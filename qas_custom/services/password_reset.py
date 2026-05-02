@@ -8,6 +8,7 @@ from frappe.utils import add_to_date, get_url, now_datetime
 PASSWORD_RESET_TOKEN_DOCTYPE = "Portal Password Reset Token"
 PASSWORD_RESET_EXPIRY_MINUTES = 30
 PASSWORD_RESET_PATH = "/reset-password"
+DEFAULT_PARENT_PORTAL_ALLOWED_ROLES = ("Parent",)
 
 
 def request_password_reset(email: str | None) -> dict:
@@ -26,6 +27,9 @@ def request_password_reset(email: str | None) -> dict:
         "name",
     )
     if not user_name:
+        return generic_response
+
+    if not _is_parent_portal_user(user_name):
         return generic_response
 
     now = now_datetime()
@@ -83,6 +87,13 @@ def validate_password_reset_token(token: str | None) -> dict:
             "ok": False,
             "valid": False,
             "message": f"Reset token is not usable because its status is {token_doc.status}.",
+        }
+
+    if not _is_parent_portal_user(token_doc.user):
+        return {
+            "ok": False,
+            "valid": False,
+            "message": "This reset token is no longer valid for this account.",
         }
 
     now = now_datetime()
@@ -156,8 +167,10 @@ def confirm_password_reset(token: str | None, new_password: str | None) -> dict:
 
 
 def _build_password_reset_link(reset_token: str) -> str:
-    base_url = frappe.db.get_single_value("Website Settings", "home_page")
-    del base_url  # Placeholder to keep room for future portal-domain override.
+    portal_base_url = _get_parent_portal_base_url()
+    if portal_base_url:
+        return f"{portal_base_url.rstrip('/')}{PASSWORD_RESET_PATH}?token={reset_token}"
+
     return f"{get_url(PASSWORD_RESET_PATH)}?token={reset_token}"
 
 
@@ -184,3 +197,37 @@ def _send_password_reset_email(email: str, reset_link: str, expires_at, token_re
             message=frappe.get_traceback()
             + f"\n\nToken Record: {token_record}\nRecipient: {email}\nReset Link: {reset_link}",
         )
+
+
+def _is_parent_portal_user(user_name: str) -> bool:
+    user_type = frappe.db.get_value("User", user_name, "user_type")
+    if user_type != "Website User":
+        return False
+
+    user_roles = set(frappe.get_roles(user_name))
+    allowed_roles = set(_get_parent_portal_allowed_roles())
+    return bool(user_roles.intersection(allowed_roles))
+
+
+def _get_parent_portal_allowed_roles() -> tuple[str, ...]:
+    configured_roles = getattr(frappe.conf, "parent_portal_reset_allowed_roles", None)
+
+    if isinstance(configured_roles, str) and configured_roles.strip():
+        roles = tuple(role.strip() for role in configured_roles.split(",") if role.strip())
+        if roles:
+            return roles
+
+    if isinstance(configured_roles, (list, tuple)):
+        roles = tuple(str(role).strip() for role in configured_roles if str(role).strip())
+        if roles:
+            return roles
+
+    return DEFAULT_PARENT_PORTAL_ALLOWED_ROLES
+
+
+def _get_parent_portal_base_url() -> str | None:
+    configured_url = getattr(frappe.conf, "parent_portal_base_url", None)
+    if isinstance(configured_url, str) and configured_url.strip():
+        return configured_url.strip().rstrip("/")
+
+    return None
