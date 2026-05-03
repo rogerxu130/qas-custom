@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import mimetypes
+
 import frappe
 from frappe import _
 from frappe.utils import get_datetime, get_url
@@ -12,7 +14,7 @@ def get_parent_feed_data(student=None, page=1, page_length=10):
     page = max(cint(page), 1)
     page_length = max(min(cint(page_length), 20), 1)
 
-    parent_name = frappe.db.get_value("Parent", {"linked_user": frappe.session.user}, "name")
+    parent_name = get_current_parent_name()
     if not parent_name:
         frappe.throw(_("No Parent record is linked to the current user."))
 
@@ -122,7 +124,7 @@ def get_parent_feed_data(student=None, page=1, page_length=10):
     for row in photo_item_rows:
         if not row.image:
             continue
-        photo_media_map.setdefault(row.parent, []).append(row.image)
+        photo_media_map.setdefault(row.parent, []).append({"idx": row.idx, "image": row.image})
 
     items = []
     for row in homework_docs:
@@ -188,7 +190,7 @@ def _build_photo_item(row, session_map, weekly_timeslot_map, student_map, sessio
     session = session_map.get(row.course_session)
     timeslot = weekly_timeslot_map.get(session.weekly_timeslot) if session else None
     media = photo_media_map.get(row.name, [])
-    photos = [_normalize_media_url(url) for url in media if url]
+    photos = [_build_photo_asset(row.name, photo) for photo in media if photo.get("image")]
     return {
         "type": "photo_post",
         "id": row.name,
@@ -252,6 +254,79 @@ def _normalize_media_url(value):
     if value.startswith(("http://", "https://")):
         return value
     return get_url(value)
+
+
+def _build_photo_asset(photo_post_name, photo_row):
+    idx = cint(photo_row.get("idx"))
+    image_url = photo_row.get("image")
+    direct_url = _normalize_media_url(image_url)
+
+    if image_url and image_url.startswith("/private/files/"):
+        file_name = image_url.rsplit("/", 1)[-1]
+        proxy_url = (
+            "/api/method/qas_custom.api.parent_portal.parent_portal_get_feed_photo"
+            f"?photo_post={photo_post_name}&photo_idx={idx}"
+        )
+        return proxy_url
+
+    return direct_url
+
+
+def get_current_parent_name():
+    return frappe.db.get_value("Parent", {"linked_user": frappe.session.user}, "name")
+
+
+def get_parent_feed_photo_content(photo_post, photo_idx):
+    if frappe.session.user == "Guest":
+        frappe.throw(_("Please sign in to view class photos."))
+
+    parent_name = get_current_parent_name()
+    if not parent_name:
+        frappe.throw(_("No Parent record is linked to the current user."))
+
+    photo_post_doc = frappe.get_doc("Session Photo Post", photo_post)
+    course_session = photo_post_doc.get("course_session")
+    if not course_session:
+        raise frappe.PermissionError
+
+    student_ids = frappe.get_all("Student", filters={"guardian": parent_name}, pluck="name")
+    if not student_ids:
+        raise frappe.PermissionError
+
+    has_access = frappe.db.exists(
+        "Attendance Record",
+        {
+            "parent": course_session,
+            "parenttype": "Course Sessions",
+            "parentfield": "attendance_list",
+            "student": ["in", student_ids],
+        },
+    )
+    if not has_access:
+        raise frappe.PermissionError
+
+    target_idx = cint(photo_idx)
+    if target_idx <= 0:
+        raise frappe.PermissionError
+
+    photo_row = next((row for row in photo_post_doc.photos or [] if cint(row.idx) == target_idx), None)
+    if not photo_row or not getattr(photo_row, "image", None):
+        raise frappe.DoesNotExistError
+
+    file_doc_name = frappe.db.get_value("File", {"file_url": photo_row.image}, "name")
+    if not file_doc_name:
+        raise frappe.DoesNotExistError
+
+    file_doc = frappe.get_doc("File", file_doc_name)
+    content = file_doc.get_content()
+    filename = file_doc.file_name or photo_row.image.rsplit("/", 1)[-1]
+    content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+
+    return {
+        "filename": filename,
+        "content": content,
+        "content_type": content_type,
+    }
 
 
 def cint(value):

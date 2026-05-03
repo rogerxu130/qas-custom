@@ -1,6 +1,6 @@
 import frappe
 
-from qas_custom.services.parent_feed import get_parent_feed_data
+from qas_custom.services.parent_feed import get_parent_feed_data, get_parent_feed_photo_content
 from qas_custom.services.parent_info import get_parent_info_data
 from qas_custom.services.parent_portal_read import (
     get_parent_invoices_data,
@@ -50,6 +50,16 @@ def parent_portal_confirm_password_reset(token=None, new_password=None):
 @frappe.whitelist()
 def get_parent_feed(student=None, page=1, page_length=10):
     return get_parent_feed_data(student=student, page=page, page_length=page_length)
+
+
+@frappe.whitelist()
+def parent_portal_get_feed_photo(photo_post=None, photo_idx=None):
+    payload = get_parent_feed_photo_content(photo_post=photo_post, photo_idx=photo_idx)
+    frappe.local.response.filename = payload["filename"]
+    frappe.local.response.filecontent = payload["content"]
+    frappe.local.response.content_type = payload["content_type"]
+    frappe.local.response.display_content_as = "inline"
+    frappe.local.response.type = "download"
 
 
 @frappe.whitelist()
