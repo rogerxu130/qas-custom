@@ -137,13 +137,14 @@ app_license = "mit"
 # ---------------
 # Hook on document methods and events
 
-# doc_events = {
-# 	"*": {
-# 		"on_update": "method",
-# 		"on_cancel": "method",
-# 		"on_trash": "method"
-# 	}
-# }
+doc_events = {
+	"Session Homework": {
+		"validate": "qas_custom.services.session_homework.validate_session_homework",
+	},
+	"Session Photo Post": {
+		"validate": "qas_custom.services.session_photo_post.validate_session_photo_post",
+	},
+}
 
 # Scheduled Tasks
 # ---------------
@@ -246,4 +247,3 @@ app_license = "mit"
 # ------------
 # List of apps whose translatable strings should be excluded from this app's translations.
 # ignore_translatable_strings_from = []
-
