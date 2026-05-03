@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import frappe
 from frappe import _
-from frappe.utils import get_datetime, getdate
+from frappe.utils import get_datetime, get_url
 
 
 def get_parent_feed_data(student=None, page=1, page_length=10):
@@ -188,6 +188,7 @@ def _build_photo_item(row, session_map, weekly_timeslot_map, student_map, sessio
     session = session_map.get(row.course_session)
     timeslot = weekly_timeslot_map.get(session.weekly_timeslot) if session else None
     media = photo_media_map.get(row.name, [])
+    photos = [_normalize_media_url(url) for url in media if url]
     return {
         "type": "photo_post",
         "id": row.name,
@@ -200,8 +201,9 @@ def _build_photo_item(row, session_map, weekly_timeslot_map, student_map, sessio
         "published_at": _normalize_datetime(row.posted_at),
         "teacher": _build_teacher_payload(row.teacher, teacher_map),
         "students": _build_students_payload(row.course_session, session_student_map, student_map),
-        "photo_count": len(media),
-        "cover_image": media[0] if media else None,
+        "photo_count": len(photos),
+        "cover_image": photos[0] if photos else None,
+        "photos": photos,
         "route": f"/updates/photos/{row.name}",
     }
 
@@ -242,6 +244,14 @@ def _normalize_datetime(value):
     if not value:
         return None
     return str(get_datetime(value))
+
+
+def _normalize_media_url(value):
+    if not value:
+        return None
+    if value.startswith(("http://", "https://")):
+        return value
+    return get_url(value)
 
 
 def cint(value):
