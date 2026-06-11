@@ -1,6 +1,7 @@
 import frappe
 
 from qas_custom.services.teacher_portal import (
+    get_teacher_csrf_token_data,
     get_teacher_me_data,
     get_teacher_session_detail_data,
     get_teacher_sessions_data,
@@ -11,6 +12,11 @@ from qas_custom.services.teacher_portal import (
 @frappe.whitelist()
 def teacher_portal_get_me():
     return get_teacher_me_data()
+
+
+@frappe.whitelist()
+def teacher_portal_get_csrf_token():
+    return get_teacher_csrf_token_data()
 
 
 @frappe.whitelist()

@@ -18,6 +18,13 @@ def get_teacher_me_data():
     }
 
 
+def get_teacher_csrf_token_data():
+    _require_teacher()
+    return {
+        "csrf_token": frappe.sessions.get_csrf_token(),
+    }
+
+
 def get_teacher_sessions_data(from_date=None, to_date=None):
     teacher = _require_teacher()
     start_date = getdate(from_date or today())
