@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+import json
 
 import frappe
 from frappe import _
@@ -108,6 +109,45 @@ def get_teacher_session_detail_data(course_session=None):
         "status_options": _get_attendance_status_options(),
         "special_students": _count_special_students(attendance_rows),
     }
+
+
+def update_teacher_attendance_data(course_session=None, updates=None):
+    teacher = _require_teacher()
+    payload = _get_request_json()
+    course_session = course_session or payload.get("course_session")
+    updates = updates if updates is not None else payload.get("updates")
+
+    if not course_session:
+        frappe.throw(_("Course session is required."))
+
+    session = _get_owned_session(course_session, teacher.name)
+    updates = _parse_attendance_updates(updates)
+    if not updates:
+        frappe.throw(_("No attendance updates were provided."))
+
+    valid_statuses = set(_get_attendance_status_options())
+    session_doc = frappe.get_doc("Course Sessions", session["name"])
+    attendance_by_row_id = {
+        row.name: row
+        for row in session_doc.get("attendance_list", [])
+    }
+
+    for update in updates:
+        row_id = update.get("row_id")
+        if not row_id or row_id not in attendance_by_row_id:
+            frappe.throw(_("Invalid attendance row."))
+
+        status = (update.get("status") or "").strip()
+        if status and status not in valid_statuses:
+            frappe.throw(_("Invalid attendance status: {0}").format(status))
+
+        row = attendance_by_row_id[row_id]
+        row.status = status or None
+        row.comments = (update.get("comments") or "").strip()
+
+    session_doc.save(ignore_permissions=True)
+    frappe.db.commit()
+    return get_teacher_session_detail_data(course_session=session["name"])
 
 
 def _require_teacher():
@@ -271,6 +311,38 @@ def _get_attendance_status_options():
         return []
 
     return [option.strip() for option in field.options.splitlines() if option.strip()]
+
+
+def _parse_attendance_updates(updates):
+    if isinstance(updates, str):
+        updates = updates.strip()
+        if not updates:
+            return []
+        try:
+            updates = json.loads(updates)
+        except json.JSONDecodeError:
+            frappe.throw(_("Attendance updates must be valid JSON."))
+
+    if isinstance(updates, dict):
+        updates = updates.get("updates")
+
+    if not isinstance(updates, list):
+        frappe.throw(_("Attendance updates must be a list."))
+
+    return [update for update in updates if isinstance(update, dict)]
+
+
+def _get_request_json():
+    request = getattr(frappe.local, "request", None)
+    if not request:
+        return {}
+
+    try:
+        payload = request.get_json(silent=True) or {}
+    except Exception:
+        return {}
+
+    return payload if isinstance(payload, dict) else {}
 
 
 def _as_string(value):

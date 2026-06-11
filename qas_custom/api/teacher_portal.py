@@ -4,6 +4,7 @@ from qas_custom.services.teacher_portal import (
     get_teacher_me_data,
     get_teacher_session_detail_data,
     get_teacher_sessions_data,
+    update_teacher_attendance_data,
 )
 
 
@@ -20,3 +21,8 @@ def teacher_portal_get_sessions(from_date=None, to_date=None):
 @frappe.whitelist()
 def teacher_portal_get_session_detail(course_session=None):
     return get_teacher_session_detail_data(course_session=course_session)
+
+
+@frappe.whitelist()
+def teacher_portal_update_attendance(course_session=None, updates=None):
+    return update_teacher_attendance_data(course_session=course_session, updates=updates)
