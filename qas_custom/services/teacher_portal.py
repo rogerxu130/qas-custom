@@ -5,7 +5,7 @@ import json
 
 import frappe
 from frappe import _
-from frappe.utils import add_days, getdate, today
+from frappe.utils import add_days, getdate, now_datetime, today
 
 
 SPECIAL_ENROLLMENT_TYPES = {"Trial", "Makeup", "Pay-as-you-go"}
@@ -155,6 +155,47 @@ def update_teacher_attendance_data(course_session=None, updates=None):
     session_doc.save(ignore_permissions=True)
     frappe.db.commit()
     return get_teacher_session_detail_data(course_session=session["name"])
+
+
+def publish_teacher_homework_data(course_session=None, title=None, description=None):
+    teacher = _require_teacher()
+    payload = _get_request_json()
+    course_session = course_session or payload.get("course_session")
+    title = title or payload.get("title")
+    description = description if description is not None else payload.get("description")
+
+    if not course_session:
+        frappe.throw(_("Course session is required."))
+
+    title = (title or "").strip()
+    if not title:
+        frappe.throw(_("Homework title is required."))
+
+    session = _get_owned_session(course_session, teacher.name)
+    homework = frappe.get_doc(
+        {
+            "doctype": "Session Homework",
+            "course_session": session["name"],
+            "title": title,
+            "description": (description or "").strip(),
+            "status": "Published",
+            "teacher": teacher.name,
+            "published_at": now_datetime(),
+        }
+    )
+    homework.insert(ignore_permissions=True)
+    frappe.db.commit()
+
+    return {
+        "homework": {
+            "id": homework.name,
+            "title": homework.title,
+            "description": homework.description or "",
+            "course_session": homework.course_session,
+            "status": homework.status,
+            "published_at": _as_string(homework.published_at),
+        }
+    }
 
 
 def _require_teacher():
