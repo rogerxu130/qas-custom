@@ -90,9 +90,26 @@ def get_parent_feed_data(student=None, page=1, page_length=10):
         order_by="posted_at desc",
     )
 
+    video_docs = frappe.get_all(
+        "Session Video Post",
+        filters={"status": "Published", "course_session": ["in", session_ids]},
+        fields=[
+            "name",
+            "title",
+            "caption",
+            "course_session",
+            "posted_at",
+            "teacher",
+            "video",
+            "file_name",
+            "file_size",
+        ],
+        order_by="posted_at desc",
+    )
+
     teacher_ids = {
         row.teacher
-        for row in homework_docs + photo_docs
+        for row in homework_docs + photo_docs + video_docs
         if getattr(row, "teacher", None)
     }
     teacher_map = {}
@@ -152,6 +169,18 @@ def get_parent_feed_data(student=None, page=1, page_length=10):
             )
         )
 
+    for row in video_docs:
+        items.append(
+            _build_video_item(
+                row=row,
+                session_map=session_map,
+                weekly_timeslot_map=weekly_timeslot_map,
+                student_map=student_map,
+                session_student_map=session_student_map,
+                teacher_map=teacher_map,
+            )
+        )
+
     items.sort(key=lambda item: item["published_at"] or "", reverse=True)
 
     start = (page - 1) * page_length
@@ -207,6 +236,26 @@ def _build_photo_item(row, session_map, weekly_timeslot_map, student_map, sessio
         "cover_image": photos[0] if photos else None,
         "photos": photos,
         "route": f"/updates/photos/{row.name}",
+    }
+
+
+def _build_video_item(row, session_map, weekly_timeslot_map, student_map, session_student_map, teacher_map):
+    session = session_map.get(row.course_session)
+    timeslot = weekly_timeslot_map.get(session.weekly_timeslot) if session else None
+    return {
+        "type": "video_post",
+        "id": row.name,
+        "title": row.title or "Class Video",
+        "summary": row.caption or "",
+        "course_session": row.course_session,
+        "course_name": timeslot.course if timeslot else None,
+        "session_label": _build_session_label(timeslot),
+        "session_date": str(session.session_date) if session and session.session_date else None,
+        "published_at": _normalize_datetime(row.posted_at),
+        "teacher": _build_teacher_payload(row.teacher, teacher_map),
+        "students": _build_students_payload(row.course_session, session_student_map, student_map),
+        "video": _build_video_asset(row),
+        "route": f"/updates/videos/{row.name}",
     }
 
 
@@ -272,20 +321,47 @@ def _build_photo_asset(photo_post_name, photo_row):
     return direct_url
 
 
+def _build_video_asset(row):
+    if not row.video:
+        return None
+
+    proxy_url = (
+        "/api/method/qas_custom.api.parent_portal.parent_portal_get_feed_video"
+        f"?video_post={row.name}"
+    )
+    download_url = f"{proxy_url}&download=1"
+
+    if row.video.startswith("/private/files/"):
+        video_url = proxy_url
+        video_download_url = download_url
+    else:
+        video_url = _normalize_media_url(row.video)
+        video_download_url = video_url
+
+    return {
+        "url": video_url,
+        "download_url": video_download_url,
+        "file_name": row.file_name or row.video.rsplit("/", 1)[-1],
+        "file_size": row.file_size or 0,
+    }
+
+
 def get_current_parent_name():
     return frappe.db.get_value("Parent", {"linked_user": frappe.session.user}, "name")
 
 
-def get_parent_feed_photo_content(photo_post, photo_idx):
+def _require_parent():
     if frappe.session.user == "Guest":
-        frappe.throw(_("Please sign in to view class photos."))
+        frappe.throw(_("Please sign in to view class media."))
 
     parent_name = get_current_parent_name()
     if not parent_name:
         frappe.throw(_("No Parent record is linked to the current user."))
 
-    photo_post_doc = frappe.get_doc("Session Photo Post", photo_post)
-    course_session = photo_post_doc.get("course_session")
+    return parent_name
+
+
+def _validate_parent_session_access(parent_name, course_session):
     if not course_session:
         raise frappe.PermissionError
 
@@ -304,6 +380,14 @@ def get_parent_feed_photo_content(photo_post, photo_idx):
     )
     if not has_access:
         raise frappe.PermissionError
+
+
+def get_parent_feed_photo_content(photo_post, photo_idx):
+    parent_name = _require_parent()
+
+    photo_post_doc = frappe.get_doc("Session Photo Post", photo_post)
+    course_session = photo_post_doc.get("course_session")
+    _validate_parent_session_access(parent_name, course_session)
 
     target_idx = cint(photo_idx)
     if target_idx <= 0:
@@ -326,6 +410,32 @@ def get_parent_feed_photo_content(photo_post, photo_idx):
         "filename": filename,
         "content": content,
         "content_type": content_type,
+    }
+
+
+def get_parent_feed_video_content(video_post, download=False):
+    parent_name = _require_parent()
+
+    video_post_doc = frappe.get_doc("Session Video Post", video_post)
+    _validate_parent_session_access(parent_name, video_post_doc.get("course_session"))
+
+    if not video_post_doc.video:
+        raise frappe.DoesNotExistError
+
+    file_doc_name = frappe.db.get_value("File", {"file_url": video_post_doc.video}, "name")
+    if not file_doc_name:
+        raise frappe.DoesNotExistError
+
+    file_doc = frappe.get_doc("File", file_doc_name)
+    content = file_doc.get_content()
+    filename = file_doc.file_name or video_post_doc.file_name or video_post_doc.video.rsplit("/", 1)[-1]
+    content_type = video_post_doc.mime_type or mimetypes.guess_type(filename)[0] or "application/octet-stream"
+
+    return {
+        "filename": filename,
+        "content": content,
+        "content_type": content_type,
+        "display_content_as": "attachment" if cint(download) else "inline",
     }
 
 

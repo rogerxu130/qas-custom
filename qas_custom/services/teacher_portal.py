@@ -11,6 +11,9 @@ from frappe.utils.file_manager import save_file
 
 SPECIAL_ENROLLMENT_TYPES = {"Trial", "Makeup", "Pay-as-you-go"}
 MAX_PHOTO_UPLOADS = 12
+MAX_VIDEO_UPLOAD_BYTES = 100 * 1024 * 1024
+VALID_VIDEO_EXTENSIONS = (".mp4", ".mov", ".webm")
+VALID_VIDEO_MIME_TYPES = {"video/mp4", "video/quicktime", "video/webm"}
 
 
 def get_teacher_me_data():
@@ -117,6 +120,7 @@ def get_teacher_session_detail_data(course_session=None):
         "students": students,
         "homeworks": _get_homework_rows(session["name"]),
         "photo_posts": _get_photo_post_rows(session["name"]),
+        "video_posts": _get_video_post_rows(session["name"]),
         "status_options": _get_attendance_status_options(),
         "special_students": _count_special_students(attendance_rows),
     }
@@ -255,6 +259,72 @@ def publish_teacher_photo_post_data(course_session=None, title=None, caption=Non
             photo_post.status,
             photo_post.posted_at,
             len(photo_post.photos or []),
+        )
+    }
+
+
+def publish_teacher_video_post_data(course_session=None, title=None, caption=None):
+    teacher = _require_teacher()
+    form_payload = _get_request_form()
+    course_session = course_session or form_payload.get("course_session")
+    title = title if title is not None else form_payload.get("title")
+    caption = caption if caption is not None else form_payload.get("caption")
+
+    if not course_session:
+        frappe.throw(_("Course session is required."))
+
+    upload = _get_uploaded_video()
+    if not upload:
+        frappe.throw(_("A video file is required."))
+
+    _validate_uploaded_video(upload)
+    content = _read_uploaded_file(upload, "video")
+    if len(content) > MAX_VIDEO_UPLOAD_BYTES:
+        frappe.throw(_("Please upload a video smaller than 100 MB."))
+
+    session = _get_owned_session(course_session, teacher.name)
+    video_post = frappe.get_doc(
+        {
+            "doctype": "Session Video Post",
+            "course_session": session["name"],
+            "title": (title or "").strip() or "Class Video",
+            "caption": (caption or "").strip(),
+            "status": "Draft",
+            "teacher": teacher.name,
+        }
+    )
+    video_post.insert(ignore_permissions=True)
+
+    file_doc = save_file(
+        _get_upload_filename(upload, "class-video.mp4"),
+        content,
+        "Session Video Post",
+        video_post.name,
+        is_private=1,
+    )
+
+    video_post.video = file_doc.file_url
+    video_post.file_name = file_doc.file_name or _get_upload_filename(upload, "class-video.mp4")
+    video_post.file_size = len(content)
+    video_post.mime_type = (
+        getattr(upload, "mimetype", None)
+        or getattr(upload, "content_type", None)
+        or ""
+    )
+    video_post.status = "Published"
+    video_post.posted_at = now_datetime()
+    video_post.save(ignore_permissions=True)
+    frappe.db.commit()
+
+    return {
+        "video_post": _build_video_post_payload(
+            video_post.name,
+            video_post.title,
+            video_post.caption,
+            video_post.status,
+            video_post.posted_at,
+            video_post.file_name,
+            video_post.file_size,
         )
     }
 
@@ -476,6 +546,38 @@ def _build_photo_post_payload(photo_post_id, title, caption, status, posted_at, 
     }
 
 
+def _get_video_post_rows(course_session: str):
+    return [
+        _build_video_post_payload(
+            row.name,
+            row.title,
+            row.caption,
+            row.status,
+            row.posted_at,
+            row.file_name,
+            row.file_size,
+        )
+        for row in frappe.get_all(
+            "Session Video Post",
+            filters={"course_session": course_session},
+            fields=["name", "title", "caption", "status", "posted_at", "file_name", "file_size"],
+            order_by="posted_at desc, creation desc",
+        )
+    ]
+
+
+def _build_video_post_payload(video_post_id, title, caption, status, posted_at, file_name=None, file_size=None):
+    return {
+        "id": video_post_id,
+        "title": title or "Class Video",
+        "caption": caption or "",
+        "status": status,
+        "posted_at": _as_string(posted_at),
+        "file_name": file_name or "",
+        "file_size": file_size or 0,
+    }
+
+
 def _count_special_students(attendance_rows: list[dict]):
     counter = Counter(row.get("enrollment_type") for row in attendance_rows)
     return {
@@ -550,6 +652,25 @@ def _get_uploaded_photos():
     return [upload for upload in uploads if upload and _get_upload_filename(upload)]
 
 
+def _get_uploaded_video():
+    request = getattr(frappe.local, "request", None)
+    files = getattr(request, "files", None) if request else None
+    if not files:
+        return None
+
+    if hasattr(files, "getlist"):
+        for fieldname in ("video", "videos"):
+            uploads = [upload for upload in files.getlist(fieldname) if upload]
+            if uploads:
+                return uploads[0]
+
+    for upload in files.values():
+        if upload:
+            return upload
+
+    return None
+
+
 def _validate_uploaded_photo(upload):
     mimetype = (getattr(upload, "mimetype", None) or getattr(upload, "content_type", None) or "").lower()
     filename = _get_upload_filename(upload).lower()
@@ -558,20 +679,29 @@ def _validate_uploaded_photo(upload):
         frappe.throw(_("Only image files can be uploaded."))
 
 
-def _get_upload_filename(upload):
-    return (getattr(upload, "filename", None) or "class-photo.jpg").strip()
+def _validate_uploaded_video(upload):
+    mimetype = (getattr(upload, "mimetype", None) or getattr(upload, "content_type", None) or "").lower()
+    filename = _get_upload_filename(upload, "class-video.mp4").lower()
+    valid_extension = filename.endswith(VALID_VIDEO_EXTENSIONS)
+    valid_mimetype = mimetype in VALID_VIDEO_MIME_TYPES or mimetype.startswith("video/")
+    if not valid_mimetype and not valid_extension:
+        frappe.throw(_("Only MP4, MOV, or WebM video files can be uploaded."))
 
 
-def _read_uploaded_file(upload):
+def _get_upload_filename(upload, fallback="class-photo.jpg"):
+    return (getattr(upload, "filename", None) or fallback).strip()
+
+
+def _read_uploaded_file(upload, label="photo"):
     if hasattr(upload, "stream") and upload.stream:
         content = upload.stream.read()
     elif hasattr(upload, "read"):
         content = upload.read()
     else:
-        frappe.throw(_("Could not read uploaded photo."))
+        frappe.throw(_("Could not read uploaded {0}.").format(label))
 
     if not content:
-        frappe.throw(_("Uploaded photo is empty."))
+        frappe.throw(_("Uploaded {0} is empty.").format(label))
     return content
 
 

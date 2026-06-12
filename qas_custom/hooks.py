@@ -144,6 +144,9 @@ doc_events = {
 	"Session Photo Post": {
 		"validate": "qas_custom.services.session_photo_post.validate_session_photo_post",
 	},
+	"Session Video Post": {
+		"validate": "qas_custom.services.session_video_post.validate_session_video_post",
+	},
 }
 
 # Scheduled Tasks

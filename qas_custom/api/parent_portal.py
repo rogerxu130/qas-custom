@@ -1,6 +1,10 @@
 import frappe
 
-from qas_custom.services.parent_feed import get_parent_feed_data, get_parent_feed_photo_content
+from qas_custom.services.parent_feed import (
+    get_parent_feed_data,
+    get_parent_feed_photo_content,
+    get_parent_feed_video_content,
+)
 from qas_custom.services.parent_info import get_parent_info_data
 from qas_custom.services.parent_portal_read import (
     get_parent_invoices_data,
@@ -59,6 +63,16 @@ def parent_portal_get_feed_photo(photo_post=None, photo_idx=None):
     frappe.local.response.filecontent = payload["content"]
     frappe.local.response.content_type = payload["content_type"]
     frappe.local.response.display_content_as = "inline"
+    frappe.local.response.type = "download"
+
+
+@frappe.whitelist()
+def parent_portal_get_feed_video(video_post=None, download=0):
+    payload = get_parent_feed_video_content(video_post=video_post, download=download)
+    frappe.local.response.filename = payload["filename"]
+    frappe.local.response.filecontent = payload["content"]
+    frappe.local.response.content_type = payload["content_type"]
+    frappe.local.response.display_content_as = payload["display_content_as"]
     frappe.local.response.type = "download"
 
 
