@@ -6,9 +6,11 @@ import json
 import frappe
 from frappe import _
 from frappe.utils import add_days, getdate, now_datetime, today
+from frappe.utils.file_manager import save_file
 
 
 SPECIAL_ENROLLMENT_TYPES = {"Trial", "Makeup", "Pay-as-you-go"}
+MAX_PHOTO_UPLOADS = 12
 
 
 def get_teacher_me_data():
@@ -114,6 +116,7 @@ def get_teacher_session_detail_data(course_session=None):
         },
         "students": students,
         "homeworks": _get_homework_rows(session["name"]),
+        "photo_posts": _get_photo_post_rows(session["name"]),
         "status_options": _get_attendance_status_options(),
         "special_students": _count_special_students(attendance_rows),
     }
@@ -196,6 +199,63 @@ def publish_teacher_homework_data(course_session=None, title=None, description=N
             "status": homework.status,
             "published_at": _as_string(homework.published_at),
         }
+    }
+
+
+def publish_teacher_photo_post_data(course_session=None, title=None, caption=None):
+    teacher = _require_teacher()
+    form_payload = _get_request_form()
+    course_session = course_session or form_payload.get("course_session")
+    title = title if title is not None else form_payload.get("title")
+    caption = caption if caption is not None else form_payload.get("caption")
+
+    if not course_session:
+        frappe.throw(_("Course session is required."))
+
+    uploads = _get_uploaded_photos()
+    if not uploads:
+        frappe.throw(_("At least one photo is required."))
+    if len(uploads) > MAX_PHOTO_UPLOADS:
+        frappe.throw(_("Please upload {0} photos or fewer at a time.").format(MAX_PHOTO_UPLOADS))
+
+    session = _get_owned_session(course_session, teacher.name)
+    photo_post = frappe.get_doc(
+        {
+            "doctype": "Session Photo Post",
+            "course_session": session["name"],
+            "title": (title or "").strip() or "Class Photos",
+            "caption": (caption or "").strip(),
+            "status": "Draft",
+            "teacher": teacher.name,
+        }
+    )
+    photo_post.insert(ignore_permissions=True)
+
+    for upload in uploads:
+        _validate_uploaded_photo(upload)
+        file_doc = save_file(
+            _get_upload_filename(upload),
+            _read_uploaded_file(upload),
+            "Session Photo Post",
+            photo_post.name,
+            is_private=1,
+        )
+        photo_post.append("photos", {"image": file_doc.file_url})
+
+    photo_post.status = "Published"
+    photo_post.posted_at = now_datetime()
+    photo_post.save(ignore_permissions=True)
+    frappe.db.commit()
+
+    return {
+        "photo_post": _build_photo_post_payload(
+            photo_post.name,
+            photo_post.title,
+            photo_post.caption,
+            photo_post.status,
+            photo_post.posted_at,
+            len(photo_post.photos or []),
+        )
     }
 
 
@@ -363,6 +423,59 @@ def _get_homework_rows(course_session: str):
     ]
 
 
+def _get_photo_post_rows(course_session: str):
+    rows = frappe.get_all(
+        "Session Photo Post",
+        filters={"course_session": course_session},
+        fields=["name", "title", "caption", "status", "posted_at"],
+        order_by="posted_at desc, creation desc",
+    )
+    if not rows:
+        return []
+
+    photo_counts = _get_photo_counts([row.name for row in rows])
+    return [
+        _build_photo_post_payload(
+            row.name,
+            row.title,
+            row.caption,
+            row.status,
+            row.posted_at,
+            photo_counts.get(row.name, 0),
+        )
+        for row in rows
+    ]
+
+
+def _get_photo_counts(photo_post_ids: list[str]):
+    if not photo_post_ids:
+        return {}
+
+    counts = defaultdict(int)
+    for row in frappe.get_all(
+        "Session Photo Item",
+        filters={
+            "parent": ["in", photo_post_ids],
+            "parenttype": "Session Photo Post",
+            "parentfield": "photos",
+        },
+        fields=["parent"],
+    ):
+        counts[row.parent] += 1
+    return counts
+
+
+def _build_photo_post_payload(photo_post_id, title, caption, status, posted_at, photo_count):
+    return {
+        "id": photo_post_id,
+        "title": title or "Class Photos",
+        "caption": caption or "",
+        "status": status,
+        "posted_at": _as_string(posted_at),
+        "photo_count": photo_count,
+    }
+
+
 def _count_special_students(attendance_rows: list[dict]):
     counter = Counter(row.get("enrollment_type") for row in attendance_rows)
     return {
@@ -410,6 +523,56 @@ def _get_request_json():
         return {}
 
     return payload if isinstance(payload, dict) else {}
+
+
+def _get_request_form():
+    request = getattr(frappe.local, "request", None)
+    form = getattr(request, "form", None) if request else None
+    if not form:
+        return {}
+    return dict(form)
+
+
+def _get_uploaded_photos():
+    request = getattr(frappe.local, "request", None)
+    files = getattr(request, "files", None) if request else None
+    if not files:
+        return []
+
+    uploads = []
+    if hasattr(files, "getlist"):
+        uploads.extend(files.getlist("photos"))
+        uploads.extend(files.getlist("photo"))
+
+    if not uploads:
+        uploads.extend(list(files.values()))
+
+    return [upload for upload in uploads if upload and _get_upload_filename(upload)]
+
+
+def _validate_uploaded_photo(upload):
+    mimetype = (getattr(upload, "mimetype", None) or getattr(upload, "content_type", None) or "").lower()
+    filename = _get_upload_filename(upload).lower()
+    valid_extension = filename.endswith((".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic", ".heif"))
+    if not mimetype.startswith("image/") and not valid_extension:
+        frappe.throw(_("Only image files can be uploaded."))
+
+
+def _get_upload_filename(upload):
+    return (getattr(upload, "filename", None) or "class-photo.jpg").strip()
+
+
+def _read_uploaded_file(upload):
+    if hasattr(upload, "stream") and upload.stream:
+        content = upload.stream.read()
+    elif hasattr(upload, "read"):
+        content = upload.read()
+    else:
+        frappe.throw(_("Could not read uploaded photo."))
+
+    if not content:
+        frappe.throw(_("Uploaded photo is empty."))
+    return content
 
 
 def _as_string(value):

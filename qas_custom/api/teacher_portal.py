@@ -6,6 +6,7 @@ from qas_custom.services.teacher_portal import (
     get_teacher_session_detail_data,
     get_teacher_sessions_data,
     publish_teacher_homework_data,
+    publish_teacher_photo_post_data,
     update_teacher_attendance_data,
 )
 
@@ -41,4 +42,13 @@ def teacher_portal_publish_homework(course_session=None, title=None, description
         course_session=course_session,
         title=title,
         description=description,
+    )
+
+
+@frappe.whitelist()
+def teacher_portal_publish_photo_post(course_session=None, title=None, caption=None):
+    return publish_teacher_photo_post_data(
+        course_session=course_session,
+        title=title,
+        caption=caption,
     )
