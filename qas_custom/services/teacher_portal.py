@@ -113,6 +113,7 @@ def get_teacher_session_detail_data(course_session=None):
             "status": session.get("status"),
         },
         "students": students,
+        "homeworks": _get_homework_rows(session["name"]),
         "status_options": _get_attendance_status_options(),
         "special_students": _count_special_students(attendance_rows),
     }
@@ -342,6 +343,24 @@ def _get_student_map(student_ids: list[str]):
             fields=["name", "student_name"],
         )
     }
+
+
+def _get_homework_rows(course_session: str):
+    return [
+        {
+            "id": row.get("name"),
+            "title": row.get("title"),
+            "description": row.get("description") or "",
+            "status": row.get("status"),
+            "published_at": _as_string(row.get("published_at")),
+        }
+        for row in frappe.get_all(
+            "Session Homework",
+            filters={"course_session": course_session},
+            fields=["name", "title", "description", "status", "published_at"],
+            order_by="published_at desc, creation desc",
+        )
+    ]
 
 
 def _count_special_students(attendance_rows: list[dict]):
