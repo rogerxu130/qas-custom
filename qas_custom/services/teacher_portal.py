@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 import json
+import mimetypes
+from urllib.parse import urlencode
 
 import frappe
 from frappe import _
-from frappe.utils import add_days, getdate, now_datetime, today
+from frappe.utils import add_days, cint, getdate, now_datetime, today
 from frappe.utils.file_manager import save_file
 
 
@@ -329,6 +331,34 @@ def publish_teacher_video_post_data(course_session=None, title=None, caption=Non
     }
 
 
+def get_teacher_video_content_data(video_post=None, download=False):
+    teacher = _require_teacher()
+    if not video_post:
+        frappe.throw(_("Video post is required."))
+
+    video_post_doc = frappe.get_doc("Session Video Post", video_post)
+    _get_owned_session(video_post_doc.get("course_session"), teacher.name)
+
+    if not video_post_doc.video:
+        raise frappe.DoesNotExistError
+
+    file_doc_name = frappe.db.get_value("File", {"file_url": video_post_doc.video}, "name")
+    if not file_doc_name:
+        raise frappe.DoesNotExistError
+
+    file_doc = frappe.get_doc("File", file_doc_name)
+    content = file_doc.get_content()
+    filename = file_doc.file_name or video_post_doc.file_name or video_post_doc.video.rsplit("/", 1)[-1]
+    content_type = video_post_doc.mime_type or mimetypes.guess_type(filename)[0] or "application/octet-stream"
+
+    return {
+        "filename": filename,
+        "content": content,
+        "content_type": content_type,
+        "display_content_as": "attachment" if cint(download) else "inline",
+    }
+
+
 def _require_teacher():
     if frappe.session.user == "Guest":
         frappe.throw(_("Login required."), frappe.PermissionError)
@@ -567,6 +597,7 @@ def _get_video_post_rows(course_session: str):
 
 
 def _build_video_post_payload(video_post_id, title, caption, status, posted_at, file_name=None, file_size=None):
+    preview_url = _build_teacher_video_url(video_post_id)
     return {
         "id": video_post_id,
         "title": title or "Class Video",
@@ -575,7 +606,19 @@ def _build_video_post_payload(video_post_id, title, caption, status, posted_at, 
         "posted_at": _as_string(posted_at),
         "file_name": file_name or "",
         "file_size": file_size or 0,
+        "preview_url": preview_url,
+        "download_url": _build_teacher_video_url(video_post_id, download=True),
     }
+
+
+def _build_teacher_video_url(video_post_id, download=False):
+    query = {"video_post": video_post_id}
+    if download:
+        query["download"] = 1
+    return (
+        "/api/method/qas_custom.api.teacher_portal.teacher_portal_get_video?"
+        + urlencode(query)
+    )
 
 
 def _count_special_students(attendance_rows: list[dict]):
