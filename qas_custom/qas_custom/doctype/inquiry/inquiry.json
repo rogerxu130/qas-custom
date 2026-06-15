@@ -1,0 +1,216 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "INQ-.YYYY.-.#####",
+ "creation": "2026-06-15 00:00:00.000000",
+ "doctype": "DocType",
+ "document_type": "Document",
+ "engine": "InnoDB",
+ "field_order": [
+  "inquiry_type",
+  "source",
+  "status",
+  "campus",
+  "party_section",
+  "parent",
+  "student",
+  "customer",
+  "contact_name",
+  "contact_phone",
+  "contact_email",
+  "preferred_course",
+  "appointment_section",
+  "current_appointment",
+  "current_course_session",
+  "current_appointment_date",
+  "current_appointment_time",
+  "followup_section",
+  "trial_invoice",
+  "confirmation_status",
+  "reminder_status",
+  "converted_enrollment",
+  "inactive_reason"
+ ],
+ "fields": [
+  {
+   "fieldname": "inquiry_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Inquiry Type",
+   "options": "Trial Lesson\nSchool Visit",
+   "reqd": 1
+  },
+  {
+   "default": "Manual",
+   "fieldname": "source",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "Source",
+   "reqd": 1
+  },
+  {
+   "default": "New",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "New\nBooked\nRescheduled\nCompleted\nNo-show\nFollow-up\nConverted\nInactive",
+   "reqd": 1
+  },
+  {
+   "fieldname": "campus",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Campus",
+   "options": "Campus"
+  },
+  {
+   "fieldname": "party_section",
+   "fieldtype": "Section Break",
+   "label": "Family And Contact"
+  },
+  {
+   "fieldname": "parent",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Parent",
+   "options": "Parent"
+  },
+  {
+   "fieldname": "student",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Student",
+   "options": "Student"
+  },
+  {
+   "fieldname": "customer",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Customer",
+   "options": "Customer"
+  },
+  {
+   "fieldname": "contact_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Contact Name"
+  },
+  {
+   "fieldname": "contact_phone",
+   "fieldtype": "Data",
+   "label": "Contact Phone"
+  },
+  {
+   "fieldname": "contact_email",
+   "fieldtype": "Data",
+   "label": "Contact Email"
+  },
+  {
+   "fieldname": "preferred_course",
+   "fieldtype": "Link",
+   "label": "Preferred Course",
+   "options": "Course"
+  },
+  {
+   "fieldname": "appointment_section",
+   "fieldtype": "Section Break",
+   "label": "Current Appointment"
+  },
+  {
+   "fieldname": "current_appointment",
+   "fieldtype": "Link",
+   "label": "Current Appointment",
+   "options": "Inquiry Appointment",
+   "read_only": 1
+  },
+  {
+   "fieldname": "current_course_session",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Current Course Session",
+   "options": "Course Sessions",
+   "read_only": 1
+  },
+  {
+   "fieldname": "current_appointment_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Current Appointment Date",
+   "read_only": 1
+  },
+  {
+   "fieldname": "current_appointment_time",
+   "fieldtype": "Time",
+   "label": "Current Appointment Time",
+   "read_only": 1
+  },
+  {
+   "fieldname": "followup_section",
+   "fieldtype": "Section Break",
+   "label": "Follow-Up"
+  },
+  {
+   "fieldname": "trial_invoice",
+   "fieldtype": "Link",
+   "label": "Trial Invoice",
+   "options": "Sales Invoice"
+  },
+  {
+   "default": "Not Required",
+   "fieldname": "confirmation_status",
+   "fieldtype": "Select",
+   "label": "Confirmation Status",
+   "options": "Not Required\nPending\nSent\nFailed"
+  },
+  {
+   "default": "Not Required",
+   "fieldname": "reminder_status",
+   "fieldtype": "Select",
+   "label": "Reminder Status",
+   "options": "Not Required\nPending\nSent\nFailed"
+  },
+  {
+   "fieldname": "converted_enrollment",
+   "fieldtype": "Link",
+   "label": "Converted Enrollment",
+   "options": "Enrollment"
+  },
+  {
+   "fieldname": "inactive_reason",
+   "fieldtype": "Small Text",
+   "label": "Inactive Reason"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-06-15 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "QAS Custom",
+ "name": "Inquiry",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 0,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "select": 1,
+   "share": 0,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

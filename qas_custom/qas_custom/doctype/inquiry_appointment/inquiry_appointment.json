@@ -1,0 +1,128 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "INQA-.YYYY.-.#####",
+ "creation": "2026-06-15 00:00:00.000000",
+ "doctype": "DocType",
+ "document_type": "Document",
+ "engine": "InnoDB",
+ "field_order": [
+  "inquiry",
+  "appointment_type",
+  "status",
+  "is_current",
+  "campus",
+  "course_session",
+  "attendance_row_id",
+  "appointment_date",
+  "appointment_time",
+  "previous_appointment",
+  "reason"
+ ],
+ "fields": [
+  {
+   "fieldname": "inquiry",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Inquiry",
+   "options": "Inquiry",
+   "reqd": 1
+  },
+  {
+   "fieldname": "appointment_type",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Appointment Type",
+   "options": "Trial Lesson\nSchool Visit",
+   "reqd": 1
+  },
+  {
+   "default": "Booked",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Booked\nRescheduled\nNo-show\nCompleted\nCancelled\nExpired",
+   "reqd": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "is_current",
+   "fieldtype": "Check",
+   "in_standard_filter": 1,
+   "label": "Is Current"
+  },
+  {
+   "fieldname": "campus",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Campus",
+   "options": "Campus"
+  },
+  {
+   "fieldname": "course_session",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Course Session",
+   "options": "Course Sessions"
+  },
+  {
+   "fieldname": "attendance_row_id",
+   "fieldtype": "Data",
+   "label": "Attendance Row ID",
+   "read_only": 1
+  },
+  {
+   "fieldname": "appointment_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Appointment Date",
+   "reqd": 1
+  },
+  {
+   "fieldname": "appointment_time",
+   "fieldtype": "Time",
+   "label": "Appointment Time"
+  },
+  {
+   "fieldname": "previous_appointment",
+   "fieldtype": "Link",
+   "label": "Previous Appointment",
+   "options": "Inquiry Appointment"
+  },
+  {
+   "fieldname": "reason",
+   "fieldtype": "Small Text",
+   "label": "Reason"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-06-15 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "QAS Custom",
+ "name": "Inquiry Appointment",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 0,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "select": 1,
+   "share": 0,
+   "write": 1
+  }
+ ],
+ "sort_field": "appointment_date",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
