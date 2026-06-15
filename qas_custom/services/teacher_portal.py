@@ -13,6 +13,7 @@ from frappe.utils.file_manager import save_file
 
 SPECIAL_ENROLLMENT_TYPES = {"Trial", "Makeup", "Pay-as-you-go"}
 MAX_PHOTO_UPLOADS = 12
+PHOTO_POST_PREVIEW_LIMIT = 6
 MAX_VIDEO_UPLOAD_BYTES = 100 * 1024 * 1024
 VALID_VIDEO_EXTENSIONS = (".mp4", ".mov", ".webm")
 VALID_VIDEO_MIME_TYPES = {"video/mp4", "video/quicktime", "video/webm"}
@@ -261,7 +262,40 @@ def publish_teacher_photo_post_data(course_session=None, title=None, caption=Non
             photo_post.status,
             photo_post.posted_at,
             len(photo_post.photos or []),
+            _build_photo_previews_from_doc(photo_post),
         )
+    }
+
+
+def get_teacher_photo_content_data(photo_post=None, photo_idx=None):
+    teacher = _require_teacher()
+    if not photo_post:
+        frappe.throw(_("Photo post is required."))
+
+    photo_post_doc = frappe.get_doc("Session Photo Post", photo_post)
+    _get_owned_session(photo_post_doc.get("course_session"), teacher.name)
+
+    target_idx = cint(photo_idx)
+    if target_idx <= 0:
+        raise frappe.PermissionError
+
+    photo_row = next((row for row in photo_post_doc.photos or [] if cint(row.idx) == target_idx), None)
+    if not photo_row or not getattr(photo_row, "image", None):
+        raise frappe.DoesNotExistError
+
+    file_doc_name = frappe.db.get_value("File", {"file_url": photo_row.image}, "name")
+    if not file_doc_name:
+        raise frappe.DoesNotExistError
+
+    file_doc = frappe.get_doc("File", file_doc_name)
+    content = file_doc.get_content()
+    filename = file_doc.file_name or photo_row.image.rsplit("/", 1)[-1]
+    content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+
+    return {
+        "filename": filename,
+        "content": content,
+        "content_type": content_type,
     }
 
 
@@ -533,7 +567,9 @@ def _get_photo_post_rows(course_session: str):
     if not rows:
         return []
 
-    photo_counts = _get_photo_counts([row.name for row in rows])
+    photo_post_ids = [row.name for row in rows]
+    photo_counts = _get_photo_counts(photo_post_ids)
+    photo_previews = _get_photo_previews(photo_post_ids)
     return [
         _build_photo_post_payload(
             row.name,
@@ -542,6 +578,7 @@ def _get_photo_post_rows(course_session: str):
             row.status,
             row.posted_at,
             photo_counts.get(row.name, 0),
+            photo_previews.get(row.name, []),
         )
         for row in rows
     ]
@@ -565,7 +602,40 @@ def _get_photo_counts(photo_post_ids: list[str]):
     return counts
 
 
-def _build_photo_post_payload(photo_post_id, title, caption, status, posted_at, photo_count):
+def _get_photo_previews(photo_post_ids: list[str]):
+    previews = defaultdict(list)
+    for row in frappe.get_all(
+        "Session Photo Item",
+        filters={
+            "parent": ["in", photo_post_ids],
+            "parenttype": "Session Photo Post",
+            "parentfield": "photos",
+        },
+        fields=["parent", "idx"],
+        order_by="parent asc, idx asc",
+    ):
+        if len(previews[row.parent]) >= PHOTO_POST_PREVIEW_LIMIT:
+            continue
+        previews[row.parent].append(_build_photo_preview_payload(row.parent, row.idx))
+    return previews
+
+
+def _build_photo_previews_from_doc(photo_post):
+    return [
+        _build_photo_preview_payload(photo_post.name, row.idx)
+        for row in (photo_post.photos or [])[:PHOTO_POST_PREVIEW_LIMIT]
+    ]
+
+
+def _build_photo_preview_payload(photo_post_id, photo_idx):
+    return {
+        "idx": cint(photo_idx),
+        "preview_url": _build_teacher_photo_url(photo_post_id, photo_idx),
+    }
+
+
+def _build_photo_post_payload(photo_post_id, title, caption, status, posted_at, photo_count, photos=None):
+    photos = photos or []
     return {
         "id": photo_post_id,
         "title": title or "Class Photos",
@@ -573,7 +643,16 @@ def _build_photo_post_payload(photo_post_id, title, caption, status, posted_at, 
         "status": status,
         "posted_at": _as_string(posted_at),
         "photo_count": photo_count,
+        "photos": photos,
+        "remaining_photo_count": max(cint(photo_count) - len(photos), 0),
     }
+
+
+def _build_teacher_photo_url(photo_post_id, photo_idx):
+    return (
+        "/api/method/qas_custom.api.teacher_portal.teacher_portal_get_photo?"
+        + urlencode({"photo_post": photo_post_id, "photo_idx": cint(photo_idx)})
+    )
 
 
 def _get_video_post_rows(course_session: str):

@@ -3,6 +3,7 @@ import frappe
 from qas_custom.services.teacher_portal import (
     get_teacher_csrf_token_data,
     get_teacher_me_data,
+    get_teacher_photo_content_data,
     get_teacher_session_detail_data,
     get_teacher_sessions_data,
     get_teacher_video_content_data,
@@ -63,6 +64,16 @@ def teacher_portal_publish_video_post(course_session=None, title=None, caption=N
         title=title,
         caption=caption,
     )
+
+
+@frappe.whitelist()
+def teacher_portal_get_photo(photo_post=None, photo_idx=None):
+    payload = get_teacher_photo_content_data(photo_post=photo_post, photo_idx=photo_idx)
+    frappe.local.response.filename = payload["filename"]
+    frappe.local.response.filecontent = payload["content"]
+    frappe.local.response.content_type = payload["content_type"]
+    frappe.local.response.display_content_as = "inline"
+    frappe.local.response.type = "download"
 
 
 @frappe.whitelist()
