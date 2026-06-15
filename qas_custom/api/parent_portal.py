@@ -11,6 +11,10 @@ from qas_custom.services.parent_portal_read import (
     get_parent_schedule_data,
     get_parent_vouchers_data,
 )
+from qas_custom.services.parent_portal_write import (
+    get_parent_csrf_token_data,
+    submit_parent_leave_request_data,
+)
 from qas_custom.services.password_reset import (
     confirm_password_reset,
     request_password_reset,
@@ -94,3 +98,13 @@ def parent_portal_get_vouchers(student=None):
 @frappe.whitelist()
 def parent_portal_get_invoices():
     return get_parent_invoices_data()
+
+
+@frappe.whitelist()
+def parent_portal_get_csrf_token():
+    return get_parent_csrf_token_data()
+
+
+@frappe.whitelist()
+def parent_portal_leave_request(student=None, course_session=None):
+    return submit_parent_leave_request_data(student=student, course_session=course_session)
