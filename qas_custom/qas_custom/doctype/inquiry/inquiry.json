@@ -14,10 +14,16 @@
   "party_section",
   "parent",
   "student",
-  "customer",
   "contact_name",
   "contact_phone",
   "contact_email",
+  "submitted_form_name",
+  "submitted_student_name",
+  "submitted_student_dob",
+  "submitted_class_session",
+  "submitted_trial_date",
+  "referral_source",
+  "referral_detail",
   "preferred_course",
   "appointment_section",
   "current_appointment",
@@ -56,7 +62,7 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Status",
-   "options": "New\nBooked\nRescheduled\nCompleted\nNo-show\nFollow-up\nConverted\nInactive",
+   "options": "New\nBooked\nNeeds Review\nRescheduled\nCompleted\nNo-show\nFollow-up\nConverted\nInactive",
    "reqd": 1
   },
   {
@@ -88,13 +94,6 @@
    "options": "Student"
   },
   {
-   "fieldname": "customer",
-   "fieldtype": "Link",
-   "in_standard_filter": 1,
-   "label": "Customer",
-   "options": "Customer"
-  },
-  {
    "fieldname": "contact_name",
    "fieldtype": "Data",
    "in_list_view": 1,
@@ -109,6 +108,42 @@
    "fieldname": "contact_email",
    "fieldtype": "Data",
    "label": "Contact Email"
+  },
+  {
+   "fieldname": "submitted_form_name",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "Submitted Form Name"
+  },
+  {
+   "fieldname": "submitted_student_name",
+   "fieldtype": "Data",
+   "label": "Submitted Student Name"
+  },
+  {
+   "fieldname": "submitted_student_dob",
+   "fieldtype": "Date",
+   "label": "Submitted Student DOB"
+  },
+  {
+   "fieldname": "submitted_class_session",
+   "fieldtype": "Data",
+   "label": "Submitted Class Session"
+  },
+  {
+   "fieldname": "submitted_trial_date",
+   "fieldtype": "Date",
+   "label": "Submitted Trial Date"
+  },
+  {
+   "fieldname": "referral_source",
+   "fieldtype": "Data",
+   "label": "Referral Source"
+  },
+  {
+   "fieldname": "referral_detail",
+   "fieldtype": "Small Text",
+   "label": "Referral Detail"
   },
   {
    "fieldname": "preferred_course",

@@ -174,7 +174,7 @@ def _get_inquiry_dashboard_items(campuses, start_date, end_date, inquiry_type):
 			"campus": ["in", campuses],
 			"inquiry_type": inquiry_type,
 			"current_appointment_date": ["between", [start_date, end_date]],
-			"status": ["in", ["Booked", "Rescheduled", "Follow-up", "No-show"]],
+			"status": ["in", ["Booked", "Needs Review", "Rescheduled", "Follow-up", "No-show"]],
 		},
 		fields=[
 			"name",
