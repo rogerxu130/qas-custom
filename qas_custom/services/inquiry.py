@@ -62,6 +62,14 @@ def reschedule_inquiry_data(inquiry=None, payload=None):
 	return reschedule_inquiry_core(inquiry, payload, actor=frappe.session.user)
 
 
+def assign_inquiry_course_session_data(inquiry=None, course_session=None):
+	_require_admin()
+	payload = _get_payload()
+	inquiry = inquiry or payload.get("inquiry")
+	course_session = course_session or payload.get("course_session")
+	return assign_inquiry_course_session_core(inquiry, course_session, status="Booked")
+
+
 def mark_inquiry_completed_data(inquiry=None):
 	_require_admin()
 	return mark_inquiry_status_core(inquiry, "Completed", actor=frappe.session.user)
@@ -94,23 +102,25 @@ def create_inquiry_core(payload: dict, source="Manual", actor=None):
 	parent = _resolve_parent(payload)
 	student = _resolve_student(payload, parent)
 	session_context, review_reason = _resolve_trial_session_context(payload, inquiry_type)
-	appointment_data = _build_appointment_data(payload, inquiry_type, session_context)
 
-	if inquiry_type == "Trial Lesson" and appointment_data and not student:
+	if inquiry_type == "Trial Lesson" and session_context and not student:
 		frappe.throw(_("A linked student is required before booking a trial lesson into a course session."))
 
 	current_date, current_time = _get_requested_trial_datetime(payload)
 	inquiry_doc = frappe.new_doc("Inquiry")
 	inquiry_doc.inquiry_type = inquiry_type
 	inquiry_doc.source = source or payload.get("source") or "Manual"
-	inquiry_doc.status = _get_initial_inquiry_status(appointment_data, review_reason)
-	inquiry_doc.campus = appointment_data.get("campus") if appointment_data else payload.get("campus")
+	inquiry_doc.status = _get_initial_inquiry_status(session_context, review_reason)
+	inquiry_doc.campus = session_context.get("campus") if session_context else payload.get("campus")
 	inquiry_doc.parent = parent
 	inquiry_doc.student = student
 	inquiry_doc.contact_name = payload.get("contact_name") or payload.get("parent_name")
 	inquiry_doc.contact_phone = payload.get("contact_phone") or payload.get("phone")
 	inquiry_doc.contact_email = payload.get("contact_email") or payload.get("email")
-	inquiry_doc.preferred_course = payload.get("preferred_course") or payload.get("course")
+	inquiry_doc.preferred_course = (
+		session_context["timeslot"].get("course") if session_context else payload.get("preferred_course") or payload.get("course")
+	)
+	inquiry_doc.course_session = session_context["session"].get("name") if session_context else payload.get("course_session")
 	inquiry_doc.submitted_form_name = payload.get("submitted_form_name")
 	inquiry_doc.submitted_student_name = payload.get("submitted_student_name") or payload.get("student_name")
 	inquiry_doc.submitted_student_dob = payload.get("submitted_student_dob") or payload.get("date_of_birth")
@@ -118,52 +128,18 @@ def create_inquiry_core(payload: dict, source="Manual", actor=None):
 	inquiry_doc.submitted_trial_date = payload.get("submitted_trial_date")
 	inquiry_doc.referral_source = payload.get("referral_source")
 	inquiry_doc.referral_detail = payload.get("referral_detail")
-	if review_reason and current_date:
+	if session_context:
+		_apply_session_to_inquiry(inquiry_doc, session_context)
+	elif review_reason and current_date:
 		inquiry_doc.current_appointment_date = current_date
 		inquiry_doc.current_appointment_time = current_time
-	inquiry_doc.confirmation_status = "Pending" if appointment_data else "Not Required"
+		inquiry_doc.review_reason = review_reason
+	inquiry_doc.confirmation_status = "Pending" if session_context else "Not Required"
 	inquiry_doc.reminder_status = "Not Required"
 	inquiry_doc.flags.ignore_permissions = True
 	inquiry_doc.insert()
 
-	appointment_doc = None
-	if appointment_data:
-		appointment_doc = _create_appointment(inquiry_doc.name, appointment_data, previous_appointment=None)
-		if inquiry_type == "Trial Lesson":
-			attendance_row_id = _add_trial_attendance_row(
-				course_session=appointment_doc.course_session,
-				student=student,
-				inquiry=inquiry_doc.name,
-			)
-			appointment_doc.attendance_row_id = attendance_row_id
-			appointment_doc.save(ignore_permissions=True)
-
-		_apply_current_appointment(inquiry_doc, appointment_doc)
-		inquiry_doc.save(ignore_permissions=True)
-
-	_write_history(
-		inquiry_doc.name,
-		"inquiry_created",
-		actor=actor,
-		after=_build_history_snapshot(inquiry_doc),
-		message="Inquiry created.",
-	)
-	if appointment_doc:
-		_write_history(
-			inquiry_doc.name,
-			"appointment_booked",
-			actor=actor,
-			after=_build_history_snapshot(appointment_doc),
-			message="Appointment booked.",
-		)
 	if review_reason:
-		_write_history(
-			inquiry_doc.name,
-			"course_session_not_found",
-			actor=actor,
-			after={"reason": review_reason, "payload": _build_review_payload_snapshot(payload)},
-			message=review_reason,
-		)
 		_send_needs_review_alert(inquiry_doc, review_reason)
 
 	frappe.db.commit()
@@ -179,68 +155,39 @@ def reschedule_inquiry_core(inquiry: str | None, payload: dict, actor=None):
 	if inquiry_doc.status in {"Completed", "Converted", "Inactive"}:
 		frappe.throw(_("This inquiry cannot be rescheduled from its current status."))
 
-	current_appointment = _get_current_appointment_doc(inquiry_doc)
-	if not current_appointment:
-		frappe.throw(_("This inquiry does not have a current appointment to reschedule."))
-
-	before_snapshot = {
-		"inquiry": _build_history_snapshot(inquiry_doc),
-		"appointment": _build_history_snapshot(current_appointment),
-	}
-	old_started = _appointment_has_started(current_appointment)
-	if old_started:
-		current_appointment.status = "No-show"
-	else:
-		current_appointment.status = "Rescheduled"
-	current_appointment.is_current = 0
-	current_appointment.save(ignore_permissions=True)
-
 	if inquiry_doc.inquiry_type == "Trial Lesson":
-		session_context = _get_session_context(payload.get("course_session"))
-		if old_started:
-			_write_history(
-				inquiry_doc.name,
-				"appointment_no_show_before_rebook",
-				actor=actor,
-				before=before_snapshot,
-				message="Previous trial appointment had already started before rebooking.",
-			)
-		else:
-			_remove_trial_attendance_row(current_appointment)
-	else:
-		session_context = None
+		course_session = payload.get("course_session")
+		if not course_session:
+			frappe.throw(_("Course session is required for a trial lesson."))
+		return assign_inquiry_course_session_core(inquiry_doc.name, course_session, status="Rescheduled")
 
-	appointment_data = _build_appointment_data(payload, inquiry_doc.inquiry_type, session_context)
-	new_appointment = _create_appointment(
-		inquiry_doc.name,
-		appointment_data,
-		previous_appointment=current_appointment.name,
-	)
-	if inquiry_doc.inquiry_type == "Trial Lesson":
-		attendance_row_id = _add_trial_attendance_row(
-			course_session=new_appointment.course_session,
-			student=inquiry_doc.student,
-			inquiry=inquiry_doc.name,
-		)
-		new_appointment.attendance_row_id = attendance_row_id
-		new_appointment.save(ignore_permissions=True)
-
+	appointment_date, appointment_time = _parse_appointment_datetime(payload)
+	if not appointment_date:
+		frappe.throw(_("Appointment date is required for a school visit."))
+	if payload.get("campus"):
+		inquiry_doc.campus = payload.get("campus")
+	inquiry_doc.current_appointment_date = appointment_date
+	inquiry_doc.current_appointment_time = appointment_time
 	inquiry_doc.status = "Rescheduled"
-	inquiry_doc.confirmation_status = "Pending"
-	_apply_current_appointment(inquiry_doc, new_appointment)
 	inquiry_doc.save(ignore_permissions=True)
+	frappe.db.commit()
+	return build_inquiry_detail(inquiry_doc.name)
 
-	_write_history(
-		inquiry_doc.name,
-		"appointment_rescheduled",
-		actor=actor,
-		before=before_snapshot,
-		after={
-			"inquiry": _build_history_snapshot(inquiry_doc),
-			"appointment": _build_history_snapshot(new_appointment),
-		},
-		message="Inquiry appointment rescheduled.",
-	)
+
+def assign_inquiry_course_session_core(inquiry: str | None, course_session: str | None, status="Booked"):
+	if not inquiry:
+		frappe.throw(_("Inquiry is required."))
+	if not course_session:
+		frappe.throw(_("Course session is required."))
+
+	inquiry_doc = frappe.get_doc("Inquiry", inquiry)
+	if inquiry_doc.inquiry_type != "Trial Lesson":
+		frappe.throw(_("Course session can only be assigned to a trial lesson inquiry."))
+	if inquiry_doc.status in {"Completed", "Converted", "Inactive"}:
+		frappe.throw(_("This inquiry cannot be assigned from its current status."))
+	inquiry_doc.course_session = course_session
+	inquiry_doc.status = status or "Booked"
+	inquiry_doc.save(ignore_permissions=True)
 	frappe.db.commit()
 	return build_inquiry_detail(inquiry_doc.name)
 
@@ -252,23 +199,8 @@ def mark_inquiry_status_core(inquiry: str | None, status: str, actor=None):
 		frappe.throw(_("Unsupported inquiry status."))
 
 	inquiry_doc = frappe.get_doc("Inquiry", inquiry)
-	before = _build_history_snapshot(inquiry_doc)
 	inquiry_doc.status = status
 	inquiry_doc.save(ignore_permissions=True)
-
-	current_appointment = _get_current_appointment_doc(inquiry_doc)
-	if current_appointment and status in {"Completed", "No-show"}:
-		current_appointment.status = status
-		current_appointment.save(ignore_permissions=True)
-
-	_write_history(
-		inquiry_doc.name,
-		"inquiry_status_changed",
-		actor=actor,
-		before=before,
-		after=_build_history_snapshot(inquiry_doc),
-		message=f"Inquiry marked {status}.",
-	)
 	frappe.db.commit()
 	return build_inquiry_detail(inquiry_doc.name)
 
@@ -289,14 +221,6 @@ def add_inquiry_note_core(inquiry: str | None, note: str | None, actor=None):
 	note_doc.edited_at = now_datetime()
 	note_doc.flags.ignore_permissions = True
 	note_doc.insert()
-
-	_write_history(
-		inquiry_doc.name,
-		"inquiry_note_added",
-		actor=actor,
-		after={"note": note_doc.name},
-		message="Inquiry note added.",
-	)
 	frappe.db.commit()
 	return build_inquiry_detail(inquiry_doc.name)
 
@@ -305,9 +229,7 @@ def build_inquiry_detail(inquiry: str):
 	inquiry_doc = frappe.get_doc("Inquiry", inquiry)
 	return {
 		"inquiry": _build_inquiry_payload(inquiry_doc),
-		"appointments": _get_appointment_payloads(inquiry_doc.name),
 		"notes": _get_note_payloads(inquiry_doc.name),
-		"history": _get_history_payloads(inquiry_doc.name),
 	}
 
 
@@ -482,7 +404,7 @@ def _resolve_student(payload: dict, parent: str | None):
 		if student:
 			return student
 
-	if parent and (payload.get("create_student") or payload.get("submitted_form_name") or payload.get("source") == "Webhook"):
+	if parent and student_name:
 		student_doc = frappe.new_doc("Student")
 		student_doc.student_name = student_name
 		student_doc.guardian = parent
@@ -759,61 +681,52 @@ def _get_initial_inquiry_status(appointment_data, review_reason: str | None):
 	return "New"
 
 
+def sync_inquiry_course_session(inquiry_doc):
+	if inquiry_doc.inquiry_type != "Trial Lesson":
+		return
+
+	old_doc = None if inquiry_doc.is_new() else inquiry_doc.get_doc_before_save()
+	old_course_session = old_doc.course_session if old_doc else None
+	old_attendance_row_id = old_doc.attendance_row_id if old_doc else None
+
+	if old_course_session and old_course_session != inquiry_doc.course_session and old_attendance_row_id:
+		_remove_trial_attendance_row_by_id(old_course_session, old_attendance_row_id)
+		inquiry_doc.attendance_row_id = None
+
+	if not inquiry_doc.course_session:
+		return
+	if not inquiry_doc.student:
+		frappe.throw(_("Student is required before assigning a trial lesson course session."))
+
+	session_context = _get_session_context(inquiry_doc.course_session)
+	_apply_session_to_inquiry(inquiry_doc, session_context)
+	inquiry_doc.review_reason = None
+	if not inquiry_doc.status or inquiry_doc.status in {"New", NEEDS_REVIEW_STATUS, "Follow-up"}:
+		inquiry_doc.status = "Booked"
+	if not inquiry_doc.confirmation_status or inquiry_doc.confirmation_status == "Not Required":
+		inquiry_doc.confirmation_status = "Pending"
+	if not inquiry_doc.attendance_row_id or old_course_session != inquiry_doc.course_session:
+		inquiry_doc.attendance_row_id = _add_trial_attendance_row(
+			course_session=inquiry_doc.course_session,
+			student=inquiry_doc.student,
+			inquiry=inquiry_doc.name,
+		)
+
+
+def _apply_session_to_inquiry(inquiry_doc, session_context):
+	inquiry_doc.course_session = session_context["session"].get("name")
+	inquiry_doc.campus = session_context.get("campus")
+	inquiry_doc.preferred_course = session_context["timeslot"].get("course")
+	inquiry_doc.current_appointment_date = session_context["session"].get("session_date")
+	inquiry_doc.current_appointment_time = session_context["timeslot"].get("start_time")
+
+
 def _get_requested_trial_datetime(payload: dict):
 	appointment_time = payload.get("appointment_time")
 	if not appointment_time and payload.get("submitted_class_session"):
 		parsed = _parse_class_session(payload.get("submitted_class_session"))
 		appointment_time = parsed.get("start_time") if parsed else None
 	return payload.get("appointment_date") or payload.get("submitted_trial_date"), appointment_time
-
-
-def _build_review_payload_snapshot(payload: dict):
-	return {
-		"submitted_form_name": payload.get("submitted_form_name"),
-		"submitted_class_session": payload.get("submitted_class_session"),
-		"submitted_trial_date": payload.get("submitted_trial_date"),
-		"campus": payload.get("campus"),
-		"preferred_course": payload.get("preferred_course") or payload.get("course"),
-		"contact_email": payload.get("contact_email") or payload.get("email"),
-	}
-
-
-def _build_appointment_data(payload: dict, inquiry_type: str, session_context=None):
-	has_appointment = bool(
-		payload.get("course_session")
-		or payload.get("appointment_date")
-		or payload.get("appointment_datetime")
-	)
-	if not has_appointment:
-		return None
-
-	if inquiry_type == "Trial Lesson":
-		if not session_context:
-			if payload.get("submitted_form_name") or payload.get("submitted_class_session"):
-				return None
-			frappe.throw(_("Course session is required for a trial lesson appointment."))
-		return {
-			"appointment_type": inquiry_type,
-			"campus": session_context["campus"],
-			"course_session": session_context["session"]["name"],
-			"appointment_date": session_context["session"]["session_date"],
-			"appointment_time": session_context["timeslot"]["start_time"],
-			"reason": payload.get("reason"),
-		}
-
-	appointment_date, appointment_time = _parse_appointment_datetime(payload)
-	if not appointment_date:
-		frappe.throw(_("Appointment date is required for a school visit."))
-	if not payload.get("campus"):
-		frappe.throw(_("Campus is required for a school visit."))
-	return {
-		"appointment_type": inquiry_type,
-		"campus": payload.get("campus"),
-		"course_session": None,
-		"appointment_date": appointment_date,
-		"appointment_time": appointment_time,
-		"reason": payload.get("reason"),
-	}
 
 
 def _parse_appointment_datetime(payload: dict):
@@ -828,31 +741,6 @@ def _parse_appointment_datetime(payload: dict):
 		except ValueError:
 			frappe.throw(_("Appointment datetime is invalid."))
 	return appointment_date, appointment_time
-
-
-def _create_appointment(inquiry: str, appointment_data: dict, previous_appointment=None):
-	appointment_doc = frappe.new_doc("Inquiry Appointment")
-	appointment_doc.inquiry = inquiry
-	appointment_doc.appointment_type = appointment_data["appointment_type"]
-	appointment_doc.status = "Booked"
-	appointment_doc.is_current = 1
-	appointment_doc.campus = appointment_data.get("campus")
-	appointment_doc.course_session = appointment_data.get("course_session")
-	appointment_doc.appointment_date = appointment_data.get("appointment_date")
-	appointment_doc.appointment_time = appointment_data.get("appointment_time")
-	appointment_doc.previous_appointment = previous_appointment
-	appointment_doc.reason = appointment_data.get("reason")
-	appointment_doc.flags.ignore_permissions = True
-	appointment_doc.insert()
-	return appointment_doc
-
-
-def _apply_current_appointment(inquiry_doc, appointment_doc):
-	inquiry_doc.current_appointment = appointment_doc.name
-	inquiry_doc.current_course_session = appointment_doc.course_session
-	inquiry_doc.current_appointment_date = appointment_doc.appointment_date
-	inquiry_doc.current_appointment_time = appointment_doc.appointment_time
-	inquiry_doc.campus = appointment_doc.campus
 
 
 def _get_session_context(course_session: str | None):
@@ -888,13 +776,6 @@ def _get_session_start(session, timeslot):
 	return datetime.combine(getdate(session.get("session_date")), get_time(timeslot.get("start_time")))
 
 
-def _appointment_has_started(appointment_doc):
-	if not appointment_doc.appointment_date:
-		return False
-	appointment_time = appointment_doc.appointment_time or "00:00:00"
-	return datetime.combine(getdate(appointment_doc.appointment_date), get_time(appointment_time)) <= now_datetime()
-
-
 def _add_trial_attendance_row(course_session: str, student: str, inquiry: str):
 	if not student:
 		frappe.throw(_("Student is required before adding trial attendance."))
@@ -916,14 +797,14 @@ def _add_trial_attendance_row(course_session: str, student: str, inquiry: str):
 	return row.name
 
 
-def _remove_trial_attendance_row(appointment_doc):
-	if not appointment_doc.course_session or not appointment_doc.attendance_row_id:
+def _remove_trial_attendance_row_by_id(course_session: str, attendance_row_id: str):
+	if not course_session or not attendance_row_id:
 		return
 
-	session_doc = frappe.get_doc("Course Sessions", appointment_doc.course_session)
+	session_doc = frappe.get_doc("Course Sessions", course_session)
 	target = None
 	for row in session_doc.get("attendance_list", []):
-		if row.name == appointment_doc.attendance_row_id and row.enrollment_type == TRIAL_ENROLLMENT_TYPE:
+		if row.name == attendance_row_id and row.enrollment_type == TRIAL_ENROLLMENT_TYPE:
 			target = row
 			break
 	if target:
@@ -931,35 +812,9 @@ def _remove_trial_attendance_row(appointment_doc):
 		session_doc.save(ignore_permissions=True)
 
 
-def _get_current_appointment_doc(inquiry_doc):
-	if not inquiry_doc.current_appointment:
-		return None
-	return frappe.get_doc("Inquiry Appointment", inquiry_doc.current_appointment)
-
-
-def _write_history(inquiry, event_type, actor=None, before=None, after=None, message=None):
-	history = frappe.new_doc("Inquiry History")
-	history.inquiry = inquiry
-	history.event_type = event_type
-	history.actor = actor
-	history.event_time = now_datetime()
-	history.before_json = json.dumps(before, default=str) if before is not None else None
-	history.after_json = json.dumps(after, default=str) if after is not None else None
-	history.message = message
-	history.flags.ignore_permissions = True
-	history.insert()
-	return history
-
-
 def _send_needs_review_alert(inquiry_doc, reason: str):
 	recipients = _get_admin_alert_recipients()
 	if not recipients:
-		_write_history(
-			inquiry_doc.name,
-			"admin_alert_email_skipped",
-			after={"reason": "No administrator alert recipients configured or discoverable."},
-			message="Needs Review alert email was not sent because no recipients were found.",
-		)
 		return
 
 	try:
@@ -969,18 +824,10 @@ def _send_needs_review_alert(inquiry_doc, reason: str):
 			message=_build_needs_review_email(inquiry_doc, reason),
 			delayed=True,
 		)
-		_write_history(
-			inquiry_doc.name,
-			"admin_alert_email_queued",
-			after={"recipients": recipients},
-			message="Needs Review alert email queued.",
-		)
 	except Exception as exc:
-		_write_history(
-			inquiry_doc.name,
-			"admin_alert_email_failed",
-			after={"error": str(exc), "recipients": recipients},
-			message="Needs Review alert email failed to queue.",
+		frappe.log_error(
+			title="Inquiry Needs Review Alert Failed",
+			message=json.dumps({"inquiry": inquiry_doc.name, "error": str(exc), "recipients": recipients}, default=str),
 		)
 
 
@@ -1053,52 +900,17 @@ def _build_inquiry_payload(doc):
 		"referral_source": doc.referral_source,
 		"referral_detail": doc.referral_detail,
 		"preferred_course": doc.preferred_course,
-		"current_appointment": doc.current_appointment,
-		"current_course_session": doc.current_course_session,
+		"course_session": doc.course_session,
+		"attendance_row_id": doc.attendance_row_id,
 		"current_appointment_date": _as_string(doc.current_appointment_date),
 		"current_appointment_time": _as_string(doc.current_appointment_time),
+		"review_reason": doc.review_reason,
 		"confirmation_status": doc.confirmation_status,
 		"reminder_status": doc.reminder_status,
 		"trial_invoice": doc.trial_invoice,
 		"converted_enrollment": doc.converted_enrollment,
 		"inactive_reason": doc.inactive_reason,
 	}
-
-
-def _get_appointment_payloads(inquiry):
-	return [
-		{
-			"id": row.name,
-			"appointment_type": row.appointment_type,
-			"status": row.status,
-			"is_current": bool(row.is_current),
-			"campus": row.campus,
-			"course_session": row.course_session,
-			"attendance_row_id": row.attendance_row_id,
-			"appointment_date": _as_string(row.appointment_date),
-			"appointment_time": _as_string(row.appointment_time),
-			"previous_appointment": row.previous_appointment,
-			"reason": row.reason,
-		}
-		for row in frappe.get_all(
-			"Inquiry Appointment",
-			filters={"inquiry": inquiry},
-			fields=[
-				"name",
-				"appointment_type",
-				"status",
-				"is_current",
-				"campus",
-				"course_session",
-				"attendance_row_id",
-				"appointment_date",
-				"appointment_time",
-				"previous_appointment",
-				"reason",
-			],
-			order_by="appointment_date desc, creation desc",
-		)
-	]
 
 
 def _get_note_payloads(inquiry):
@@ -1118,30 +930,6 @@ def _get_note_payloads(inquiry):
 			order_by="creation desc",
 		)
 	]
-
-
-def _get_history_payloads(inquiry):
-	return [
-		{
-			"id": row.name,
-			"event_type": row.event_type,
-			"actor": row.actor,
-			"event_time": _as_string(row.event_time),
-			"message": row.message,
-			"before_json": row.before_json,
-			"after_json": row.after_json,
-		}
-		for row in frappe.get_all(
-			"Inquiry History",
-			filters={"inquiry": inquiry},
-			fields=["name", "event_type", "actor", "event_time", "message", "before_json", "after_json"],
-			order_by="event_time desc, creation desc",
-		)
-	]
-
-
-def _build_history_snapshot(doc):
-	return {field: doc.get(field) for field in doc.meta.get_valid_columns() if field not in {"modified", "modified_by"}}
 
 
 def _validate_exists(doctype: str, name: str, message):

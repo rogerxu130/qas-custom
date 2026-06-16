@@ -2,6 +2,7 @@ import frappe
 
 from qas_custom.services.campus_admin import (
 	add_campus_admin_inquiry_note_data,
+	assign_campus_admin_inquiry_course_session_data,
 	get_campus_admin_dashboard_data,
 	get_campus_admin_inquiries_data,
 	get_campus_admin_inquiry_data,
@@ -62,3 +63,8 @@ def campus_admin_mark_inquiry_follow_up(inquiry=None):
 @frappe.whitelist()
 def campus_admin_reschedule_inquiry(inquiry=None, payload=None):
 	return reschedule_campus_admin_inquiry_data(inquiry=inquiry, payload=payload)
+
+
+@frappe.whitelist()
+def campus_admin_assign_inquiry_course_session(inquiry=None, course_session=None):
+	return assign_campus_admin_inquiry_course_session_data(inquiry=inquiry, course_session=course_session)

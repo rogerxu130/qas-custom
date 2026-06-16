@@ -26,10 +26,11 @@
   "referral_detail",
   "preferred_course",
   "appointment_section",
-  "current_appointment",
-  "current_course_session",
+  "course_session",
+  "attendance_row_id",
   "current_appointment_date",
   "current_appointment_time",
+  "review_reason",
   "followup_section",
   "trial_invoice",
   "confirmation_status",
@@ -154,21 +155,21 @@
   {
    "fieldname": "appointment_section",
    "fieldtype": "Section Break",
-   "label": "Current Appointment"
+   "label": "Trial Booking"
   },
   {
-   "fieldname": "current_appointment",
+   "fieldname": "course_session",
    "fieldtype": "Link",
-   "label": "Current Appointment",
-   "options": "Inquiry Appointment",
-   "read_only": 1
-  },
-  {
-   "fieldname": "current_course_session",
-   "fieldtype": "Link",
+   "in_list_view": 1,
    "in_standard_filter": 1,
-   "label": "Current Course Session",
-   "options": "Course Sessions",
+   "label": "Course Session",
+   "options": "Course Sessions"
+  },
+  {
+   "fieldname": "attendance_row_id",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "Attendance Row ID",
    "read_only": 1
   },
   {
@@ -176,13 +177,19 @@
    "fieldtype": "Date",
    "in_list_view": 1,
    "in_standard_filter": 1,
-   "label": "Current Appointment Date",
+   "label": "Trial Date",
    "read_only": 1
   },
   {
    "fieldname": "current_appointment_time",
    "fieldtype": "Time",
-   "label": "Current Appointment Time",
+   "label": "Trial Time",
+   "read_only": 1
+  },
+  {
+   "fieldname": "review_reason",
+   "fieldtype": "Small Text",
+   "label": "Review Reason",
    "read_only": 1
   },
   {

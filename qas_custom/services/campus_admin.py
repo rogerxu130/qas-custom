@@ -6,6 +6,7 @@ from frappe.utils import add_days, getdate, today
 
 from qas_custom.services.inquiry import (
 	add_inquiry_note_core,
+	assign_inquiry_course_session_core,
 	build_inquiry_detail,
 	build_inquiry_summary,
 	mark_inquiry_status_core,
@@ -70,8 +71,7 @@ def get_campus_admin_inquiries_data(status=None, inquiry_type=None, from_date=No
 			"contact_phone",
 			"contact_email",
 			"preferred_course",
-			"current_appointment",
-			"current_course_session",
+			"course_session",
 			"current_appointment_date",
 			"current_appointment_time",
 		],
@@ -110,6 +110,14 @@ def reschedule_campus_admin_inquiry_data(inquiry=None, payload=None):
 	payload = payload or _get_request_json()
 	_validate_reschedule_target_access(payload, profile["campuses"])
 	return reschedule_inquiry_core(inquiry, payload, actor=frappe.session.user)
+
+
+def assign_campus_admin_inquiry_course_session_data(inquiry=None, course_session=None):
+	profile = _require_inquiry_access(inquiry)
+	payload = _get_request_json()
+	course_session = course_session or payload.get("course_session")
+	_validate_reschedule_target_access({"course_session": course_session}, profile["campuses"])
+	return assign_inquiry_course_session_core(inquiry, course_session, status="Booked")
 
 
 def _require_campus_admin_profile():
@@ -187,7 +195,7 @@ def _get_inquiry_dashboard_items(campuses, start_date, end_date, inquiry_type):
 			"contact_phone",
 			"contact_email",
 			"preferred_course",
-			"current_course_session",
+			"course_session",
 			"current_appointment_date",
 			"current_appointment_time",
 		],
@@ -280,7 +288,7 @@ def _build_inquiry_dashboard_item(row, student=None, latest_note=None):
 		"date": str(row.current_appointment_date) if row.current_appointment_date else None,
 		"time": str(row.current_appointment_time) if row.current_appointment_time else None,
 		"status": row.status,
-		"session_id": row.current_course_session,
+		"session_id": row.course_session,
 		"latest_note": latest_note,
 	}
 

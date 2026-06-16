@@ -2,6 +2,7 @@ import frappe
 
 from qas_custom.services.inquiry import (
 	add_inquiry_note_data,
+	assign_inquiry_course_session_data,
 	create_inquiry_data,
 	create_inquiry_webhook_data,
 	get_inquiry_data,
@@ -30,6 +31,11 @@ def inquiry_get(inquiry=None):
 @frappe.whitelist()
 def inquiry_reschedule(inquiry=None, payload=None):
 	return reschedule_inquiry_data(inquiry=inquiry, payload=payload)
+
+
+@frappe.whitelist()
+def inquiry_assign_course_session(inquiry=None, course_session=None):
+	return assign_inquiry_course_session_data(inquiry=inquiry, course_session=course_session)
 
 
 @frappe.whitelist()

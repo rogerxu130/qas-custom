@@ -5,3 +5,4 @@
 [post_model_sync]
 # Patches added in this section will be executed after doctypes are migrated
 qas_custom.patches.v2026_06_16_make_student_dob_optional
+qas_custom.patches.v2026_06_16_migrate_inquiry_direct_course_session
