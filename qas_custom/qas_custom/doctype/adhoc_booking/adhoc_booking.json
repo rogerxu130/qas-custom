@@ -1,0 +1,218 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "ADHOC-.YYYY.-.#####",
+ "creation": "2026-06-16 00:00:00.000000",
+ "doctype": "DocType",
+ "document_type": "Document",
+ "engine": "InnoDB",
+ "field_order": [
+  "parent",
+  "student",
+  "customer",
+  "course",
+  "course_session",
+  "campus",
+  "class_date",
+  "start_time",
+  "end_time",
+  "fee_section",
+  "fee_amount",
+  "pricing_source",
+  "status",
+  "payment_status",
+  "balance_hold_amount",
+  "lock_section",
+  "locked_at",
+  "cancellable_until",
+  "cancelled_at",
+  "cancellation_reason",
+  "sync_section",
+  "attendance_row_id",
+  "created_by_portal_user"
+ ],
+ "fields": [
+  {
+   "fieldname": "parent",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Parent",
+   "options": "Parent",
+   "reqd": 1
+  },
+  {
+   "fieldname": "student",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Student",
+   "options": "Student",
+   "reqd": 1
+  },
+  {
+   "fieldname": "customer",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Customer",
+   "options": "Customer"
+  },
+  {
+   "fieldname": "course",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Course",
+   "options": "Course",
+   "reqd": 1
+  },
+  {
+   "fieldname": "course_session",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Course Session",
+   "options": "Course Sessions",
+   "reqd": 1
+  },
+  {
+   "fieldname": "campus",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Campus",
+   "options": "Campus"
+  },
+  {
+   "fieldname": "class_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Class Date"
+  },
+  {
+   "fieldname": "start_time",
+   "fieldtype": "Time",
+   "label": "Start Time"
+  },
+  {
+   "fieldname": "end_time",
+   "fieldtype": "Time",
+   "label": "End Time"
+  },
+  {
+   "fieldname": "fee_section",
+   "fieldtype": "Section Break",
+   "label": "Fee And Status"
+  },
+  {
+   "fieldname": "fee_amount",
+   "fieldtype": "Currency",
+   "label": "Fee Amount"
+  },
+  {
+   "default": "Trial Class Fee",
+   "fieldname": "pricing_source",
+   "fieldtype": "Data",
+   "label": "Pricing Source"
+  },
+  {
+   "default": "Reserved",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Reserved\nLocked\nCancelled\nCompleted\nNo-show\nManual Review",
+   "reqd": 1
+  },
+  {
+   "default": "No Charge Yet",
+   "fieldname": "payment_status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Payment Status",
+   "options": "No Charge Yet\nHeld\nCharged\nReleased\nManual Review",
+   "reqd": 1
+  },
+  {
+   "fieldname": "balance_hold_amount",
+   "fieldtype": "Currency",
+   "label": "Balance Hold Amount"
+  },
+  {
+   "fieldname": "lock_section",
+   "fieldtype": "Section Break",
+   "label": "Lock And Cancellation"
+  },
+  {
+   "fieldname": "locked_at",
+   "fieldtype": "Datetime",
+   "label": "Locked At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "cancellable_until",
+   "fieldtype": "Datetime",
+   "in_standard_filter": 1,
+   "label": "Cancellable Until",
+   "read_only": 1
+  },
+  {
+   "fieldname": "cancelled_at",
+   "fieldtype": "Datetime",
+   "label": "Cancelled At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "cancellation_reason",
+   "fieldtype": "Small Text",
+   "label": "Cancellation Reason"
+  },
+  {
+   "fieldname": "sync_section",
+   "fieldtype": "Section Break",
+   "label": "Portal And Attendance Sync"
+  },
+  {
+   "fieldname": "attendance_row_id",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "Attendance Row ID",
+   "read_only": 1
+  },
+  {
+   "fieldname": "created_by_portal_user",
+   "fieldtype": "Link",
+   "label": "Created By Portal User",
+   "options": "User",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-06-16 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "QAS Custom",
+ "name": "Adhoc Booking",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 0,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "select": 1,
+   "share": 0,
+   "write": 1
+  }
+ ],
+ "sort_field": "class_date",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

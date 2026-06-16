@@ -36,7 +36,7 @@ def get_campus_admin_dashboard_data(from_date=None, to_date=None):
 		"trial_lessons": _get_inquiry_dashboard_items(campuses, start_date, end_date, "Trial Lesson"),
 		"school_visits": _get_inquiry_dashboard_items(campuses, start_date, end_date, "School Visit"),
 		"makeup_bookings": _get_attendance_dashboard_items(campuses, start_date, end_date, "Makeup"),
-		"adhoc_bookings": _get_attendance_dashboard_items(campuses, start_date, end_date, "Pay-as-you-go"),
+		"adhoc_bookings": _get_adhoc_booking_dashboard_items(campuses, start_date, end_date),
 	}
 
 
@@ -314,6 +314,57 @@ def _get_attendance_dashboard_items(campuses, start_date, end_date, enrollment_t
 			}
 		)
 	return items
+
+
+def _get_adhoc_booking_dashboard_items(campuses, start_date, end_date):
+	rows = frappe.get_all(
+		"Adhoc Booking",
+		filters={
+			"campus": ["in", campuses],
+			"class_date": ["between", [start_date, end_date]],
+			"status": ["in", ["Reserved", "Locked"]],
+		},
+		fields=[
+			"name",
+			"parent",
+			"student",
+			"course",
+			"course_session",
+			"campus",
+			"class_date",
+			"start_time",
+			"status",
+			"payment_status",
+			"attendance_row_id",
+		],
+		order_by="class_date asc, start_time asc",
+	)
+	student_map = _get_student_map([row.student for row in rows if row.student])
+	parent_map = _get_parent_map([row.parent for row in rows if row.parent])
+	return [
+		{
+			"type": "adhoc_booking",
+			"booking_id": row.name,
+			"student": row.student,
+			"student_name": student_map.get(row.student, {}).get("student_name") if row.student else None,
+			"parent": row.parent,
+			"contact_name": parent_map.get(row.parent, {}).get("parent_name") if row.parent else None,
+			"phone": parent_map.get(row.parent, {}).get("mobile_number") if row.parent else None,
+			"email": None,
+			"campus": row.campus,
+			"course": row.course,
+			"classroom": None,
+			"date": str(row.class_date) if row.class_date else None,
+			"time": str(row.start_time) if row.start_time else None,
+			"status": row.status,
+			"payment_status": row.payment_status,
+			"session_id": row.course_session,
+			"attendance_row_id": row.attendance_row_id,
+			"latest_note": None,
+			"makeup_voucher": None,
+		}
+		for row in rows
+	]
 
 
 def _build_inquiry_dashboard_item(row, student=None, latest_note=None):

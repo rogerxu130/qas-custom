@@ -152,23 +152,11 @@ doc_events = {
 # Scheduled Tasks
 # ---------------
 
-# scheduler_events = {
-# 	"all": [
-# 		"qas_custom.tasks.all"
-# 	],
-# 	"daily": [
-# 		"qas_custom.tasks.daily"
-# 	],
-# 	"hourly": [
-# 		"qas_custom.tasks.hourly"
-# 	],
-# 	"weekly": [
-# 		"qas_custom.tasks.weekly"
-# 	],
-# 	"monthly": [
-# 		"qas_custom.tasks.monthly"
-# 	],
-# }
+scheduler_events = {
+	"hourly": [
+		"qas_custom.tasks.adhoc_booking_tasks.lock_due_adhoc_bookings",
+	],
+}
 
 # Testing
 # -------
