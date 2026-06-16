@@ -149,8 +149,9 @@
   {
    "fieldname": "preferred_course",
    "fieldtype": "Link",
-   "label": "Preferred Course",
-   "options": "Course"
+   "label": "Requested Course",
+   "options": "Course",
+   "read_only": 1
   },
   {
    "fieldname": "appointment_section",
