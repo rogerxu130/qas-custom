@@ -85,6 +85,49 @@ def get_campus_admin_inquiry_data(inquiry=None):
 	return build_inquiry_detail(inquiry)
 
 
+def get_campus_admin_course_sessions_data(campus=None, course=None, from_date=None, to_date=None, query=None):
+	profile = _require_campus_admin_profile()
+	campuses = _filter_requested_campus(profile["campuses"], campus)
+	start_date = getdate(from_date or today())
+	end_date = getdate(to_date or add_days(start_date, 60))
+
+	timeslot_filters = {"campus": ["in", campuses]}
+	if course:
+		timeslot_filters["course"] = course
+	timeslots = frappe.get_all(
+		"Weekly Timeslot",
+		filters=timeslot_filters,
+		fields=["name", "course", "campus", "classroom", "start_time", "end_time"],
+		order_by="campus asc, course asc, start_time asc",
+	)
+	if not timeslots:
+		return {"items": []}
+
+	timeslot_map = {row.name: row for row in timeslots}
+	session_filters = {
+		"weekly_timeslot": ["in", list(timeslot_map.keys())],
+		"session_date": ["between", [start_date, end_date]],
+		"status": ["!=", "Cancelled"],
+	}
+	if query:
+		session_filters["name"] = ["like", f"%{query}%"]
+
+	sessions = frappe.get_all(
+		"Course Sessions",
+		filters=session_filters,
+		fields=["name", "weekly_timeslot", "session_date", "status"],
+		order_by="session_date asc, name asc",
+		limit=100,
+	)
+	return {
+		"items": [
+			_build_course_session_item(row, timeslot_map.get(row.weekly_timeslot))
+			for row in sessions
+			if timeslot_map.get(row.weekly_timeslot)
+		]
+	}
+
+
 def add_campus_admin_inquiry_note_data(inquiry=None, note=None):
 	_require_inquiry_access(inquiry)
 	return add_inquiry_note_core(inquiry, note, actor=frappe.session.user)
@@ -297,6 +340,20 @@ def _build_inquiry_list_item(row):
 	return {
 		**build_inquiry_summary(row),
 		"latest_note": _get_latest_note_map([row.name]).get(row.name),
+	}
+
+
+def _build_course_session_item(row, timeslot):
+	return {
+		"name": row.name,
+		"session_date": str(row.session_date) if row.session_date else None,
+		"status": row.status,
+		"timeslot": row.weekly_timeslot,
+		"course": timeslot.course,
+		"campus": timeslot.campus,
+		"classroom": timeslot.classroom,
+		"start_time": str(timeslot.start_time) if timeslot.start_time else None,
+		"end_time": str(timeslot.end_time) if timeslot.end_time else None,
 	}
 
 
