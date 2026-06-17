@@ -87,6 +87,11 @@ def convert_inquiry_to_full_term_core(inquiry: str | None, course_session: str |
 	remaining_sessions = _get_remaining_sessions(timeslot.name, session.session_date)
 	if not remaining_sessions:
 		frappe.throw(_("No remaining course sessions were found from the selected start session."))
+	invoice_context = _get_prorata_invoice_context(
+		inquiry_doc=inquiry_doc,
+		course=course,
+		remaining_session_count=len(remaining_sessions),
+	)
 
 	enrollment = _create_full_term_enrollment(
 		inquiry_doc=inquiry_doc,
@@ -95,6 +100,7 @@ def convert_inquiry_to_full_term_core(inquiry: str | None, course_session: str |
 		remaining_session_count=len(remaining_sessions),
 		actor=actor,
 	)
+	_clear_frappe_messages()
 	invoice = _create_prorata_invoice(
 		inquiry_doc=inquiry_doc,
 		enrollment=enrollment,
@@ -102,6 +108,7 @@ def convert_inquiry_to_full_term_core(inquiry: str | None, course_session: str |
 		term=term,
 		start_session=session.name,
 		remaining_session_count=len(remaining_sessions),
+		invoice_context=invoice_context,
 	)
 	_link_invoice_to_enrollment(enrollment, invoice)
 	_add_full_term_attendance_rows(remaining_sessions, inquiry_doc.student, enrollment.name)
@@ -213,17 +220,33 @@ def _create_full_term_enrollment(inquiry_doc, session, timeslot, remaining_sessi
 	return enrollment
 
 
-def _create_prorata_invoice(inquiry_doc, enrollment, course: str, term: str, start_session: str, remaining_session_count: int):
+def _get_prorata_invoice_context(inquiry_doc, course: str, remaining_session_count: int):
 	full_term_fee = _get_course_money(course, ("full_term_fee", "full_term_price", "term_fee"))
 	total_sessions = _get_course_number(course, ("total_session_per_term", "total_sessions_per_term", "sessions_per_term"))
 	if full_term_fee <= 0:
 		frappe.throw(_("Course full term fee is required before generating a pro rata invoice."))
 	if total_sessions <= 0:
 		frappe.throw(_("Course total sessions per term is required before generating a pro rata invoice."))
+	return {
+		"customer": _get_invoice_customer(inquiry_doc.parent),
+		"item_code": _get_invoice_item(course),
+		"unit_rate": flt(full_term_fee) / flt(total_sessions),
+		"remaining_session_count": remaining_session_count,
+	}
 
-	unit_rate = flt(full_term_fee) / flt(total_sessions)
-	customer = _get_invoice_customer(inquiry_doc.parent)
-	item_code = _get_invoice_item(course)
+
+def _create_prorata_invoice(
+	inquiry_doc,
+	enrollment,
+	course: str,
+	term: str,
+	start_session: str,
+	remaining_session_count: int,
+	invoice_context: dict,
+):
+	customer = invoice_context["customer"]
+	item_code = invoice_context["item_code"]
+	unit_rate = invoice_context["unit_rate"]
 
 	invoice = frappe.new_doc("Sales Invoice")
 	invoice.customer = customer
@@ -335,6 +358,13 @@ def _get_course_invoice_item(course: str):
 	if not frappe.db.exists("Item", item):
 		frappe.throw(_("Course Invoice Item does not exist: {0}").format(item))
 	return item
+
+
+def _clear_frappe_messages():
+	if hasattr(frappe, "clear_messages"):
+		frappe.clear_messages()
+	elif hasattr(frappe.local, "message_log"):
+		frappe.local.message_log = []
 
 
 def _set_if_field(doc, fieldname: str, value):
