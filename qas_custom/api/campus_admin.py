@@ -3,6 +3,7 @@ import frappe
 from qas_custom.services.campus_admin import (
 	add_campus_admin_inquiry_note_data,
 	assign_campus_admin_inquiry_course_session_data,
+	get_campus_admin_csrf_token_data,
 	get_campus_admin_dashboard_data,
 	get_campus_admin_inquiries_data,
 	get_campus_admin_inquiry_data,
@@ -18,6 +19,11 @@ from qas_custom.services.campus_admin import (
 @frappe.whitelist()
 def campus_admin_get_me():
 	return get_campus_admin_me_data()
+
+
+@frappe.whitelist()
+def campus_admin_get_csrf_token():
+	return get_campus_admin_csrf_token_data()
 
 
 @frappe.whitelist()

@@ -24,6 +24,13 @@ def get_campus_admin_me_data():
 	}
 
 
+def get_campus_admin_csrf_token_data():
+	_require_campus_admin_profile()
+	return {
+		"csrf_token": frappe.sessions.get_csrf_token(),
+	}
+
+
 def get_campus_admin_dashboard_data(from_date=None, to_date=None):
 	profile = _require_campus_admin_profile()
 	start_date = getdate(from_date or today())
