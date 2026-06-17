@@ -142,7 +142,7 @@ def mark_inquiry_inactive_core(inquiry: str | None, inactive_reason: str | None,
 	if inquiry_doc.status == "Converted":
 		frappe.throw(_("A converted inquiry cannot be marked inactive."))
 	if inquiry_doc.status not in {"Completed", "Follow-up", "No-show"}:
-		frappe.throw(_("Only post-trial inquiries can be marked inactive."))
+		frappe.throw(_("Only post-visit inquiries can be marked inactive."))
 
 	inquiry_doc.status = "Inactive"
 	inquiry_doc.inactive_reason = reason

@@ -62,8 +62,6 @@ def get_campus_admin_inquiries_data(status=None, inquiry_type=None, from_date=No
 		filters["status"] = ["in", ["Completed", "Follow-up"]]
 	else:
 		filters["status"] = ["in", ["New", "Booked", "Needs Review", "Rescheduled", "No-show"]]
-	if queue == "post_trial" and not inquiry_type:
-		inquiry_type = "Trial Lesson"
 	if inquiry_type:
 		filters["inquiry_type"] = inquiry_type
 	if from_date and to_date:

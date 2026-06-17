@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import frappe
 from frappe import _
@@ -125,9 +125,15 @@ def create_inquiry_core(payload: dict, source="Manual", actor=None):
 	if inquiry_type not in INQUIRY_TYPES:
 		frappe.throw(_("Inquiry type must be Trial Lesson or School Visit."))
 
-	parent = _resolve_parent(payload)
-	student = _resolve_student(payload, parent)
-	session_context, review_reason = _resolve_trial_session_context(payload, inquiry_type)
+	parent = _resolve_parent(payload, inquiry_type)
+	student = _resolve_student(payload, parent, inquiry_type)
+	session_context = None
+	appointment_context = None
+	review_reason = None
+	if inquiry_type == "Trial Lesson":
+		session_context, review_reason = _resolve_trial_session_context(payload, inquiry_type)
+	else:
+		appointment_context, review_reason = _resolve_school_visit_context(payload)
 
 	if inquiry_type == "Trial Lesson" and session_context and not student:
 		frappe.throw(_("A linked student is required before booking a trial lesson into a course session."))
@@ -136,15 +142,25 @@ def create_inquiry_core(payload: dict, source="Manual", actor=None):
 	inquiry_doc = frappe.new_doc("Inquiry")
 	inquiry_doc.inquiry_type = inquiry_type
 	inquiry_doc.source = source or payload.get("source") or "Manual"
-	inquiry_doc.status = _get_initial_inquiry_status(session_context, review_reason)
-	inquiry_doc.campus = session_context.get("campus") if session_context else payload.get("campus")
+	inquiry_doc.status = _get_initial_inquiry_status(session_context or appointment_context, review_reason)
+	inquiry_doc.campus = (
+		session_context.get("campus")
+		if session_context
+		else appointment_context.get("campus")
+		if appointment_context
+		else payload.get("campus")
+		if inquiry_type == "Trial Lesson"
+		else None
+	)
 	inquiry_doc.parent = parent
 	inquiry_doc.student = student
 	inquiry_doc.contact_name = payload.get("contact_name") or payload.get("parent_name")
 	inquiry_doc.contact_phone = payload.get("contact_phone") or payload.get("phone")
 	inquiry_doc.contact_email = payload.get("contact_email") or payload.get("email")
 	inquiry_doc.preferred_course = (
-		session_context["timeslot"].get("course") if session_context else payload.get("preferred_course") or payload.get("course")
+		session_context["timeslot"].get("course")
+		if session_context
+		else _resolve_course(payload.get("preferred_course") or payload.get("course"))
 	)
 	inquiry_doc.course_session = session_context["session"].get("name") if session_context else payload.get("course_session")
 	inquiry_doc.submitted_form_name = payload.get("submitted_form_name")
@@ -156,11 +172,16 @@ def create_inquiry_core(payload: dict, source="Manual", actor=None):
 	inquiry_doc.referral_detail = payload.get("referral_detail")
 	if session_context:
 		_apply_session_to_inquiry(inquiry_doc, session_context)
-	elif review_reason and current_date:
-		inquiry_doc.current_appointment_date = current_date
-		inquiry_doc.current_appointment_time = current_time
+	elif appointment_context:
+		inquiry_doc.current_appointment_date = appointment_context.get("appointment_date")
+		inquiry_doc.current_appointment_time = appointment_context.get("appointment_time")
 		inquiry_doc.review_reason = review_reason
-	inquiry_doc.confirmation_status = "Pending" if session_context else "Not Required"
+	elif review_reason:
+		if current_date:
+			inquiry_doc.current_appointment_date = current_date
+			inquiry_doc.current_appointment_time = current_time
+		inquiry_doc.review_reason = review_reason
+	inquiry_doc.confirmation_status = "Pending" if session_context or (appointment_context and not review_reason) else "Not Required"
 	inquiry_doc.reminder_status = "Not Required"
 	inquiry_doc.flags.ignore_permissions = True
 	inquiry_doc.insert()
@@ -320,6 +341,7 @@ def _normalize_inquiry_payload(payload: dict):
 	normalized["submitted_class_session"] = _normalize_scalar(normalized.get("submitted_class_session"))
 	normalized["referral_source"] = _normalize_scalar(normalized.get("referral_source"))
 	normalized["referral_detail"] = _normalize_scalar(normalized.get("referral_detail"))
+	_normalize_appointment_aliases(normalized)
 	if not normalized.get("contact_email") and normalized.get("email"):
 		normalized["contact_email"] = normalized.get("email")
 	if not normalized.get("contact_phone") and normalized.get("phone"):
@@ -339,7 +361,7 @@ def _normalize_inquiry_payload(payload: dict):
 		if not normalized.get("appointment_date"):
 			normalized["appointment_date"] = normalized.get("submitted_trial_date")
 	if normalized.get("submitted_form_name") and not normalized.get("inquiry_type"):
-		normalized["inquiry_type"] = "Trial Lesson"
+		normalized["inquiry_type"] = _infer_inquiry_type(normalized)
 
 	if normalized.get("inquiry_type"):
 		normalized["inquiry_type"] = _normalize_inquiry_type(normalized.get("inquiry_type"))
@@ -352,11 +374,55 @@ def _normalize_webhook_payload(payload: dict):
 	return normalized
 
 
+def _normalize_appointment_aliases(normalized: dict):
+	aliases = {
+		"visit_date": "appointment_date",
+		"tour_date": "appointment_date",
+		"school_visit_date": "appointment_date",
+		"selected_date": "appointment_date",
+		"booking_date": "appointment_date",
+		"visit_time": "appointment_time",
+		"tour_time": "appointment_time",
+		"school_visit_time": "appointment_time",
+		"selected_time": "appointment_time",
+		"booking_time": "appointment_time",
+		"visit_datetime": "appointment_datetime",
+		"tour_datetime": "appointment_datetime",
+		"selected_datetime": "appointment_datetime",
+		"child_name": "student_name",
+		"child_dob": "date_of_birth",
+		"message": "referral_detail",
+		"customer_message": "referral_detail",
+		"interested_course": "preferred_course",
+		"requested_course": "preferred_course",
+	}
+	for source, target in aliases.items():
+		if not normalized.get(target) and normalized.get(source):
+			normalized[target] = normalized.get(source)
+
+
+def _infer_inquiry_type(payload: dict):
+	type_hint = " ".join(
+		str(value or "")
+		for value in (
+			payload.get("submitted_form_name"),
+			payload.get("inquiry_type"),
+			payload.get("request_type"),
+			payload.get("type"),
+		)
+	).lower()
+	if any(keyword in type_hint for keyword in ("school visit", "school tour", "campus visit", "tour", "visit")):
+		return "School Visit"
+	if payload.get("appointment_date") and payload.get("appointment_time") and not payload.get("submitted_class_session"):
+		return "School Visit"
+	return "Trial Lesson"
+
+
 def _normalize_inquiry_type(value):
 	value = (value or "").strip().lower().replace("_", " ").replace("-", " ")
 	if value in {"trial", "trial lesson", "trial class"}:
 		return "Trial Lesson"
-	if value in {"visit", "school visit", "campus visit", "tour"}:
+	if value in {"visit", "school visit", "campus visit", "tour", "school tour", "open day"}:
 		return "School Visit"
 	return value.title()
 
@@ -375,7 +441,7 @@ def _validate_webhook_token(payload: dict):
 		frappe.throw(_("Invalid inquiry webhook token."), frappe.PermissionError)
 
 
-def _resolve_parent(payload: dict):
+def _resolve_parent(payload: dict, inquiry_type: str | None = None):
 	parent = payload.get("parent")
 	if parent:
 		_validate_exists("Parent", parent, _("Parent was not found."))
@@ -390,13 +456,23 @@ def _resolve_parent(payload: dict):
 	phone = payload.get("contact_phone") or payload.get("phone")
 	linked_user = payload.get("linked_user")
 	email = (payload.get("contact_email") or payload.get("email") or "").strip().lower()
-	if payload.get("submitted_form_name") and not email:
+	if inquiry_type == "Trial Lesson" and payload.get("submitted_form_name") and not email:
 		frappe.throw(_("Parent email is required for trial form submissions."))
 	if linked_user:
 		parent = frappe.db.get_value("Parent", {"linked_user": linked_user}, "name")
 		if parent:
 			_update_parent_contact_if_blank(parent, parent_name, phone)
 			return parent
+
+	if inquiry_type == "School Visit" and not payload.get("create_parent"):
+		if email:
+			user = frappe.db.exists("User", email) or frappe.db.get_value("User", {"email": email}, "name")
+			if user:
+				parent = frappe.db.get_value("Parent", {"linked_user": user}, "name")
+				if parent:
+					_update_parent_contact_if_blank(parent, parent_name, phone)
+					return parent
+		return None
 
 	user = _get_or_create_user_for_parent(email, parent_name) if email else None
 	if user:
@@ -425,13 +501,16 @@ def _resolve_parent(payload: dict):
 	return None
 
 
-def _resolve_student(payload: dict, parent: str | None):
+def _resolve_student(payload: dict, parent: str | None, inquiry_type: str | None = None):
 	student = payload.get("student")
 	if student:
 		_validate_exists("Student", student, _("Student was not found."))
 		return student
 
-	student_name = payload.get("student_name") or payload.get("submitted_student_name") or "Student"
+	student_name = payload.get("student_name") or payload.get("submitted_student_name")
+	if inquiry_type == "School Visit" and not student_name:
+		return None
+	student_name = student_name or "Student"
 	date_of_birth = payload.get("date_of_birth") or payload.get("submitted_student_dob")
 	if parent and date_of_birth:
 		student = frappe.db.get_value("Student", {"guardian": parent, "date_of_birth": date_of_birth}, "name")
@@ -532,6 +611,38 @@ def _resolve_trial_session_context(payload: dict, inquiry_type: str):
 		except Exception as exc:
 			return None, _("Matched Course Session cannot be booked: {0}").format(str(exc))
 	return None, mapping.get("reason") or _("Course Session could not be matched from the submitted trial form.")
+
+
+def _resolve_school_visit_context(payload: dict):
+	review_reasons = []
+	if not (payload.get("contact_name") or payload.get("parent_name")):
+		review_reasons.append(_("Contact name is required for a school tour."))
+	if not (payload.get("contact_phone") or payload.get("phone") or payload.get("contact_email") or payload.get("email")):
+		review_reasons.append(_("Phone or email is required for a school tour."))
+
+	campus = _resolve_campus(payload.get("campus"))
+	if not campus:
+		if payload.get("campus"):
+			review_reasons.append(_("Campus could not be matched from the submitted school tour form."))
+		else:
+			review_reasons.append(_("Campus is required for a school tour."))
+
+	appointment_date, appointment_time, datetime_reason = _parse_school_visit_appointment(payload)
+	if datetime_reason:
+		review_reasons.append(datetime_reason)
+
+	context = {}
+	if campus:
+		context["campus"] = campus
+	if appointment_date:
+		context["appointment_date"] = appointment_date
+	if appointment_time:
+		context["appointment_time"] = appointment_time
+	if appointment_date and appointment_time:
+		context["appointment_start"] = datetime.combine(getdate(appointment_date), get_time(appointment_time))
+		context["appointment_end"] = context["appointment_start"] + timedelta(minutes=15)
+
+	return context or None, "; ".join(str(reason) for reason in review_reasons if reason) or None
 
 
 def _map_trial_form_session(payload: dict):
@@ -643,6 +754,27 @@ def _resolve_course(course_candidate: str | None):
 	return matches[0] if len(matches) == 1 else None
 
 
+def _resolve_campus(campus_candidate: str | None):
+	candidate = (campus_candidate or "").strip()
+	if not candidate:
+		return None
+	if frappe.db.exists("Campus", candidate):
+		return candidate
+	campuses = frappe.get_all("Campus", fields=["name"])
+	normalized_candidate = _normalize_compare(candidate)
+	matches = [
+		row.name
+		for row in campuses
+		if normalized_candidate
+		and (
+			_normalize_compare(row.name) == normalized_candidate
+			or normalized_candidate in _normalize_compare(row.name)
+			or _normalize_compare(row.name) in normalized_candidate
+		)
+	]
+	return matches[0] if len(matches) == 1 else None
+
+
 def _parse_class_session(class_session: str | None):
 	value = (class_session or "").strip()
 	match = re.search(r"([A-Za-z]+)\s+(\d{1,2}:\d{2})(?:\s*[-–]\s*(\d{1,2}:\d{2}))?", value)
@@ -697,6 +829,50 @@ def _parse_date(value, label):
 		frappe.throw(_("{0} is invalid.").format(label))
 
 
+def _try_parse_date(value):
+	if not value:
+		return None
+	try:
+		return _parse_date(value, "Date")
+	except Exception:
+		return None
+
+
+def _try_parse_time(value):
+	if not value:
+		return None
+	try:
+		return _normalize_time_string(value)
+	except Exception:
+		return None
+
+
+def _parse_school_visit_appointment(payload: dict):
+	appointment_date = _try_parse_date(payload.get("appointment_date"))
+	appointment_time = _try_parse_time(payload.get("appointment_time"))
+	appointment_datetime = payload.get("appointment_datetime")
+
+	if appointment_datetime and (not appointment_date or not appointment_time):
+		try:
+			value = datetime.fromisoformat(str(appointment_datetime).strip().replace("Z", "+00:00"))
+			appointment_date = appointment_date or value.date()
+			appointment_time = appointment_time or value.time().replace(tzinfo=None).strftime("%H:%M:%S")
+		except ValueError:
+			return appointment_date, appointment_time, _("School tour appointment datetime is invalid.")
+
+	missing = []
+	if payload.get("appointment_date") and not appointment_date:
+		missing.append(_("appointment date is invalid"))
+	elif not appointment_date:
+		missing.append(_("appointment date is required"))
+	if payload.get("appointment_time") and not appointment_time:
+		missing.append(_("appointment time is invalid"))
+	elif not appointment_time:
+		missing.append(_("appointment time is required"))
+
+	return appointment_date, appointment_time, "; ".join(str(item) for item in missing if item) or None
+
+
 def _normalize_time_string(value):
 	if not value:
 		return None
@@ -708,10 +884,10 @@ def _normalize_compare(value):
 
 
 def _get_initial_inquiry_status(appointment_data, review_reason: str | None):
-	if appointment_data:
-		return "Booked"
 	if review_reason:
 		return NEEDS_REVIEW_STATUS
+	if appointment_data:
+		return "Booked"
 	return "New"
 
 
@@ -901,11 +1077,16 @@ def _get_admin_alert_recipients():
 
 def _build_needs_review_email(inquiry_doc, reason: str):
 	lines = [
-		_("A trial inquiry needs manual review."),
+		_("An inquiry needs manual review."),
 		"",
 		_("Inquiry: {0}").format(inquiry_doc.name),
+		_("Type: {0}").format(inquiry_doc.inquiry_type or "-"),
 		_("Reason: {0}").format(reason),
 		_("Campus: {0}").format(inquiry_doc.campus or "-"),
+		_("Appointment: {0} {1}").format(
+			inquiry_doc.current_appointment_date or "-",
+			inquiry_doc.current_appointment_time or "-",
+		),
 		_("Submitted form: {0}").format(inquiry_doc.submitted_form_name or "-"),
 		_("Submitted session: {0}").format(inquiry_doc.submitted_class_session or "-"),
 		_("Submitted trial date: {0}").format(inquiry_doc.submitted_trial_date or "-"),
