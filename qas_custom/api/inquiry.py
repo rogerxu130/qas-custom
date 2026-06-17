@@ -3,12 +3,14 @@ import frappe
 from qas_custom.services.inquiry import (
 	add_inquiry_note_data,
 	assign_inquiry_course_session_data,
+	convert_inquiry_data,
 	create_inquiry_data,
 	create_inquiry_webhook_data,
 	get_inquiry_data,
 	mark_inquiry_cancelled_data,
 	mark_inquiry_completed_data,
 	mark_inquiry_follow_up_data,
+	mark_inquiry_inactive_data,
 	mark_inquiry_no_show_data,
 	reschedule_inquiry_data,
 )
@@ -57,6 +59,16 @@ def inquiry_mark_cancelled(inquiry=None):
 @frappe.whitelist()
 def inquiry_mark_follow_up(inquiry=None):
 	return mark_inquiry_follow_up_data(inquiry=inquiry)
+
+
+@frappe.whitelist()
+def inquiry_convert(inquiry=None, course_session=None, payload=None):
+	return convert_inquiry_data(inquiry=inquiry, course_session=course_session, payload=payload)
+
+
+@frappe.whitelist()
+def inquiry_mark_inactive(inquiry=None, inactive_reason=None, payload=None):
+	return mark_inquiry_inactive_data(inquiry=inquiry, inactive_reason=inactive_reason, payload=payload)
 
 
 @frappe.whitelist()

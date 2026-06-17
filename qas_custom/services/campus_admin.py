@@ -4,6 +4,11 @@ import frappe
 from frappe import _
 from frappe.utils import add_days, getdate, today
 
+from qas_custom.services.billing_enrollment import (
+	convert_inquiry_to_full_term_core,
+	get_conversion_session_options,
+	mark_inquiry_inactive_core,
+)
 from qas_custom.services.inquiry import (
 	add_inquiry_note_core,
 	build_inquiry_detail,
@@ -122,6 +127,31 @@ def mark_campus_admin_inquiry_follow_up_data(inquiry=None):
 	return mark_inquiry_status_core(inquiry, "Follow-up", actor=frappe.session.user)
 
 
+def get_campus_admin_conversion_sessions_data(inquiry=None, start_date=None, course=None):
+	profile = _require_inquiry_access(inquiry)
+	inquiry_campus = frappe.db.get_value("Inquiry", inquiry, "campus")
+	if inquiry_campus not in profile["campuses"]:
+		frappe.throw(_("You do not have access to this inquiry."), frappe.PermissionError)
+	return get_conversion_session_options(
+		inquiry=inquiry,
+		start_date=start_date,
+		course=course,
+		campus=inquiry_campus,
+	)
+
+
+def convert_campus_admin_inquiry_data(inquiry=None, course_session=None):
+	_require_inquiry_access(inquiry)
+	_validate_conversion_session_access(inquiry, course_session)
+	result = convert_inquiry_to_full_term_core(inquiry, course_session, actor=frappe.session.user)
+	return result["inquiry"]
+
+
+def mark_campus_admin_inquiry_inactive_data(inquiry=None, inactive_reason=None):
+	_require_inquiry_access(inquiry)
+	return mark_inquiry_inactive_core(inquiry, inactive_reason, actor=frappe.session.user)
+
+
 def _require_campus_admin_profile():
 	if frappe.session.user == "Guest":
 		frappe.throw(_("Login required."), frappe.PermissionError)
@@ -159,6 +189,18 @@ def _filter_requested_campus(allowed_campuses, requested_campus=None):
 	if requested_campus not in allowed_campuses:
 		frappe.throw(_("You do not have access to the requested campus."), frappe.PermissionError)
 	return [requested_campus]
+
+
+def _validate_conversion_session_access(inquiry, course_session):
+	if not course_session:
+		frappe.throw(_("Course session is required."))
+	profile = _require_inquiry_access(inquiry)
+	session = frappe.db.get_value("Course Sessions", course_session, ["weekly_timeslot"], as_dict=True)
+	if not session:
+		frappe.throw(_("Course session was not found."))
+	timeslot = frappe.db.get_value("Weekly Timeslot", session.weekly_timeslot, ["campus"], as_dict=True)
+	if not timeslot or timeslot.campus not in profile["campuses"]:
+		frappe.throw(_("You do not have access to the selected session."), frappe.PermissionError)
 
 
 def _get_inquiry_dashboard_items(campuses, start_date, end_date, inquiry_type):

@@ -36,6 +36,7 @@
   "confirmation_status",
   "reminder_status",
   "converted_enrollment",
+  "converted_invoice",
   "inactive_reason"
  ],
  "fields": [
@@ -223,6 +224,12 @@
    "fieldtype": "Link",
    "label": "Converted Enrollment",
    "options": "Enrollment"
+  },
+  {
+   "fieldname": "converted_invoice",
+   "fieldtype": "Link",
+   "label": "Converted Invoice",
+   "options": "Sales Invoice"
   },
   {
    "fieldname": "inactive_reason",

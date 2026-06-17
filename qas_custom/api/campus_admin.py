@@ -2,7 +2,9 @@ import frappe
 
 from qas_custom.services.campus_admin import (
 	add_campus_admin_inquiry_note_data,
+	convert_campus_admin_inquiry_data,
 	get_campus_admin_csrf_token_data,
+	get_campus_admin_conversion_sessions_data,
 	get_campus_admin_dashboard_data,
 	get_campus_admin_inquiries_data,
 	get_campus_admin_inquiry_data,
@@ -10,6 +12,7 @@ from qas_custom.services.campus_admin import (
 	mark_campus_admin_inquiry_cancelled_data,
 	mark_campus_admin_inquiry_completed_data,
 	mark_campus_admin_inquiry_follow_up_data,
+	mark_campus_admin_inquiry_inactive_data,
 	mark_campus_admin_inquiry_no_show_data,
 )
 
@@ -74,6 +77,21 @@ def campus_admin_mark_inquiry_cancelled(inquiry=None):
 @frappe.whitelist()
 def campus_admin_mark_inquiry_follow_up(inquiry=None):
 	return mark_campus_admin_inquiry_follow_up_data(inquiry=inquiry)
+
+
+@frappe.whitelist()
+def campus_admin_get_conversion_sessions(inquiry=None, start_date=None, course=None):
+	return get_campus_admin_conversion_sessions_data(inquiry=inquiry, start_date=start_date, course=course)
+
+
+@frappe.whitelist()
+def campus_admin_convert_inquiry(inquiry=None, course_session=None):
+	return convert_campus_admin_inquiry_data(inquiry=inquiry, course_session=course_session)
+
+
+@frappe.whitelist()
+def campus_admin_mark_inquiry_inactive(inquiry=None, inactive_reason=None):
+	return mark_campus_admin_inquiry_inactive_data(inquiry=inquiry, inactive_reason=inactive_reason)
 
 
 @frappe.whitelist()

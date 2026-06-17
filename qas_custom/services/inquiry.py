@@ -8,6 +8,11 @@ import frappe
 from frappe import _
 from frappe.utils import get_time, getdate, now_datetime
 
+from qas_custom.services.billing_enrollment import (
+	convert_inquiry_to_full_term_core,
+	mark_inquiry_inactive_core,
+)
+
 
 INQUIRY_TYPES = {"Trial Lesson", "School Visit"}
 ADMIN_ROLES = {"System Manager", "School Admin"}
@@ -88,6 +93,22 @@ def mark_inquiry_cancelled_data(inquiry=None):
 def mark_inquiry_follow_up_data(inquiry=None):
 	_require_admin()
 	return mark_inquiry_status_core(inquiry, "Follow-up", actor=frappe.session.user)
+
+
+def convert_inquiry_data(inquiry=None, course_session=None, payload=None):
+	_require_admin()
+	payload = _get_payload(payload)
+	inquiry = inquiry or payload.get("inquiry")
+	course_session = course_session or payload.get("course_session")
+	return convert_inquiry_to_full_term_core(inquiry, course_session, actor=frappe.session.user)
+
+
+def mark_inquiry_inactive_data(inquiry=None, inactive_reason=None, payload=None):
+	_require_admin()
+	payload = _get_payload(payload)
+	inquiry = inquiry or payload.get("inquiry")
+	inactive_reason = inactive_reason if inactive_reason is not None else payload.get("inactive_reason")
+	return mark_inquiry_inactive_core(inquiry, inactive_reason, actor=frappe.session.user)
 
 
 def add_inquiry_note_data(inquiry=None, note=None):
@@ -929,6 +950,7 @@ def _build_inquiry_payload(doc):
 		"reminder_status": doc.reminder_status,
 		"trial_invoice": doc.trial_invoice,
 		"converted_enrollment": doc.converted_enrollment,
+		"converted_invoice": doc.get("converted_invoice"),
 		"inactive_reason": doc.inactive_reason,
 	}
 
