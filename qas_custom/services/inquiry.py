@@ -786,8 +786,7 @@ def _get_session_context(course_session: str | None):
 	)
 	if not timeslot:
 		frappe.throw(_("Weekly timeslot was not found."))
-	if _get_session_start(session, timeslot) <= now_datetime():
-		frappe.throw(_("Course session has already started."))
+	_get_session_start(session, timeslot)
 	return {"session": session, "timeslot": timeslot, "campus": timeslot.get("campus")}
 
 
