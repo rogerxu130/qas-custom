@@ -2,17 +2,14 @@ import frappe
 
 from qas_custom.services.campus_admin import (
 	add_campus_admin_inquiry_note_data,
-	assign_campus_admin_inquiry_course_session_data,
 	get_campus_admin_csrf_token_data,
 	get_campus_admin_dashboard_data,
 	get_campus_admin_inquiries_data,
 	get_campus_admin_inquiry_data,
 	get_campus_admin_me_data,
-	get_campus_admin_course_sessions_data,
 	mark_campus_admin_inquiry_completed_data,
 	mark_campus_admin_inquiry_follow_up_data,
 	mark_campus_admin_inquiry_no_show_data,
-	reschedule_campus_admin_inquiry_data,
 )
 
 
@@ -49,13 +46,7 @@ def campus_admin_get_inquiry(inquiry=None):
 
 @frappe.whitelist()
 def campus_admin_get_course_sessions(campus=None, course=None, from_date=None, to_date=None, query=None):
-	return get_campus_admin_course_sessions_data(
-		campus=campus,
-		course=course,
-		from_date=from_date,
-		to_date=to_date,
-		query=query,
-	)
+	frappe.throw("Trial lesson scheduling is managed by School Admin.", frappe.PermissionError)
 
 
 @frappe.whitelist()
@@ -80,9 +71,9 @@ def campus_admin_mark_inquiry_follow_up(inquiry=None):
 
 @frappe.whitelist()
 def campus_admin_reschedule_inquiry(inquiry=None, payload=None):
-	return reschedule_campus_admin_inquiry_data(inquiry=inquiry, payload=payload)
+	frappe.throw("Trial lesson scheduling is managed by School Admin.", frappe.PermissionError)
 
 
 @frappe.whitelist()
 def campus_admin_assign_inquiry_course_session(inquiry=None, course_session=None):
-	return assign_campus_admin_inquiry_course_session_data(inquiry=inquiry, course_session=course_session)
+	frappe.throw("Trial lesson scheduling is managed by School Admin.", frappe.PermissionError)

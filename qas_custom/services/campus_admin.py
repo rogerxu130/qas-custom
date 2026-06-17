@@ -6,11 +6,9 @@ from frappe.utils import add_days, getdate, today
 
 from qas_custom.services.inquiry import (
 	add_inquiry_note_core,
-	assign_inquiry_course_session_core,
 	build_inquiry_detail,
 	build_inquiry_summary,
 	mark_inquiry_status_core,
-	reschedule_inquiry_core,
 )
 
 
@@ -92,49 +90,6 @@ def get_campus_admin_inquiry_data(inquiry=None):
 	return build_inquiry_detail(inquiry)
 
 
-def get_campus_admin_course_sessions_data(campus=None, course=None, from_date=None, to_date=None, query=None):
-	profile = _require_campus_admin_profile()
-	campuses = _filter_requested_campus(profile["campuses"], campus)
-	start_date = getdate(from_date or today())
-	end_date = getdate(to_date or add_days(start_date, 60))
-
-	timeslot_filters = {"campus": ["in", campuses]}
-	if course:
-		timeslot_filters["course"] = course
-	timeslots = frappe.get_all(
-		"Weekly Timeslot",
-		filters=timeslot_filters,
-		fields=["name", "course", "campus", "classroom", "start_time", "end_time"],
-		order_by="campus asc, course asc, start_time asc",
-	)
-	if not timeslots:
-		return {"items": []}
-
-	timeslot_map = {row.name: row for row in timeslots}
-	session_filters = {
-		"weekly_timeslot": ["in", list(timeslot_map.keys())],
-		"session_date": ["between", [start_date, end_date]],
-		"status": ["!=", "Cancelled"],
-	}
-	if query:
-		session_filters["name"] = ["like", f"%{query}%"]
-
-	sessions = frappe.get_all(
-		"Course Sessions",
-		filters=session_filters,
-		fields=["name", "weekly_timeslot", "session_date", "status"],
-		order_by="session_date asc, name asc",
-		limit=100,
-	)
-	return {
-		"items": [
-			_build_course_session_item(row, timeslot_map.get(row.weekly_timeslot))
-			for row in sessions
-			if timeslot_map.get(row.weekly_timeslot)
-		]
-	}
-
-
 def add_campus_admin_inquiry_note_data(inquiry=None, note=None):
 	_require_inquiry_access(inquiry)
 	return add_inquiry_note_core(inquiry, note, actor=frappe.session.user)
@@ -153,21 +108,6 @@ def mark_campus_admin_inquiry_no_show_data(inquiry=None):
 def mark_campus_admin_inquiry_follow_up_data(inquiry=None):
 	_require_inquiry_access(inquiry)
 	return mark_inquiry_status_core(inquiry, "Follow-up", actor=frappe.session.user)
-
-
-def reschedule_campus_admin_inquiry_data(inquiry=None, payload=None):
-	profile = _require_inquiry_access(inquiry)
-	payload = payload or _get_request_json()
-	_validate_reschedule_target_access(payload, profile["campuses"])
-	return reschedule_inquiry_core(inquiry, payload, actor=frappe.session.user)
-
-
-def assign_campus_admin_inquiry_course_session_data(inquiry=None, course_session=None):
-	profile = _require_inquiry_access(inquiry)
-	payload = _get_request_json()
-	course_session = course_session or payload.get("course_session")
-	_validate_reschedule_target_access({"course_session": course_session}, profile["campuses"])
-	return assign_inquiry_course_session_core(inquiry, course_session, status="Booked")
 
 
 def _require_campus_admin_profile():
@@ -207,22 +147,6 @@ def _filter_requested_campus(allowed_campuses, requested_campus=None):
 	if requested_campus not in allowed_campuses:
 		frappe.throw(_("You do not have access to the requested campus."), frappe.PermissionError)
 	return [requested_campus]
-
-
-def _validate_reschedule_target_access(payload, allowed_campuses):
-	course_session = payload.get("course_session")
-	if course_session:
-		session = frappe.db.get_value("Course Sessions", course_session, "weekly_timeslot", as_dict=True)
-		if not session:
-			frappe.throw(_("Course session was not found."))
-		campus = frappe.db.get_value("Weekly Timeslot", session.weekly_timeslot, "campus")
-		if campus not in allowed_campuses:
-			frappe.throw(_("You do not have access to the target course session campus."), frappe.PermissionError)
-		return
-
-	campus = payload.get("campus")
-	if campus and campus not in allowed_campuses:
-		frappe.throw(_("You do not have access to the target campus."), frappe.PermissionError)
 
 
 def _get_inquiry_dashboard_items(campuses, start_date, end_date, inquiry_type):
@@ -401,20 +325,6 @@ def _build_inquiry_list_item(row):
 	}
 
 
-def _build_course_session_item(row, timeslot):
-	return {
-		"name": row.name,
-		"session_date": str(row.session_date) if row.session_date else None,
-		"status": row.status,
-		"timeslot": row.weekly_timeslot,
-		"course": timeslot.course,
-		"campus": timeslot.campus,
-		"classroom": timeslot.classroom,
-		"start_time": str(timeslot.start_time) if timeslot.start_time else None,
-		"end_time": str(timeslot.end_time) if timeslot.end_time else None,
-	}
-
-
 def _get_student_map(student_ids):
 	student_ids = sorted({student_id for student_id in student_ids if student_id})
 	if not student_ids:
@@ -458,10 +368,3 @@ def _get_latest_note_map(inquiry_ids):
 			latest[note.inquiry] = note.note
 	return latest
 
-
-def _get_request_json():
-	request = getattr(frappe.local, "request", None)
-	if not request:
-		return {}
-	payload = request.get_json(silent=True)
-	return payload if isinstance(payload, dict) else {}
