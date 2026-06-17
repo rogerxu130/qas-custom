@@ -306,6 +306,10 @@ def _get_invoice_customer(parent: str):
 
 
 def _get_invoice_item(course: str):
+	course_item = _get_course_invoice_item(course)
+	if course_item:
+		return course_item
+
 	configured = (
 		frappe.conf.get("qas_full_term_invoice_item")
 		or frappe.conf.get("qas_enrollment_invoice_item")
@@ -317,9 +321,20 @@ def _get_invoice_item(course: str):
 		return course
 	frappe.throw(
 		_(
-			"Course invoice item is not configured. Set qas_full_term_invoice_item or create an Item matching the Course name."
+			"Course invoice item is not configured. Set Invoice Item on the Course, set qas_full_term_invoice_item, or create an Item matching the Course name."
 		)
 	)
+
+
+def _get_course_invoice_item(course: str):
+	if not frappe.db.has_column("Course", "invoice_item"):
+		return None
+	item = frappe.db.get_value("Course", course, "invoice_item")
+	if not item:
+		return None
+	if not frappe.db.exists("Item", item):
+		frappe.throw(_("Course Invoice Item does not exist: {0}").format(item))
+	return item
 
 
 def _set_if_field(doc, fieldname: str, value):
