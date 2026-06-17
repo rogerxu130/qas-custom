@@ -7,6 +7,7 @@ from qas_custom.services.campus_admin import (
 	get_campus_admin_inquiries_data,
 	get_campus_admin_inquiry_data,
 	get_campus_admin_me_data,
+	mark_campus_admin_inquiry_cancelled_data,
 	mark_campus_admin_inquiry_completed_data,
 	mark_campus_admin_inquiry_follow_up_data,
 	mark_campus_admin_inquiry_no_show_data,
@@ -62,6 +63,11 @@ def campus_admin_mark_inquiry_completed(inquiry=None):
 @frappe.whitelist()
 def campus_admin_mark_inquiry_no_show(inquiry=None):
 	return mark_campus_admin_inquiry_no_show_data(inquiry=inquiry)
+
+
+@frappe.whitelist()
+def campus_admin_mark_inquiry_cancelled(inquiry=None):
+	return mark_campus_admin_inquiry_cancelled_data(inquiry=inquiry)
 
 
 @frappe.whitelist()

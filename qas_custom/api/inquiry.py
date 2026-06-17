@@ -6,6 +6,7 @@ from qas_custom.services.inquiry import (
 	create_inquiry_data,
 	create_inquiry_webhook_data,
 	get_inquiry_data,
+	mark_inquiry_cancelled_data,
 	mark_inquiry_completed_data,
 	mark_inquiry_follow_up_data,
 	mark_inquiry_no_show_data,
@@ -46,6 +47,11 @@ def inquiry_mark_completed(inquiry=None):
 @frappe.whitelist()
 def inquiry_mark_no_show(inquiry=None):
 	return mark_inquiry_no_show_data(inquiry=inquiry)
+
+
+@frappe.whitelist()
+def inquiry_mark_cancelled(inquiry=None):
+	return mark_inquiry_cancelled_data(inquiry=inquiry)
 
 
 @frappe.whitelist()

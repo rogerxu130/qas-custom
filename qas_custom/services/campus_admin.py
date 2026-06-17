@@ -53,6 +53,8 @@ def get_campus_admin_inquiries_data(status=None, inquiry_type=None, from_date=No
 	}
 	if status:
 		filters["status"] = status
+	else:
+		filters["status"] = ["in", ["New", "Booked", "Needs Review", "Rescheduled", "No-show"]]
 	if inquiry_type:
 		filters["inquiry_type"] = inquiry_type
 	if from_date and to_date:
@@ -103,6 +105,11 @@ def mark_campus_admin_inquiry_completed_data(inquiry=None):
 def mark_campus_admin_inquiry_no_show_data(inquiry=None):
 	_require_inquiry_access(inquiry)
 	return mark_inquiry_status_core(inquiry, "No-show", actor=frappe.session.user)
+
+
+def mark_campus_admin_inquiry_cancelled_data(inquiry=None):
+	_require_inquiry_access(inquiry)
+	return mark_inquiry_status_core(inquiry, "Cancelled", actor=frappe.session.user)
 
 
 def mark_campus_admin_inquiry_follow_up_data(inquiry=None):
@@ -156,7 +163,7 @@ def _get_inquiry_dashboard_items(campuses, start_date, end_date, inquiry_type):
 			"campus": ["in", campuses],
 			"inquiry_type": inquiry_type,
 			"current_appointment_date": ["between", [start_date, end_date]],
-			"status": ["in", ["Booked", "Needs Review", "Rescheduled", "Follow-up", "No-show"]],
+			"status": ["in", ["Booked", "Needs Review", "Rescheduled", "No-show"]],
 		},
 		fields=[
 			"name",
@@ -367,4 +374,3 @@ def _get_latest_note_map(inquiry_ids):
 		if note.inquiry not in latest:
 			latest[note.inquiry] = note.note
 	return latest
-

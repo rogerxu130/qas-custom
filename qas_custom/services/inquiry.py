@@ -80,6 +80,11 @@ def mark_inquiry_no_show_data(inquiry=None):
 	return mark_inquiry_status_core(inquiry, "No-show", actor=frappe.session.user)
 
 
+def mark_inquiry_cancelled_data(inquiry=None):
+	_require_admin()
+	return mark_inquiry_status_core(inquiry, "Cancelled", actor=frappe.session.user)
+
+
 def mark_inquiry_follow_up_data(inquiry=None):
 	_require_admin()
 	return mark_inquiry_status_core(inquiry, "Follow-up", actor=frappe.session.user)
@@ -152,7 +157,7 @@ def reschedule_inquiry_core(inquiry: str | None, payload: dict, actor=None):
 
 	payload = _normalize_inquiry_payload(payload)
 	inquiry_doc = frappe.get_doc("Inquiry", inquiry)
-	if inquiry_doc.status in {"Completed", "Converted", "Inactive"}:
+	if inquiry_doc.status in {"Cancelled", "Completed", "Converted", "Inactive"}:
 		frappe.throw(_("This inquiry cannot be rescheduled from its current status."))
 
 	if inquiry_doc.inquiry_type == "Trial Lesson":
@@ -183,7 +188,7 @@ def assign_inquiry_course_session_core(inquiry: str | None, course_session: str 
 	inquiry_doc = frappe.get_doc("Inquiry", inquiry)
 	if inquiry_doc.inquiry_type != "Trial Lesson":
 		frappe.throw(_("Course session can only be assigned to a trial lesson inquiry."))
-	if inquiry_doc.status in {"Completed", "Converted", "Inactive"}:
+	if inquiry_doc.status in {"Cancelled", "Completed", "Converted", "Inactive"}:
 		frappe.throw(_("This inquiry cannot be assigned from its current status."))
 	inquiry_doc.course_session = course_session
 	inquiry_doc.status = status or "Booked"
@@ -195,10 +200,18 @@ def assign_inquiry_course_session_core(inquiry: str | None, course_session: str 
 def mark_inquiry_status_core(inquiry: str | None, status: str, actor=None):
 	if not inquiry:
 		frappe.throw(_("Inquiry is required."))
-	if status not in {"Completed", "No-show", "Follow-up"}:
+	if status not in {"Cancelled", "Completed", "No-show", "Follow-up"}:
 		frappe.throw(_("Unsupported inquiry status."))
 
 	inquiry_doc = frappe.get_doc("Inquiry", inquiry)
+	if inquiry_doc.status in {"Converted", "Inactive"}:
+		frappe.throw(_("This inquiry cannot be updated from its current status."))
+	if status == "Cancelled" and inquiry_doc.status in {"Completed", "Converted", "Inactive"}:
+		frappe.throw(_("A completed inquiry cannot be cancelled."))
+	if status == "Follow-up" and inquiry_doc.status != "Completed":
+		frappe.throw(_("Follow-up can only be started after the trial lesson is completed."))
+	if status in {"Completed", "No-show"} and inquiry_doc.status == "Cancelled":
+		frappe.throw(_("A cancelled inquiry cannot be marked as attended or no-show."))
 	inquiry_doc.status = status
 	inquiry_doc.save(ignore_permissions=True)
 	frappe.db.commit()
@@ -688,6 +701,14 @@ def sync_inquiry_course_session(inquiry_doc):
 	old_doc = None if inquiry_doc.is_new() else inquiry_doc.get_doc_before_save()
 	old_course_session = old_doc.course_session if old_doc else None
 	old_attendance_row_id = old_doc.attendance_row_id if old_doc else None
+
+	if inquiry_doc.status == "Cancelled":
+		attendance_row_id = inquiry_doc.attendance_row_id or old_attendance_row_id
+		course_session = inquiry_doc.course_session or old_course_session
+		if course_session and attendance_row_id:
+			_remove_trial_attendance_row_by_id(course_session, attendance_row_id)
+		inquiry_doc.attendance_row_id = None
+		return
 
 	if old_course_session and old_course_session != inquiry_doc.course_session and old_attendance_row_id:
 		_remove_trial_attendance_row_by_id(old_course_session, old_attendance_row_id)
