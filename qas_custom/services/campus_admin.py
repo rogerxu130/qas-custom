@@ -45,7 +45,7 @@ def get_campus_admin_dashboard_data(from_date=None, to_date=None):
 	}
 
 
-def get_campus_admin_inquiries_data(status=None, inquiry_type=None, from_date=None, to_date=None, campus=None):
+def get_campus_admin_inquiries_data(status=None, inquiry_type=None, from_date=None, to_date=None, campus=None, queue=None):
 	profile = _require_campus_admin_profile()
 	campuses = _filter_requested_campus(profile["campuses"], campus)
 	filters = {
@@ -53,8 +53,12 @@ def get_campus_admin_inquiries_data(status=None, inquiry_type=None, from_date=No
 	}
 	if status:
 		filters["status"] = status
+	elif queue == "post_trial":
+		filters["status"] = ["in", ["Completed", "Follow-up"]]
 	else:
 		filters["status"] = ["in", ["New", "Booked", "Needs Review", "Rescheduled", "No-show"]]
+	if queue == "post_trial" and not inquiry_type:
+		inquiry_type = "Trial Lesson"
 	if inquiry_type:
 		filters["inquiry_type"] = inquiry_type
 	if from_date and to_date:
@@ -64,6 +68,7 @@ def get_campus_admin_inquiries_data(status=None, inquiry_type=None, from_date=No
 	elif to_date:
 		filters["current_appointment_date"] = ["<=", getdate(to_date)]
 
+	order_by = "current_appointment_date desc, modified desc" if queue == "post_trial" else "current_appointment_date asc, modified desc"
 	rows = frappe.get_all(
 		"Inquiry",
 		filters=filters,
@@ -82,7 +87,7 @@ def get_campus_admin_inquiries_data(status=None, inquiry_type=None, from_date=No
 			"current_appointment_date",
 			"current_appointment_time",
 		],
-		order_by="current_appointment_date asc, modified desc",
+		order_by=order_by,
 	)
 	return {"items": [_build_inquiry_list_item(row) for row in rows]}
 

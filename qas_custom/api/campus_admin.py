@@ -30,13 +30,14 @@ def campus_admin_get_dashboard(from_date=None, to_date=None):
 
 
 @frappe.whitelist()
-def campus_admin_get_inquiries(status=None, inquiry_type=None, from_date=None, to_date=None, campus=None):
+def campus_admin_get_inquiries(status=None, inquiry_type=None, from_date=None, to_date=None, campus=None, queue=None):
 	return get_campus_admin_inquiries_data(
 		status=status,
 		inquiry_type=inquiry_type,
 		from_date=from_date,
 		to_date=to_date,
 		campus=campus,
+		queue=queue,
 	)
 
 
