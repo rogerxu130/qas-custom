@@ -919,7 +919,6 @@ def _get_enrollment_rows(parent=None, students=None, filters=None, limit=80):
 			"term",
 			"course",
 			"weekly_timeslot",
-			"course_session",
 			"start_course_session",
 			"enrollment_type",
 			"status",

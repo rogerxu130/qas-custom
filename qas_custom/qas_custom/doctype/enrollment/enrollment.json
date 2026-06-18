@@ -12,7 +12,6 @@
   "term",
   "course",
   "weekly_timeslot",
-  "course_session",
   "start_course_session",
   "enrollment_type",
   "status",
@@ -70,12 +69,6 @@
    "in_standard_filter": 1,
    "label": "Weekly Timeslot",
    "options": "Weekly Timeslot"
-  },
-  {
-   "fieldname": "course_session",
-   "fieldtype": "Link",
-   "label": "Course Session",
-   "options": "Course Sessions"
   },
   {
    "fieldname": "start_course_session",

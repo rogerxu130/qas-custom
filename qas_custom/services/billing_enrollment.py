@@ -208,7 +208,6 @@ def _create_full_term_enrollment(inquiry_doc, session, timeslot, remaining_sessi
 	_set_if_field(enrollment, "term", timeslot.term)
 	_set_if_field(enrollment, "course", timeslot.course)
 	_set_if_field(enrollment, "weekly_timeslot", timeslot.name)
-	_set_if_field(enrollment, "course_session", session.name)
 	_set_if_field(enrollment, "start_course_session", session.name)
 	_set_if_field(enrollment, "enrollment_type", FULL_TERM)
 	_set_if_field(enrollment, "status", ACTIVE)
