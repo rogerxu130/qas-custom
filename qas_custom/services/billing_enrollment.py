@@ -292,7 +292,7 @@ def _add_full_term_attendance_rows(sessions, student: str, enrollment: str):
 				break
 		if exists:
 			continue
-		session_doc.append(
+		row = session_doc.append(
 			"attendance_list",
 			{
 				"student": student,
@@ -301,6 +301,10 @@ def _add_full_term_attendance_rows(sessions, student: str, enrollment: str):
 				"comments": f"Added from Enrollment {enrollment}",
 			},
 		)
+		if row.meta.has_field("source_doctype"):
+			row.source_doctype = "Enrollment"
+		if row.meta.has_field("source_document"):
+			row.source_document = enrollment
 		session_doc.save(ignore_permissions=True)
 
 

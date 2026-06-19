@@ -10,6 +10,8 @@ from frappe import _
 from frappe.utils import add_days, cint, getdate, now_datetime, today
 from frappe.utils.file_manager import save_file
 
+from qas_custom.services.attendance import update_attendance_status
+
 
 SPECIAL_ENROLLMENT_TYPES = {"Trial", "Makeup", "Pay-as-you-go"}
 MAX_PHOTO_UPLOADS = 12
@@ -105,6 +107,8 @@ def get_teacher_session_detail_data(course_session=None):
                 "status": row.get("status"),
                 "comments": row.get("comments") or "",
                 "makeup_voucher": row.get("makeup_voucher"),
+                "source_doctype": row.get("source_doctype"),
+                "source_document": row.get("source_document"),
             }
         )
 
@@ -143,27 +147,18 @@ def update_teacher_attendance_data(course_session=None, updates=None):
     if not updates:
         frappe.throw(_("No attendance updates were provided."))
 
-    valid_statuses = set(_get_attendance_status_options())
-    session_doc = frappe.get_doc("Course Sessions", session["name"])
-    attendance_by_row_id = {
-        row.name: row
-        for row in session_doc.get("attendance_list", [])
-    }
-
     for update in updates:
         row_id = update.get("row_id")
-        if not row_id or row_id not in attendance_by_row_id:
+        if not row_id:
             frappe.throw(_("Invalid attendance row."))
+        update_attendance_status(
+            course_session=session["name"],
+            attendance_row=row_id,
+            status=update.get("status"),
+            actor=frappe.session.user,
+            comment=update.get("comments"),
+        )
 
-        status = (update.get("status") or "").strip()
-        if status and status not in valid_statuses:
-            frappe.throw(_("Invalid attendance status: {0}").format(status))
-
-        row = attendance_by_row_id[row_id]
-        row.status = status or None
-        row.comments = (update.get("comments") or "").strip()
-
-    session_doc.save(ignore_permissions=True)
     frappe.db.commit()
     return get_teacher_session_detail_data(course_session=session["name"])
 
@@ -496,6 +491,21 @@ def _get_attendance_rows(session_ids: list[str]):
     if not session_ids:
         return []
 
+    fields = [
+        "name",
+        "parent",
+        "student",
+        "enrollment_type",
+        "status",
+        "comments",
+        "makeup_voucher",
+        "idx",
+    ]
+    meta = frappe.get_meta("Attendance Record")
+    for fieldname in ("source_doctype", "source_document", "marked_by", "marked_at", "previous_status"):
+        if meta.has_field(fieldname):
+            fields.append(fieldname)
+
     return frappe.get_all(
         "Attendance Record",
         filters={
@@ -503,16 +513,7 @@ def _get_attendance_rows(session_ids: list[str]):
             "parenttype": "Course Sessions",
             "parentfield": "attendance_list",
         },
-        fields=[
-            "name",
-            "parent",
-            "student",
-            "enrollment_type",
-            "status",
-            "comments",
-            "makeup_voucher",
-            "idx",
-        ],
+        fields=fields,
         order_by="parent asc, idx asc",
     )
 

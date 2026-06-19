@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import frappe
 from frappe import _
-from frappe.utils import add_days, getdate, today
+from datetime import datetime
+
+from frappe.utils import add_days, get_time, getdate, now_datetime, today
 
 from qas_custom.services.billing_enrollment import (
 	convert_inquiry_to_full_term_core,
@@ -120,6 +122,37 @@ def mark_campus_admin_inquiry_cancelled_data(inquiry=None):
 	return mark_inquiry_status_core(inquiry, "Cancelled", actor=frappe.session.user)
 
 
+def reopen_campus_admin_inquiry_data(inquiry=None):
+	_require_inquiry_access(inquiry)
+	if not inquiry:
+		frappe.throw(_("Inquiry is required."))
+
+	inquiry_doc = frappe.get_doc("Inquiry", inquiry)
+	if inquiry_doc.status != "Cancelled":
+		frappe.throw(_("Only cancelled inquiries can be reopened."))
+
+	target_status = _get_reopen_status(inquiry_doc)
+	previous_status = inquiry_doc.status
+	original_course_session = inquiry_doc.course_session
+	inquiry_doc.status = target_status
+	if target_status == "Needs Review":
+		if inquiry_doc.inquiry_type == "Trial Lesson":
+			inquiry_doc.course_session = None
+			inquiry_doc.attendance_row_id = None
+		inquiry_doc.review_reason = _("Reopened from cancellation. Original appointment or session needs review.")
+	inquiry_doc.save(ignore_permissions=True)
+	_add_system_inquiry_note(
+		inquiry_doc,
+		_("Inquiry reopened by Campus Admin. Previous status: {0}. Restored status: {1}. Original course session: {2}.").format(
+			previous_status,
+			target_status,
+			original_course_session or "-",
+		),
+	)
+	frappe.db.commit()
+	return build_inquiry_detail(inquiry_doc.name)
+
+
 def mark_campus_admin_inquiry_follow_up_data(inquiry=None):
 	_require_inquiry_access(inquiry)
 	return mark_inquiry_status_core(inquiry, "Follow-up", actor=frappe.session.user)
@@ -199,6 +232,66 @@ def _validate_conversion_session_access(inquiry, course_session):
 	timeslot = frappe.db.get_value("Weekly Timeslot", session.weekly_timeslot, ["campus"], as_dict=True)
 	if not timeslot or timeslot.campus not in profile["campuses"]:
 		frappe.throw(_("You do not have access to the selected session."), frappe.PermissionError)
+
+
+def _get_reopen_status(inquiry_doc):
+	if inquiry_doc.inquiry_type == "Trial Lesson":
+		if _is_reopenable_trial_session(inquiry_doc):
+			return "Booked"
+		return "Needs Review"
+
+	if _appointment_is_future_or_now(inquiry_doc.current_appointment_date, inquiry_doc.current_appointment_time):
+		return "Booked"
+	return "Needs Review"
+
+
+def _is_reopenable_trial_session(inquiry_doc):
+	if not inquiry_doc.course_session:
+		return False
+	session = frappe.db.get_value(
+		"Course Sessions",
+		inquiry_doc.course_session,
+		["name", "weekly_timeslot", "session_date", "status"],
+		as_dict=True,
+	)
+	if not session or session.get("status") == "Cancelled":
+		return False
+	if not session.get("weekly_timeslot"):
+		return False
+	timeslot = frappe.db.get_value("Weekly Timeslot", session.weekly_timeslot, ["start_time"], as_dict=True)
+	if not timeslot:
+		return False
+	return _appointment_is_future_or_now(session.session_date, timeslot.start_time)
+
+
+def _appointment_is_future_or_now(appointment_date, appointment_time=None):
+	if not appointment_date:
+		return False
+	date_value = getdate(appointment_date)
+	if not appointment_time:
+		return date_value >= getdate(today())
+	try:
+		appointment_datetime = datetime.combine(date_value, get_time(appointment_time))
+	except Exception:
+		return date_value >= getdate(today())
+	return appointment_datetime >= now_datetime().replace(tzinfo=None)
+
+
+def _add_system_inquiry_note(inquiry_doc, note):
+	note_doc = frappe.new_doc("Inquiry Note")
+	note_doc.inquiry = inquiry_doc.name
+	note_doc.student = inquiry_doc.student
+	note_doc.note = note
+	note_doc.author = frappe.session.user
+	note_doc.edited_at = now_datetime()
+	if note_doc.meta.has_field("note_type"):
+		note_doc.note_type = "System"
+	if note_doc.meta.has_field("source_doctype"):
+		note_doc.source_doctype = "Inquiry"
+	if note_doc.meta.has_field("source_document"):
+		note_doc.source_document = inquiry_doc.name
+	note_doc.flags.ignore_permissions = True
+	note_doc.insert()
 
 
 def _get_inquiry_dashboard_items(campuses, start_date, end_date, inquiry_type):

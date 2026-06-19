@@ -274,6 +274,8 @@ def add_inquiry_note_core(inquiry: str | None, note: str | None, actor=None):
 	note_doc.note = note
 	note_doc.author = actor or frappe.session.user
 	note_doc.edited_at = now_datetime()
+	if note_doc.meta.has_field("note_type"):
+		note_doc.note_type = "Manual"
 	note_doc.flags.ignore_permissions = True
 	note_doc.insert()
 	frappe.db.commit()
@@ -1010,6 +1012,10 @@ def _add_trial_attendance_row(course_session: str, student: str, inquiry: str):
 			"comments": f"Added from Inquiry {inquiry}",
 		},
 	)
+	if row.meta.has_field("source_doctype"):
+		row.source_doctype = "Inquiry"
+	if row.meta.has_field("source_document"):
+		row.source_document = inquiry
 	session_doc.save(ignore_permissions=True)
 	return row.name
 
@@ -1137,6 +1143,11 @@ def _build_inquiry_payload(doc):
 
 
 def _get_note_payloads(inquiry):
+	fields = ["name", "student", "note", "author", "edited_at", "creation"]
+	meta = frappe.get_meta("Inquiry Note")
+	for fieldname in ("note_type", "source_doctype", "source_document"):
+		if meta.has_field(fieldname):
+			fields.append(fieldname)
 	return [
 		{
 			"id": row.name,
@@ -1145,11 +1156,14 @@ def _get_note_payloads(inquiry):
 			"author": row.author,
 			"edited_at": _as_string(row.edited_at),
 			"creation": _as_string(row.creation),
+			"note_type": row.get("note_type") or "Manual",
+			"source_doctype": row.get("source_doctype"),
+			"source_document": row.get("source_document"),
 		}
 		for row in frappe.get_all(
 			"Inquiry Note",
 			filters={"inquiry": inquiry},
-			fields=["name", "student", "note", "author", "edited_at", "creation"],
+			fields=fields,
 			order_by="creation desc",
 		)
 	]

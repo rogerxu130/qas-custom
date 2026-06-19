@@ -14,6 +14,7 @@ from qas_custom.services.campus_admin import (
 	mark_campus_admin_inquiry_follow_up_data,
 	mark_campus_admin_inquiry_inactive_data,
 	mark_campus_admin_inquiry_no_show_data,
+	reopen_campus_admin_inquiry_data,
 )
 
 
@@ -72,6 +73,11 @@ def campus_admin_mark_inquiry_no_show(inquiry=None):
 @frappe.whitelist()
 def campus_admin_mark_inquiry_cancelled(inquiry=None):
 	return mark_campus_admin_inquiry_cancelled_data(inquiry=inquiry)
+
+
+@frappe.whitelist()
+def campus_admin_reopen_inquiry(inquiry=None):
+	return reopen_campus_admin_inquiry_data(inquiry=inquiry)
 
 
 @frappe.whitelist()

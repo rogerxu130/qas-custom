@@ -10,6 +10,9 @@
   "inquiry",
   "student",
   "note",
+  "note_type",
+  "source_doctype",
+  "source_document",
   "author",
   "edited_at"
  ],
@@ -35,6 +38,28 @@
    "fieldtype": "Small Text",
    "label": "Note",
    "reqd": 1
+  },
+  {
+   "default": "Manual",
+   "fieldname": "note_type",
+   "fieldtype": "Select",
+   "label": "Note Type",
+   "options": "Manual\nSystem",
+   "read_only": 1
+  },
+  {
+   "fieldname": "source_doctype",
+   "fieldtype": "Link",
+   "label": "Source Doctype",
+   "options": "DocType",
+   "read_only": 1
+  },
+  {
+   "fieldname": "source_document",
+   "fieldtype": "Dynamic Link",
+   "label": "Source Document",
+   "options": "source_doctype",
+   "read_only": 1
   },
   {
    "fieldname": "author",

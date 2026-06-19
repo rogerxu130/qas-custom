@@ -23,6 +23,10 @@ def add_adhoc_attendance_row(course_session: str, student: str, booking: str):
 			"comments": f"Added from Adhoc Booking {booking}",
 		},
 	)
+	if row.meta.has_field("source_doctype"):
+		row.source_doctype = "Adhoc Booking"
+	if row.meta.has_field("source_document"):
+		row.source_document = booking
 	session_doc.save(ignore_permissions=True)
 	return row.name
 
