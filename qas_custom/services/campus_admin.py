@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import frappe
 from frappe import _
-from datetime import datetime
 
-from frappe.utils import add_days, get_time, getdate, now_datetime, today
+from frappe.utils import add_days, getdate, now_datetime, today
 
 from qas_custom.services.billing_enrollment import (
 	convert_inquiry_to_full_term_core,
@@ -133,13 +132,13 @@ def reopen_campus_admin_inquiry_data(inquiry=None):
 	original_course_session = inquiry_doc.course_session
 	inquiry_doc.status = target_status
 	if target_status == "Needs Review":
-		if inquiry_doc.inquiry_type == "Trial Lesson":
-			inquiry_doc.course_session = None
-		inquiry_doc.review_reason = _("Reopened from cancellation. Original appointment or session needs review.")
+		inquiry_doc.review_reason = _("Reopened from cancellation. No original appointment or session was available.")
+	else:
+		inquiry_doc.review_reason = None
 	inquiry_doc.save(ignore_permissions=True)
 	_add_system_inquiry_note(
 		inquiry_doc,
-		_("Inquiry reopened by Campus Admin. Previous status: {0}. Restored status: {1}. Original course session: {2}.").format(
+		_("Inquiry reopened by Campus Admin. Previous status: {0}. Restored status: {1}. Course session kept: {2}.").format(
 			previous_status,
 			target_status,
 			original_course_session or "-",
@@ -231,46 +230,9 @@ def _validate_conversion_session_access(inquiry, course_session):
 
 
 def _get_reopen_status(inquiry_doc):
-	if inquiry_doc.inquiry_type == "Trial Lesson":
-		if _is_reopenable_trial_session(inquiry_doc):
-			return "Booked"
-		return "Needs Review"
-
-	if _appointment_is_future_or_now(inquiry_doc.current_appointment_date, inquiry_doc.current_appointment_time):
+	if inquiry_doc.course_session or inquiry_doc.current_appointment_date or inquiry_doc.current_appointment_time:
 		return "Booked"
 	return "Needs Review"
-
-
-def _is_reopenable_trial_session(inquiry_doc):
-	if not inquiry_doc.course_session:
-		return False
-	session = frappe.db.get_value(
-		"Course Sessions",
-		inquiry_doc.course_session,
-		["name", "weekly_timeslot", "session_date", "status"],
-		as_dict=True,
-	)
-	if not session or session.get("status") == "Cancelled":
-		return False
-	if not session.get("weekly_timeslot"):
-		return False
-	timeslot = frappe.db.get_value("Weekly Timeslot", session.weekly_timeslot, ["start_time"], as_dict=True)
-	if not timeslot:
-		return False
-	return _appointment_is_future_or_now(session.session_date, timeslot.start_time)
-
-
-def _appointment_is_future_or_now(appointment_date, appointment_time=None):
-	if not appointment_date:
-		return False
-	date_value = getdate(appointment_date)
-	if not appointment_time:
-		return date_value >= getdate(today())
-	try:
-		appointment_datetime = datetime.combine(date_value, get_time(appointment_time))
-	except Exception:
-		return date_value >= getdate(today())
-	return appointment_datetime >= now_datetime().replace(tzinfo=None)
 
 
 def _add_system_inquiry_note(inquiry_doc, note):
