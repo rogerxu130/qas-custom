@@ -6,7 +6,7 @@ import frappe
 from frappe import _
 from frappe.utils import flt, getdate, nowdate
 
-from qas_custom.services.attendance_source import set_attendance_row_source
+from qas_custom.services.class_attendance import create_attendance_entry
 
 
 FULL_TERM = "Full-Term"
@@ -286,25 +286,15 @@ def _link_invoice_to_enrollment(enrollment, invoice):
 
 def _add_full_term_attendance_rows(sessions, student: str, enrollment: str):
 	for session in sessions:
-		session_doc = frappe.get_doc("Course Sessions", session.name)
-		exists = False
-		for row in session_doc.get("attendance_list", []):
-			if row.student == student and row.enrollment_type == FULL_TERM:
-				exists = True
-				break
-		if exists:
-			continue
-		row = session_doc.append(
-			"attendance_list",
-			{
-				"student": student,
-				"enrollment_type": FULL_TERM,
-				"status": DEFAULT_ATTENDANCE_STATUS,
-				"comments": f"Added from Enrollment {enrollment}",
-			},
+		create_attendance_entry(
+			course_session=session.name,
+			student=student,
+			enrollment_type=FULL_TERM,
+			source_doctype="Enrollment",
+			source_document=enrollment,
+			status=DEFAULT_ATTENDANCE_STATUS,
+			comments=f"Added from Enrollment {enrollment}",
 		)
-		set_attendance_row_source(row, "Enrollment", enrollment)
-		session_doc.save(ignore_permissions=True)
 
 
 def _get_course_money(course: str, fieldnames: tuple[str, ...]):

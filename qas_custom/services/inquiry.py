@@ -8,10 +8,14 @@ import frappe
 from frappe import _
 from frappe.utils import get_time, getdate, now_datetime
 
-from qas_custom.services.attendance_source import set_attendance_row_source
 from qas_custom.services.billing_enrollment import (
 	convert_inquiry_to_full_term_core,
 	mark_inquiry_inactive_core,
+)
+from qas_custom.services.class_attendance import (
+	create_attendance_entry,
+	get_attendance_entry_by_source,
+	remove_attendance_entries_by_source,
 )
 
 
@@ -900,19 +904,14 @@ def sync_inquiry_course_session(inquiry_doc):
 
 	old_doc = None if inquiry_doc.is_new() else inquiry_doc.get_doc_before_save()
 	old_course_session = old_doc.course_session if old_doc else None
-	old_attendance_row_id = old_doc.attendance_row_id if old_doc else None
 
 	if inquiry_doc.status == "Cancelled":
-		attendance_row_id = inquiry_doc.attendance_row_id or old_attendance_row_id
-		course_session = inquiry_doc.course_session or old_course_session
-		if course_session and attendance_row_id:
-			_remove_trial_attendance_row_by_id(course_session, attendance_row_id)
-		inquiry_doc.attendance_row_id = None
+		if not inquiry_doc.is_new():
+			remove_attendance_entries_by_source("Inquiry", inquiry_doc.name)
 		return
 
-	if old_course_session and old_course_session != inquiry_doc.course_session and old_attendance_row_id:
-		_remove_trial_attendance_row_by_id(old_course_session, old_attendance_row_id)
-		inquiry_doc.attendance_row_id = None
+	if old_course_session and old_course_session != inquiry_doc.course_session:
+		remove_attendance_entries_by_source("Inquiry", inquiry_doc.name)
 
 	if not inquiry_doc.course_session:
 		return
@@ -926,26 +925,30 @@ def sync_inquiry_course_session(inquiry_doc):
 		inquiry_doc.status = "Booked"
 	if not inquiry_doc.confirmation_status or inquiry_doc.confirmation_status == "Not Required":
 		inquiry_doc.confirmation_status = "Pending"
-	if not inquiry_doc.attendance_row_id or old_course_session != inquiry_doc.course_session:
-		inquiry_doc.attendance_row_id = _add_trial_attendance_row(
-			course_session=inquiry_doc.course_session,
-			student=inquiry_doc.student,
-			inquiry=inquiry_doc.name,
-		)
+	if not inquiry_doc.is_new():
+		ensure_inquiry_attendance_entry(inquiry_doc)
 
 
-def backfill_inquiry_attendance_source(inquiry_doc):
+def ensure_inquiry_attendance_entry(inquiry_doc):
 	if inquiry_doc.inquiry_type != "Trial Lesson":
 		return
-	if not inquiry_doc.course_session or not inquiry_doc.attendance_row_id:
+	if inquiry_doc.status == "Cancelled":
+		return
+	if not inquiry_doc.course_session or not inquiry_doc.student:
 		return
 
-	session_doc = frappe.get_doc("Course Sessions", inquiry_doc.course_session)
-	for row in session_doc.get("attendance_list", []):
-		if row.name == inquiry_doc.attendance_row_id:
-			set_attendance_row_source(row, "Inquiry", inquiry_doc.name)
-			session_doc.save(ignore_permissions=True)
-			return
+	if get_attendance_entry_by_source("Inquiry", inquiry_doc.name, course_session=inquiry_doc.course_session):
+		return
+	create_attendance_entry(
+		course_session=inquiry_doc.course_session,
+		student=inquiry_doc.student,
+		enrollment_type=TRIAL_ENROLLMENT_TYPE,
+		source_doctype="Inquiry",
+		source_document=inquiry_doc.name,
+		status=DEFAULT_ATTENDANCE_STATUS,
+		comments=f"Added from Inquiry {inquiry_doc.name}",
+		prevent_student_duplicate=True,
+	)
 
 
 def _apply_session_to_inquiry(inquiry_doc, session_context):
@@ -1008,43 +1011,6 @@ def _get_session_start(session, timeslot):
 	if not session.get("session_date") or not timeslot.get("start_time"):
 		frappe.throw(_("Course session is missing date or start time."))
 	return datetime.combine(getdate(session.get("session_date")), get_time(timeslot.get("start_time")))
-
-
-def _add_trial_attendance_row(course_session: str, student: str, inquiry: str):
-	if not student:
-		frappe.throw(_("Student is required before adding trial attendance."))
-	session_doc = frappe.get_doc("Course Sessions", course_session)
-	for row in session_doc.get("attendance_list", []):
-		if row.student == student and row.enrollment_type == TRIAL_ENROLLMENT_TYPE:
-			frappe.throw(_("This student is already listed as a trial student for the selected session."))
-
-	row = session_doc.append(
-		"attendance_list",
-		{
-			"student": student,
-			"enrollment_type": TRIAL_ENROLLMENT_TYPE,
-			"status": DEFAULT_ATTENDANCE_STATUS,
-			"comments": f"Added from Inquiry {inquiry}",
-		},
-	)
-	set_attendance_row_source(row, "Inquiry", inquiry)
-	session_doc.save(ignore_permissions=True)
-	return row.name
-
-
-def _remove_trial_attendance_row_by_id(course_session: str, attendance_row_id: str):
-	if not course_session or not attendance_row_id:
-		return
-
-	session_doc = frappe.get_doc("Course Sessions", course_session)
-	target = None
-	for row in session_doc.get("attendance_list", []):
-		if row.name == attendance_row_id and row.enrollment_type == TRIAL_ENROLLMENT_TYPE:
-			target = row
-			break
-	if target:
-		session_doc.remove(target)
-		session_doc.save(ignore_permissions=True)
 
 
 def _send_needs_review_alert(inquiry_doc, reason: str):
@@ -1141,7 +1107,6 @@ def _build_inquiry_payload(doc):
 		"referral_detail": doc.referral_detail,
 		"preferred_course": doc.preferred_course,
 		"course_session": doc.course_session,
-		"attendance_row_id": doc.attendance_row_id,
 		"current_appointment_date": _as_string(doc.current_appointment_date),
 		"current_appointment_time": _as_string(doc.current_appointment_time),
 		"review_reason": doc.review_reason,

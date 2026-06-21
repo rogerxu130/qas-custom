@@ -11,6 +11,7 @@ from qas_custom.services.billing_enrollment import (
 	get_conversion_session_options,
 	mark_inquiry_inactive_core,
 )
+from qas_custom.services.class_attendance import get_attendance_entries
 from qas_custom.services.inquiry import (
 	add_inquiry_note_core,
 	build_inquiry_detail,
@@ -476,7 +477,7 @@ def get_school_admin_course_session_data(course_session=None):
 		frappe.throw(_("Course session is required."))
 	doc = frappe.get_doc("Course Sessions", course_session)
 	payload = _document_payload(doc)
-	payload["attendance"] = [_child_payload(row) for row in doc.get("attendance_list", [])]
+	payload["attendance"] = [_docdict(row) for row in get_attendance_entries([course_session])]
 	if payload.get("weekly_timeslot"):
 		payload["weekly_timeslot_detail"] = _get_timeslot_summary(payload.get("weekly_timeslot"))
 	return payload

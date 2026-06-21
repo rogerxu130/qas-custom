@@ -11,6 +11,7 @@ from qas_custom.services.billing_enrollment import (
 	get_conversion_session_options,
 	mark_inquiry_inactive_core,
 )
+from qas_custom.services.class_attendance import get_attendance_entries
 from qas_custom.services.inquiry import (
 	add_inquiry_note_core,
 	build_inquiry_detail,
@@ -134,7 +135,6 @@ def reopen_campus_admin_inquiry_data(inquiry=None):
 	if target_status == "Needs Review":
 		if inquiry_doc.inquiry_type == "Trial Lesson":
 			inquiry_doc.course_session = None
-			inquiry_doc.attendance_row_id = None
 		inquiry_doc.review_reason = _("Reopened from cancellation. Original appointment or session needs review.")
 	inquiry_doc.save(ignore_permissions=True)
 	_add_system_inquiry_note(
@@ -345,22 +345,16 @@ def _get_attendance_dashboard_items(campuses, start_date, end_date, enrollment_t
 	if not sessions:
 		return []
 	session_map = {row.name: row for row in sessions}
-	attendance_rows = frappe.get_all(
-		"Attendance Record",
-		filters={
-			"parent": ["in", list(session_map.keys())],
-			"parenttype": "Course Sessions",
-			"parentfield": "attendance_list",
-			"enrollment_type": enrollment_type,
-		},
-		fields=["name", "parent", "student", "enrollment_type", "status", "comments", "makeup_voucher"],
-		order_by="parent asc, idx asc",
+	attendance_rows = get_attendance_entries(
+		list(session_map.keys()),
+		fields=["name", "course_session", "student", "enrollment_type", "status", "comments", "makeup_voucher"],
+		filters={"enrollment_type": enrollment_type},
 	)
 	student_map = _get_student_map([row.student for row in attendance_rows if row.student])
 	parent_map = _get_parent_map([student.guardian for student in student_map.values() if student.get("guardian")])
 	items = []
 	for attendance in attendance_rows:
-		session = session_map.get(attendance.parent)
+		session = session_map.get(attendance.course_session)
 		timeslot = timeslot_map.get(session.weekly_timeslot) if session else None
 		student = student_map.get(attendance.student)
 		parent = parent_map.get(student.guardian) if student and student.get("guardian") else None
@@ -379,8 +373,8 @@ def _get_attendance_dashboard_items(campuses, start_date, end_date, enrollment_t
 				"date": str(session.session_date) if session else None,
 				"time": str(timeslot.start_time) if timeslot else None,
 				"status": attendance.status,
-				"session_id": attendance.parent,
-				"attendance_row_id": attendance.name,
+				"session_id": attendance.course_session,
+				"attendance_entry": attendance.name,
 				"latest_note": attendance.comments,
 				"makeup_voucher": attendance.makeup_voucher,
 			}
@@ -407,7 +401,6 @@ def _get_adhoc_booking_dashboard_items(campuses, start_date, end_date):
 			"start_time",
 			"status",
 			"payment_status",
-			"attendance_row_id",
 		],
 		order_by="class_date asc, start_time asc",
 	)
@@ -431,7 +424,6 @@ def _get_adhoc_booking_dashboard_items(campuses, start_date, end_date):
 			"status": row.status,
 			"payment_status": row.payment_status,
 			"session_id": row.course_session,
-			"attendance_row_id": row.attendance_row_id,
 			"latest_note": None,
 			"makeup_voucher": None,
 		}

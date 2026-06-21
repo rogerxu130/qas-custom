@@ -13,7 +13,6 @@
   "is_current",
   "campus",
   "course_session",
-  "attendance_row_id",
   "appointment_date",
   "appointment_time",
   "previous_appointment",
@@ -67,12 +66,6 @@
    "in_standard_filter": 1,
    "label": "Course Session",
    "options": "Course Sessions"
-  },
-  {
-   "fieldname": "attendance_row_id",
-   "fieldtype": "Data",
-   "label": "Attendance Row ID",
-   "read_only": 1
   },
   {
    "fieldname": "appointment_date",

@@ -31,7 +31,7 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Event Type",
-   "options": "booking_created\nbalance_held\nbooking_cancelled_before_lock\nbalance_released\nbooking_locked\nbalance_charged\ncancellation_requested_after_lock\nattendance_row_created\nattendance_row_removed\nmarked_completed\nmarked_no_show\nmanual_adjustment",
+   "options": "booking_created\nbalance_held\nbooking_cancelled_before_lock\nbalance_released\nbooking_locked\nbalance_charged\ncancellation_requested_after_lock\nattendance_entry_created\nattendance_entry_removed\nattendance_row_created\nattendance_row_removed\nmarked_completed\nmarked_no_show\nmanual_adjustment",
    "reqd": 1
   },
   {

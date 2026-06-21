@@ -6,6 +6,7 @@ from datetime import datetime
 import frappe
 from frappe.utils import get_time, getdate, now_datetime
 
+from qas_custom.services.class_attendance import ATTENDANCE_DOCTYPE
 from qas_custom.services.parent_portal_read import (
     _get_parent_students,
     _require_parent,
@@ -89,9 +90,11 @@ def _get_request_payload():
 
 def _get_leave_session(student: str, course_session: str):
     session_doc = frappe.get_doc("Course Sessions", course_session)
-    attendance_row = next(
-        (row for row in session_doc.attendance_list if row.student == student),
-        None,
+    attendance_row = frappe.db.get_value(
+        ATTENDANCE_DOCTYPE,
+        {"course_session": course_session, "student": student},
+        ["name", "status"],
+        as_dict=True,
     )
     if not attendance_row:
         frappe.throw("This student is not listed in the selected class session.", frappe.PermissionError)

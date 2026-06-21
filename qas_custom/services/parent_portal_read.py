@@ -67,22 +67,18 @@ def get_parent_schedule_data(student=None):
       return {"sessions": []}
 
     attendance_rows = frappe.get_all(
-        "Attendance Record",
-        filters={
-            "student": ["in", student_names],
-            "parenttype": "Course Sessions",
-            "parentfield": "attendance_list",
-        },
-        fields=["parent", "student", "status"],
+        "Class Attendance Entry",
+        filters={"student": ["in", student_names]},
+        fields=["course_session", "student", "status"],
     )
 
     if not attendance_rows:
         return {"sessions": []}
 
     attendance_by_session_student = {
-        (row["parent"], row["student"]): row.get("status") for row in attendance_rows
+        (row["course_session"], row["student"]): row.get("status") for row in attendance_rows
     }
-    session_ids = sorted({row["parent"] for row in attendance_rows})
+    session_ids = sorted({row["course_session"] for row in attendance_rows})
 
     session_rows = frappe.get_all(
         "Course Sessions",
@@ -105,7 +101,7 @@ def get_parent_schedule_data(student=None):
             continue
 
         matching_students = [
-            row["student"] for row in attendance_rows if row["parent"] == session_row["name"]
+            row["student"] for row in attendance_rows if row["course_session"] == session_row["name"]
         ]
         for student_name in matching_students:
             if selected_student and student_name != selected_student:

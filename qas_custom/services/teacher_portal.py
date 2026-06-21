@@ -11,6 +11,7 @@ from frappe.utils import add_days, cint, getdate, now_datetime, today
 from frappe.utils.file_manager import save_file
 
 from qas_custom.services.attendance import update_attendance_status
+from qas_custom.services.class_attendance import ATTENDANCE_DOCTYPE, get_attendance_entries
 
 
 SPECIAL_ENROLLMENT_TYPES = {"Trial", "Makeup", "Pay-as-you-go"}
@@ -95,7 +96,7 @@ def get_teacher_session_detail_data(course_session=None):
     student_map = _get_student_map([row.get("student") for row in attendance_rows if row.get("student")])
 
     students = []
-    for row in sorted(attendance_rows, key=lambda item: item.get("idx") or 0):
+    for row in sorted(attendance_rows, key=lambda item: item.get("creation") or ""):
         student_id = row.get("student")
         student = student_map.get(student_id, {})
         students.append(
@@ -493,35 +494,26 @@ def _get_attendance_rows(session_ids: list[str]):
 
     fields = [
         "name",
-        "parent",
+        "course_session",
         "student",
         "enrollment_type",
         "status",
         "comments",
         "makeup_voucher",
-        "idx",
+        "source_doctype",
+        "source_document",
+        "marked_by",
+        "marked_at",
+        "previous_status",
+        "creation",
     ]
-    meta = frappe.get_meta("Attendance Record")
-    for fieldname in ("source_doctype", "source_document", "marked_by", "marked_at", "previous_status"):
-        if meta.has_field(fieldname):
-            fields.append(fieldname)
-
-    return frappe.get_all(
-        "Attendance Record",
-        filters={
-            "parent": ["in", session_ids],
-            "parenttype": "Course Sessions",
-            "parentfield": "attendance_list",
-        },
-        fields=fields,
-        order_by="parent asc, idx asc",
-    )
+    return get_attendance_entries(session_ids, fields=fields)
 
 
 def _get_attendance_by_session(session_ids: list[str]):
     grouped = defaultdict(list)
     for row in _get_attendance_rows(session_ids):
-        grouped[row.get("parent")].append(row)
+        grouped[row.get("course_session")].append(row)
     return grouped
 
 
@@ -711,7 +703,7 @@ def _count_special_students(attendance_rows: list[dict]):
 
 
 def _get_attendance_status_options():
-    field = frappe.get_meta("Attendance Record").get_field("status")
+    field = frappe.get_meta(ATTENDANCE_DOCTYPE).get_field("status")
     if not field or not field.options:
         return []
 

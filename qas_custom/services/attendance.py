@@ -4,6 +4,8 @@ import frappe
 from frappe import _
 from frappe.utils import escape_html, now_datetime
 
+from qas_custom.services.class_attendance import ATTENDANCE_DOCTYPE
+
 
 PRESENT_STATUSES = {"Present", "Late"}
 ABSENT_STATUSES = {"Absent"}
@@ -27,13 +29,13 @@ def update_attendance_status(course_session, attendance_row, status, actor=None,
 	if validate_access:
 		validate_access(course_session=course_session, attendance_row=attendance_row)
 
-	session_doc = frappe.get_doc("Course Sessions", course_session)
-	row = _get_attendance_row(session_doc, attendance_row)
+	row = _get_attendance_entry(course_session, attendance_row)
 	previous_status = row.get("status")
 
 	if previous_status == status and (row.get("comments") or "") == comment:
 		return {
 			"attendance_row": row.name,
+			"attendance_entry": row.name,
 			"previous_status": previous_status,
 			"status": status,
 			"changed": False,
@@ -45,13 +47,14 @@ def update_attendance_status(course_session, attendance_row, status, actor=None,
 	_set_if_field(row, "marked_by", actor)
 	_set_if_field(row, "marked_at", now_datetime())
 
-	session_doc.save(ignore_permissions=True)
+	row.save(ignore_permissions=True)
 
-	_notify_parent_if_present(session_doc, row, previous_status, status, actor)
-	_sync_trial_inquiry_from_attendance(session_doc, row, previous_status, status, actor, comment)
+	_notify_parent_if_present(row, previous_status, status, actor)
+	_sync_trial_inquiry_from_attendance(row, previous_status, status, actor, comment)
 
 	return {
 		"attendance_row": row.name,
+		"attendance_entry": row.name,
 		"previous_status": previous_status,
 		"status": status,
 		"changed": previous_status != status,
@@ -61,20 +64,20 @@ def update_attendance_status(course_session, attendance_row, status, actor=None,
 def _validate_status(status):
 	if not status:
 		return
-	field = frappe.get_meta("Attendance Record").get_field("status")
+	field = frappe.get_meta(ATTENDANCE_DOCTYPE).get_field("status")
 	options = [option.strip() for option in (field.options or "").splitlines() if option.strip()]
 	if options and status not in options:
 		frappe.throw(_("Invalid attendance status: {0}").format(status))
 
 
-def _get_attendance_row(session_doc, row_id):
-	for row in session_doc.get("attendance_list", []):
-		if row.name == row_id:
-			return row
-	frappe.throw(_("Invalid attendance row."))
+def _get_attendance_entry(course_session, attendance_entry):
+	row = frappe.get_doc(ATTENDANCE_DOCTYPE, attendance_entry)
+	if row.course_session != course_session:
+		frappe.throw(_("Invalid attendance row."))
+	return row
 
 
-def _notify_parent_if_present(session_doc, row, previous_status, status, actor):
+def _notify_parent_if_present(row, previous_status, status, actor):
 	if status not in PRESENT_STATUSES or previous_status in PRESENT_STATUSES:
 		return
 
@@ -82,7 +85,7 @@ def _notify_parent_if_present(session_doc, row, previous_status, status, actor):
 	if _notification_event_exists(event_key):
 		return
 
-	context = _get_attendance_context(session_doc, row)
+	context = _get_attendance_context(row)
 	parent = context.get("parent")
 	if not parent:
 		return
@@ -100,7 +103,7 @@ def _notify_parent_if_present(session_doc, row, previous_status, status, actor):
 		subject=subject,
 		message=message,
 		document_type="Course Sessions",
-		document_name=session_doc.name,
+		document_name=row.course_session,
 		from_user=actor,
 	)
 
@@ -115,7 +118,7 @@ def _notify_parent_if_present(session_doc, row, previous_status, status, actor):
 		)
 
 
-def _sync_trial_inquiry_from_attendance(session_doc, row, previous_status, status, actor, comment):
+def _sync_trial_inquiry_from_attendance(row, previous_status, status, actor, comment):
 	inquiry = _get_row_source(row, "Inquiry")
 	if not inquiry or row.get("enrollment_type") != TRIAL_ENROLLMENT_TYPE:
 		return
@@ -130,7 +133,6 @@ def _sync_trial_inquiry_from_attendance(session_doc, row, previous_status, statu
 	note = _build_inquiry_attendance_note(
 		status=status,
 		target_status=target_status,
-		session_doc=session_doc,
 		row=row,
 		previous_status=previous_status,
 		comment=comment,
@@ -150,12 +152,10 @@ def _sync_trial_inquiry_from_attendance(session_doc, row, previous_status, statu
 def _get_row_source(row, doctype):
 	if row.get("source_doctype") == doctype and row.get("source_document"):
 		return row.get("source_document")
-	if doctype == "Inquiry":
-		return frappe.db.get_value("Inquiry", {"attendance_row_id": row.name}, "name")
 	return None
 
 
-def _add_system_inquiry_note(inquiry_doc, note, attendance_row_id, actor):
+def _add_system_inquiry_note(inquiry_doc, note, attendance_entry, actor):
 	note_doc = frappe.new_doc("Inquiry Note")
 	note_doc.inquiry = inquiry_doc.name
 	note_doc.student = inquiry_doc.student
@@ -163,13 +163,14 @@ def _add_system_inquiry_note(inquiry_doc, note, attendance_row_id, actor):
 	note_doc.author = actor or frappe.session.user
 	note_doc.edited_at = now_datetime()
 	_set_if_field(note_doc, "note_type", "System")
-	_set_if_field(note_doc, "source_doctype", "Attendance Record")
-	_set_if_field(note_doc, "source_document", attendance_row_id)
+	_set_if_field(note_doc, "source_doctype", ATTENDANCE_DOCTYPE)
+	_set_if_field(note_doc, "source_document", attendance_entry)
 	note_doc.flags.ignore_permissions = True
 	note_doc.insert()
 
 
-def _get_attendance_context(session_doc, row):
+def _get_attendance_context(row):
+	session_doc = frappe.get_doc("Course Sessions", row.course_session)
 	student = frappe.db.get_value("Student", row.get("student"), ["name", "student_name", "guardian"], as_dict=True) or {}
 	timeslot = {}
 	if session_doc.get("weekly_timeslot"):
@@ -214,11 +215,11 @@ def _build_present_message(context):
 	return "<br>".join(lines)
 
 
-def _build_inquiry_attendance_note(status, target_status, session_doc, row, previous_status=None, comment=None):
+def _build_inquiry_attendance_note(status, target_status, row, previous_status=None, comment=None):
 	parts = [
 		_("Teacher attendance marked {0}.").format(status),
 		_("Inquiry status synced to {0}.").format(target_status),
-		_("Course Session: {0}.").format(session_doc.name),
+		_("Course Session: {0}.").format(row.course_session),
 	]
 	if previous_status:
 		parts.append(_("Previous attendance status: {0}.").format(previous_status))

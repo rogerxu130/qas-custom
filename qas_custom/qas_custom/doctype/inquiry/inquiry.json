@@ -27,7 +27,6 @@
   "preferred_course",
   "appointment_section",
   "course_session",
-  "attendance_row_id",
   "current_appointment_date",
   "current_appointment_time",
   "review_reason",
@@ -166,13 +165,6 @@
    "in_standard_filter": 1,
    "label": "Course Session",
    "options": "Course Sessions"
-  },
-  {
-   "fieldname": "attendance_row_id",
-   "fieldtype": "Data",
-   "hidden": 1,
-   "label": "Attendance Row ID",
-   "read_only": 1
   },
   {
    "fieldname": "current_appointment_date",

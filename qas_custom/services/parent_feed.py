@@ -6,6 +6,8 @@ import frappe
 from frappe import _
 from frappe.utils import get_datetime, get_url
 
+from qas_custom.services.class_attendance import ATTENDANCE_DOCTYPE
+
 
 def get_parent_feed_data(student=None, page=1, page_length=10):
     if frappe.session.user == "Guest":
@@ -36,14 +38,10 @@ def get_parent_feed_data(student=None, page=1, page_length=10):
         student_ids = [student]
 
     attendance_rows = frappe.get_all(
-        "Attendance Record",
-        filters={
-            "student": ["in", student_ids],
-            "parenttype": "Course Sessions",
-            "parentfield": "attendance_list",
-        },
-        fields=["parent", "student"],
-        order_by="parent asc",
+        ATTENDANCE_DOCTYPE,
+        filters={"student": ["in", student_ids]},
+        fields=["course_session", "student"],
+        order_by="course_session asc",
     )
 
     if not attendance_rows:
@@ -52,9 +50,9 @@ def get_parent_feed_data(student=None, page=1, page_length=10):
     session_student_map = {}
     session_ids = []
     for row in attendance_rows:
-        session_student_map.setdefault(row.parent, set()).add(row.student)
-        if row.parent not in session_ids:
-            session_ids.append(row.parent)
+        session_student_map.setdefault(row.course_session, set()).add(row.student)
+        if row.course_session not in session_ids:
+            session_ids.append(row.course_session)
 
     sessions = frappe.get_all(
         "Course Sessions",
@@ -370,11 +368,9 @@ def _validate_parent_session_access(parent_name, course_session):
         raise frappe.PermissionError
 
     has_access = frappe.db.exists(
-        "Attendance Record",
+        ATTENDANCE_DOCTYPE,
         {
-            "parent": course_session,
-            "parenttype": "Course Sessions",
-            "parentfield": "attendance_list",
+            "course_session": course_session,
             "student": ["in", student_ids],
         },
     )

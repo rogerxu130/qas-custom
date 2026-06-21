@@ -28,7 +28,6 @@
   "cancelled_at",
   "cancellation_reason",
   "sync_section",
-  "attendance_row_id",
   "created_by_portal_user"
  ],
  "fields": [
@@ -173,13 +172,6 @@
    "fieldname": "sync_section",
    "fieldtype": "Section Break",
    "label": "Portal And Attendance Sync"
-  },
-  {
-   "fieldname": "attendance_row_id",
-   "fieldtype": "Data",
-   "hidden": 1,
-   "label": "Attendance Row ID",
-   "read_only": 1
   },
   {
    "fieldname": "created_by_portal_user",

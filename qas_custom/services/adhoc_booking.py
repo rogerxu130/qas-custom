@@ -7,8 +7,8 @@ from frappe import _
 from frappe.utils import add_days, flt, get_time, getdate, now_datetime, today
 
 from qas_custom.services.adhoc_attendance import (
-	add_adhoc_attendance_row,
-	remove_adhoc_attendance_row,
+	add_adhoc_attendance_entry,
+	remove_adhoc_attendance_for_booking,
 )
 from qas_custom.services.adhoc_finance import (
 	charge_booking_hold,
@@ -153,9 +153,8 @@ def create_booking_data(student=None, course_session=None, confirmed_rules=0):
 		hold = hold_booking_amount(booking)
 		if hold:
 			add_booking_history(booking.name, "balance_held", new_value=str(hold.amount))
-		attendance_row_id = add_adhoc_attendance_row(session.name, selected_student, booking.name)
-		booking.attendance_row_id = attendance_row_id
-		add_booking_history(booking.name, "attendance_row_created", new_value=attendance_row_id)
+		attendance_entry = add_adhoc_attendance_entry(session.name, selected_student, booking.name)
+		add_booking_history(booking.name, "attendance_entry_created", new_value=attendance_entry)
 		booking.save(ignore_permissions=True)
 	except Exception:
 		frappe.db.rollback()
@@ -198,9 +197,9 @@ def cancel_booking_data(booking=None, reason=None):
 		)
 		frappe.throw(_("Bookings cannot be refunded or cancelled online within three days of class."))
 
-	removed = remove_adhoc_attendance_row(doc.course_session, doc.attendance_row_id)
+	removed = remove_adhoc_attendance_for_booking(doc.name)
 	if removed:
-		add_booking_history(doc.name, "attendance_row_removed", old_value=doc.attendance_row_id)
+		add_booking_history(doc.name, "attendance_entry_removed")
 	else:
 		add_booking_history(
 			doc.name,
@@ -309,11 +308,9 @@ def student_has_session_conflict(student: str, course_session: str):
 	):
 		return True
 	if frappe.db.exists(
-		"Attendance Record",
+		"Class Attendance Entry",
 		{
-			"parent": course_session,
-			"parenttype": "Course Sessions",
-			"parentfield": "attendance_list",
+			"course_session": course_session,
 			"student": student,
 		},
 	):
@@ -380,7 +377,6 @@ def get_booking_items(parent: str, student_names: list[str], status=None, upcomi
 			"status",
 			"payment_status",
 			"cancellable_until",
-			"attendance_row_id",
 		],
 		order_by="class_date asc, start_time asc",
 	)
@@ -439,7 +435,6 @@ def build_booking_item(row):
 		"cancellable_until": str(cancellable_until) if cancellable_until else None,
 		"can_cancel": can_cancel,
 		"cancel_disabled_reason": cancel_reason,
-		"attendance_row_id": row.get("attendance_row_id"),
 	}
 
 
