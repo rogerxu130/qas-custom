@@ -13,6 +13,8 @@ from qas_custom.services.parent_portal_read import (
 )
 from qas_custom.services.parent_portal_write import (
     get_parent_csrf_token_data,
+    get_parent_redeemable_sessions_data,
+    redeem_parent_voucher_data,
     submit_parent_leave_request_data,
 )
 from qas_custom.services.password_reset import (
@@ -93,6 +95,16 @@ def parent_portal_get_schedule(student=None):
 @frappe.whitelist()
 def parent_portal_get_vouchers(student=None):
     return get_parent_vouchers_data(student=student)
+
+
+@frappe.whitelist()
+def parent_portal_get_redeemable_sessions(voucher_id=None):
+    return get_parent_redeemable_sessions_data(voucher_id=voucher_id)
+
+
+@frappe.whitelist()
+def parent_portal_redeem_voucher(voucher_id=None, session_id=None):
+    return redeem_parent_voucher_data(voucher_id=voucher_id, session_id=session_id)
 
 
 @frappe.whitelist()
