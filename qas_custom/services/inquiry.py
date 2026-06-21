@@ -8,6 +8,7 @@ import frappe
 from frappe import _
 from frappe.utils import get_time, getdate, now_datetime
 
+from qas_custom.services.attendance_source import set_attendance_row_source
 from qas_custom.services.billing_enrollment import (
 	convert_inquiry_to_full_term_core,
 	mark_inquiry_inactive_core,
@@ -933,6 +934,20 @@ def sync_inquiry_course_session(inquiry_doc):
 		)
 
 
+def backfill_inquiry_attendance_source(inquiry_doc):
+	if inquiry_doc.inquiry_type != "Trial Lesson":
+		return
+	if not inquiry_doc.course_session or not inquiry_doc.attendance_row_id:
+		return
+
+	session_doc = frappe.get_doc("Course Sessions", inquiry_doc.course_session)
+	for row in session_doc.get("attendance_list", []):
+		if row.name == inquiry_doc.attendance_row_id:
+			set_attendance_row_source(row, "Inquiry", inquiry_doc.name)
+			session_doc.save(ignore_permissions=True)
+			return
+
+
 def _apply_session_to_inquiry(inquiry_doc, session_context):
 	inquiry_doc.course_session = session_context["session"].get("name")
 	inquiry_doc.campus = session_context.get("campus")
@@ -1012,10 +1027,7 @@ def _add_trial_attendance_row(course_session: str, student: str, inquiry: str):
 			"comments": f"Added from Inquiry {inquiry}",
 		},
 	)
-	if row.meta.has_field("source_doctype"):
-		row.source_doctype = "Inquiry"
-	if row.meta.has_field("source_document"):
-		row.source_document = inquiry
+	set_attendance_row_source(row, "Inquiry", inquiry)
 	session_doc.save(ignore_permissions=True)
 	return row.name
 

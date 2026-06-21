@@ -6,3 +6,8 @@ class Inquiry(Document):
 		from qas_custom.services.inquiry import sync_inquiry_course_session
 
 		sync_inquiry_course_session(self)
+
+	def after_insert(self):
+		from qas_custom.services.inquiry import backfill_inquiry_attendance_source
+
+		backfill_inquiry_attendance_source(self)

@@ -6,6 +6,8 @@ import frappe
 from frappe import _
 from frappe.utils import flt, getdate, nowdate
 
+from qas_custom.services.attendance_source import set_attendance_row_source
+
 
 FULL_TERM = "Full-Term"
 ACTIVE = "Active"
@@ -301,10 +303,7 @@ def _add_full_term_attendance_rows(sessions, student: str, enrollment: str):
 				"comments": f"Added from Enrollment {enrollment}",
 			},
 		)
-		if row.meta.has_field("source_doctype"):
-			row.source_doctype = "Enrollment"
-		if row.meta.has_field("source_document"):
-			row.source_document = enrollment
+		set_attendance_row_source(row, "Enrollment", enrollment)
 		session_doc.save(ignore_permissions=True)
 
 

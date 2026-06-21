@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import frappe
 
+from qas_custom.services.attendance_source import set_attendance_row_source
+
 PAY_AS_YOU_GO = "Pay-as-you-go"
 DEFAULT_ATTENDANCE_STATUS = "To be started"
 
@@ -23,10 +25,7 @@ def add_adhoc_attendance_row(course_session: str, student: str, booking: str):
 			"comments": f"Added from Adhoc Booking {booking}",
 		},
 	)
-	if row.meta.has_field("source_doctype"):
-		row.source_doctype = "Adhoc Booking"
-	if row.meta.has_field("source_document"):
-		row.source_document = booking
+	set_attendance_row_source(row, "Adhoc Booking", booking)
 	session_doc.save(ignore_permissions=True)
 	return row.name
 
