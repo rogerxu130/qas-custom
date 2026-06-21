@@ -15,6 +15,7 @@ from qas_custom.services.class_attendance import ATTENDANCE_DOCTYPE, get_attenda
 
 
 SPECIAL_ENROLLMENT_TYPES = {"Trial", "Makeup", "Pay-as-you-go"}
+TEACHER_BLOCKED_ATTENDANCE_STATUSES = {"Cancelled"}
 MAX_PHOTO_UPLOADS = 12
 PHOTO_POST_PREVIEW_LIMIT = 6
 MAX_VIDEO_UPLOAD_BYTES = 100 * 1024 * 1024
@@ -152,6 +153,8 @@ def update_teacher_attendance_data(course_session=None, updates=None):
         row_id = update.get("row_id")
         if not row_id:
             frappe.throw(_("Invalid attendance row."))
+        if _is_blocked_teacher_attendance_update(session["name"], row_id, update):
+            continue
         update_attendance_status(
             course_session=session["name"],
             attendance_row=row_id,
@@ -707,7 +710,28 @@ def _get_attendance_status_options():
     if not field or not field.options:
         return []
 
-    return [option.strip() for option in field.options.splitlines() if option.strip()]
+    return [
+        option.strip()
+        for option in field.options.splitlines()
+        if option.strip() and option.strip() not in TEACHER_BLOCKED_ATTENDANCE_STATUSES
+    ]
+
+
+def _is_blocked_teacher_attendance_update(course_session, row_id, update):
+    status = (update.get("status") or "").strip()
+    if status not in TEACHER_BLOCKED_ATTENDANCE_STATUSES:
+        return False
+
+    current = frappe.db.get_value(
+        ATTENDANCE_DOCTYPE,
+        {"name": row_id, "course_session": course_session},
+        ["status", "comments"],
+        as_dict=True,
+    )
+    if current and current.status == status and (current.comments or "") == (update.get("comments") or ""):
+        return True
+
+    frappe.throw(_("Teachers cannot mark attendance as {0}.").format(status))
 
 
 def _parse_attendance_updates(updates):
