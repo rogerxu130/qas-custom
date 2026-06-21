@@ -4,6 +4,7 @@ from qas_custom.services.campus_admin import (
 	add_campus_admin_inquiry_note_data,
 	convert_campus_admin_inquiry_data,
 	get_campus_admin_csrf_token_data,
+	get_campus_admin_contacts_data,
 	get_campus_admin_conversion_sessions_data,
 	get_campus_admin_dashboard_data,
 	get_campus_admin_inquiries_data,
@@ -48,6 +49,17 @@ def campus_admin_get_inquiries(status=None, inquiry_type=None, from_date=None, t
 @frappe.whitelist()
 def campus_admin_get_inquiry(inquiry=None):
 	return get_campus_admin_inquiry_data(inquiry=inquiry)
+
+
+@frappe.whitelist()
+def campus_admin_get_contacts(from_date=None, to_date=None, campus=None, course_session=None, query=None):
+	return get_campus_admin_contacts_data(
+		from_date=from_date,
+		to_date=to_date,
+		campus=campus,
+		course_session=course_session,
+		query=query,
+	)
 
 
 @frappe.whitelist()

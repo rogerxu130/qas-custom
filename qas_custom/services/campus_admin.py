@@ -98,6 +98,101 @@ def get_campus_admin_inquiry_data(inquiry=None):
 	return build_inquiry_detail(inquiry)
 
 
+def get_campus_admin_contacts_data(from_date=None, to_date=None, campus=None, course_session=None, query=None):
+	profile = _require_campus_admin_profile()
+	campuses = _filter_requested_campus(profile["campuses"], campus)
+	start_date = getdate(from_date or today())
+	end_date = getdate(to_date or add_days(start_date, 14))
+
+	timeslots = frappe.get_all(
+		"Weekly Timeslot",
+		filters={"campus": ["in", campuses]},
+		fields=["name", "course", "campus", "classroom", "teacher", "day_of_week", "start_time", "end_time"],
+	)
+	if not timeslots:
+		return {"sessions": [], "contacts": []}
+
+	timeslot_map = {row.name: row for row in timeslots}
+	session_filters = {"weekly_timeslot": ["in", list(timeslot_map.keys())]}
+	if course_session:
+		session_filters["name"] = course_session
+	else:
+		session_filters["session_date"] = ["between", [start_date, end_date]]
+
+	sessions = frappe.get_all(
+		"Course Sessions",
+		filters=session_filters,
+		fields=["name", "weekly_timeslot", "session_date", "status"],
+		order_by="session_date asc, modified asc",
+	)
+	if not sessions:
+		return {"sessions": [], "contacts": []}
+
+	session_map = {row.name: row for row in sessions}
+	attendance_rows = get_attendance_entries(
+		list(session_map.keys()),
+		fields=[
+			"name",
+			"course_session",
+			"student",
+			"enrollment_type",
+			"status",
+			"comments",
+			"makeup_voucher",
+			"source_doctype",
+			"source_document",
+		],
+	)
+	student_map = _get_student_map([row.student for row in attendance_rows if row.student])
+	parent_map = _get_parent_map([student.guardian for student in student_map.values() if student.get("guardian")])
+
+	contacts = []
+	for attendance in attendance_rows:
+		session = session_map.get(attendance.course_session)
+		timeslot = timeslot_map.get(session.weekly_timeslot) if session else None
+		student = student_map.get(attendance.student)
+		parent = parent_map.get(student.guardian) if student and student.get("guardian") else None
+		item = {
+			"attendance_entry": attendance.name,
+			"course_session": attendance.course_session,
+			"session_date": str(session.session_date) if session else None,
+			"session_status": session.status if session else None,
+			"course": timeslot.course if timeslot else None,
+			"campus": timeslot.campus if timeslot else None,
+			"classroom": timeslot.classroom if timeslot else None,
+			"teacher": timeslot.teacher if timeslot else None,
+			"day_of_week": timeslot.day_of_week if timeslot else None,
+			"start_time": str(timeslot.start_time) if timeslot else None,
+			"end_time": str(timeslot.end_time) if timeslot else None,
+			"student": attendance.student,
+			"student_name": student.get("student_name") if student else attendance.student,
+			"parent": student.get("guardian") if student else None,
+			"parent_name": parent.get("parent_name") if parent else None,
+			"phone": parent.get("mobile_number") if parent else None,
+			"email": (parent.get("email") or parent.get("email_id")) if parent else None,
+			"enrollment_type": attendance.enrollment_type,
+			"attendance_status": attendance.status,
+			"source_doctype": attendance.source_doctype,
+			"source_document": attendance.source_document,
+			"makeup_voucher": attendance.makeup_voucher,
+			"comments": attendance.comments,
+		}
+		if _contact_matches_query(item, query):
+			contacts.append(item)
+
+	session_counts = {}
+	for item in contacts:
+		session_counts[item["course_session"]] = session_counts.get(item["course_session"], 0) + 1
+
+	return {
+		"sessions": [
+			_build_contact_session_item(session, timeslot_map.get(session.weekly_timeslot), session_counts.get(session.name, 0))
+			for session in sessions
+		],
+		"contacts": contacts,
+	}
+
+
 def add_campus_admin_inquiry_note_data(inquiry=None, note=None):
 	_require_inquiry_access(inquiry)
 	return add_inquiry_note_core(inquiry, note, actor=frappe.session.user)
@@ -438,14 +533,56 @@ def _get_parent_map(parent_ids):
 	parent_ids = sorted({parent_id for parent_id in parent_ids if parent_id})
 	if not parent_ids:
 		return {}
+	fields = _safe_fields("Parent", ["name", "parent_name", "mobile_number", "email", "email_id"])
 	return {
 		row.name: row
 		for row in frappe.get_all(
 			"Parent",
 			filters={"name": ["in", parent_ids]},
-			fields=["name", "parent_name", "mobile_number"],
+			fields=fields,
 		)
 	}
+
+
+def _build_contact_session_item(session, timeslot, contact_count=0):
+	return {
+		"id": session.name,
+		"course_session": session.name,
+		"session_date": str(session.session_date) if session.session_date else None,
+		"status": session.status,
+		"course": timeslot.course if timeslot else None,
+		"campus": timeslot.campus if timeslot else None,
+		"classroom": timeslot.classroom if timeslot else None,
+		"teacher": timeslot.teacher if timeslot else None,
+		"start_time": str(timeslot.start_time) if timeslot else None,
+		"end_time": str(timeslot.end_time) if timeslot else None,
+		"student_count": contact_count,
+	}
+
+
+def _contact_matches_query(item, query=None):
+	if not query:
+		return True
+	needle = str(query).strip().lower()
+	if not needle:
+		return True
+	values = [
+		item.get("student"),
+		item.get("student_name"),
+		item.get("parent"),
+		item.get("parent_name"),
+		item.get("phone"),
+		item.get("email"),
+		item.get("course"),
+		item.get("course_session"),
+		item.get("enrollment_type"),
+	]
+	return any(needle in str(value).lower() for value in values if value)
+
+
+def _safe_fields(doctype, candidates):
+	meta = frappe.get_meta(doctype)
+	return [fieldname for fieldname in candidates if fieldname == "name" or meta.has_field(fieldname)]
 
 
 def _get_latest_note_map(inquiry_ids):
