@@ -4,7 +4,7 @@ from datetime import timedelta
 
 import frappe
 from frappe import _
-from frappe.utils import flt, getdate, nowdate
+from frappe.utils import flt, getdate, now_datetime, nowdate
 
 from qas_custom.services.class_attendance import create_attendance_entry
 from qas_custom.services.display_labels import get_student_display_code
@@ -121,6 +121,15 @@ def convert_inquiry_to_full_term_core(inquiry: str | None, course_session: str |
 	if inquiry_doc.meta.has_field("converted_invoice"):
 		inquiry_doc.converted_invoice = invoice.name
 	inquiry_doc.save(ignore_permissions=True)
+	_add_conversion_inquiry_note(
+		inquiry_doc=inquiry_doc,
+		enrollment=enrollment,
+		invoice=invoice,
+		session=session,
+		timeslot=timeslot,
+		remaining_session_count=len(remaining_sessions),
+		actor=actor,
+	)
 
 	frappe.db.commit()
 	return {
@@ -343,6 +352,58 @@ def _sync_invoice_student_summary(invoice):
 	labels = [get_student_display_code(student) or student for student in students]
 	summary = labels[0] if len(labels) == 1 else _("Multiple students: {0}").format(", ".join(labels))
 	_set_if_field(invoice, "student_summary", summary)
+
+
+def _add_conversion_inquiry_note(
+	inquiry_doc,
+	enrollment,
+	invoice,
+	session,
+	timeslot,
+	remaining_session_count: int,
+	actor=None,
+):
+	note_doc = frappe.new_doc("Inquiry Note")
+	note_doc.inquiry = inquiry_doc.name
+	note_doc.student = inquiry_doc.student
+	note_doc.note = _build_conversion_note(
+		enrollment=enrollment,
+		invoice=invoice,
+		session=session,
+		timeslot=timeslot,
+		remaining_session_count=remaining_session_count,
+	)
+	note_doc.author = actor or frappe.session.user
+	note_doc.edited_at = now_datetime()
+	_set_if_field(note_doc, "note_type", "System")
+	_set_if_field(note_doc, "source_doctype", "Enrollment")
+	_set_if_field(note_doc, "source_document", enrollment.name)
+	note_doc.flags.ignore_permissions = True
+	note_doc.insert()
+
+
+def _build_conversion_note(enrollment, invoice, session, timeslot, remaining_session_count: int):
+	start_date = session.session_date if session and session.get("session_date") else None
+	start_time = timeslot.start_time if timeslot and timeslot.get("start_time") else None
+	parts = [
+		_("Trial converted to full-term enrollment."),
+		_("Course: {0}").format(timeslot.course),
+		_("Term: {0}").format(timeslot.term),
+		_("Start session: {0}").format(session.name),
+	]
+	if start_date:
+		parts.append(_("Start date: {0}").format(start_date))
+	if start_time:
+		parts.append(_("Start time: {0}").format(start_time))
+	parts.extend(
+		[
+			_("Remaining sessions: {0}").format(remaining_session_count),
+			_("Enrollment: {0}").format(enrollment.name),
+			_("Draft invoice: {0}").format(invoice.name),
+			_("Draft invoice amount: {0}").format(flt(invoice.grand_total)),
+		]
+	)
+	return " ".join(str(part) for part in parts if part)
 
 
 def _link_invoice_to_enrollment(enrollment, invoice):
