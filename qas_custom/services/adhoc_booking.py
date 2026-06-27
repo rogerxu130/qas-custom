@@ -11,10 +11,8 @@ from qas_custom.services.adhoc_attendance import (
 	remove_adhoc_attendance_for_booking,
 )
 from qas_custom.services.adhoc_finance import (
-	charge_booking_hold,
 	get_customer_balance_summary,
-	hold_booking_amount,
-	release_booking_hold,
+	validate_booking_credit,
 )
 
 MINIMUM_NOTICE_HOURS = 72
@@ -141,7 +139,6 @@ def create_booking_data(student=None, course_session=None, confirmed_rules=0):
 			"pricing_source": "Trial Class Fee",
 			"status": "Reserved",
 			"payment_status": "No Charge Yet",
-			"balance_hold_amount": 0,
 			"cancellable_until": cancellable_until,
 			"created_by_portal_user": frappe.session.user,
 		}
@@ -150,9 +147,7 @@ def create_booking_data(student=None, course_session=None, confirmed_rules=0):
 	add_booking_history(booking.name, "booking_created", message="Adhoc booking created from portal.")
 
 	try:
-		hold = hold_booking_amount(booking)
-		if hold:
-			add_booking_history(booking.name, "balance_held", new_value=str(hold.amount))
+		validate_booking_credit(booking)
 		attendance_entry = add_adhoc_attendance_entry(session.name, selected_student, booking.name)
 		add_booking_history(booking.name, "attendance_entry_created", new_value=attendance_entry)
 		booking.save(ignore_permissions=True)
@@ -206,10 +201,8 @@ def cancel_booking_data(booking=None, reason=None):
 			"manual_adjustment",
 			message="Attendance row was not found during cancellation.",
 		)
-	release_booking_hold(doc)
-	add_booking_history(doc.name, "balance_released")
 	doc.status = "Cancelled"
-	doc.payment_status = "Released"
+	doc.payment_status = "No Charge Yet"
 	doc.cancelled_at = now_datetime()
 	doc.cancellation_reason = reason
 	doc.save(ignore_permissions=True)
@@ -227,19 +220,16 @@ def lock_due_bookings():
 	locked = []
 	for row in rows:
 		doc = frappe.get_doc("Adhoc Booking", row.name)
-		charged_count = charge_booking_hold(doc)
 		doc.status = "Locked"
 		doc.locked_at = now_datetime()
+		doc.payment_status = "Manual Review"
 		doc.save(ignore_permissions=True)
 		add_booking_history(doc.name, "booking_locked", message="Booking entered three-day lock window.")
-		if charged_count:
-			add_booking_history(doc.name, "balance_charged", message="Held amount converted to charged.")
-		else:
-			add_booking_history(
-				doc.name,
-				"manual_adjustment",
-				message="Booking locked without a confirmed balance hold; finance review is required.",
-			)
+		add_booking_history(
+			doc.name,
+			"manual_adjustment",
+			message="Booking locked and requires store credit review.",
+		)
 		locked.append(doc.name)
 	return {"locked": locked}
 

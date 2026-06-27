@@ -21,7 +21,6 @@
   "pricing_source",
   "status",
   "payment_status",
-  "balance_hold_amount",
   "lock_section",
   "locked_at",
   "cancellable_until",
@@ -131,13 +130,8 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Payment Status",
-   "options": "No Charge Yet\nHeld\nCharged\nReleased\nManual Review",
+   "options": "No Charge Yet\nManual Review\nCharged",
    "reqd": 1
-  },
-  {
-   "fieldname": "balance_hold_amount",
-   "fieldtype": "Currency",
-   "label": "Balance Hold Amount"
   },
   {
    "fieldname": "lock_section",
