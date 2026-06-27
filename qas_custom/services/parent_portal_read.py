@@ -6,6 +6,10 @@ from datetime import datetime
 import frappe
 from frappe.utils import getdate, get_time, now_datetime, today
 
+from qas_custom.modules.course_schedule.queries import (
+    get_teacher_name_map as _get_teacher_name_map,
+    get_weekly_timeslot_map as _get_weekly_timeslot_map,
+)
 from qas_custom.services.display_labels import get_makeup_voucher_label, get_student_display_name
 
 
@@ -40,26 +44,6 @@ def _validate_student_filter(student: str | None, students: list[dict]) -> str |
     if student not in allowed:
         frappe.throw("This student is not linked to the current parent account.", frappe.PermissionError)
     return student
-
-
-def _get_weekly_timeslot_map(timeslot_ids: list[str]):
-    if not timeslot_ids:
-        return {}
-
-    rows = frappe.get_all(
-        "Weekly Timeslot",
-        filters={"name": ["in", timeslot_ids]},
-        fields=["name", "course", "campus", "classroom", "teacher", "day_of_week", "start_time", "end_time"],
-    )
-    return {row["name"]: row for row in rows}
-
-
-def _get_teacher_name_map(teacher_ids: list[str]):
-    if not teacher_ids:
-        return {}
-
-    rows = frappe.get_all("Teacher", filters={"name": ["in", teacher_ids]}, fields=["name", "teacher_name"])
-    return {row["name"]: row.get("teacher_name") or row["name"] for row in rows}
 
 
 def get_parent_schedule_data(student=None):

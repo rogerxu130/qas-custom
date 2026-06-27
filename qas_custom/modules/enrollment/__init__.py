@@ -1,0 +1,1 @@
+"""Enrollment domain module."""

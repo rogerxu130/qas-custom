@@ -12,17 +12,14 @@ from qas_custom.services.billing_enrollment import (
 	convert_inquiry_to_full_term_core,
 	mark_inquiry_inactive_core,
 )
-from qas_custom.services.class_attendance import (
-	create_attendance_entry,
-	get_attendance_entry_by_source,
-	remove_attendance_entries_by_source,
+from qas_custom.modules.attendance.commands import (
+	ensure_trial_inquiry_attendance_entry,
+	remove_trial_inquiry_attendance_entries,
 )
 
 
 INQUIRY_TYPES = {"Trial Lesson", "School Visit"}
 ADMIN_ROLES = {"System Manager", "School Admin"}
-TRIAL_ENROLLMENT_TYPE = "Trial"
-DEFAULT_ATTENDANCE_STATUS = "To be started"
 NEEDS_REVIEW_STATUS = "Needs Review"
 DAY_ABBREVIATIONS = {
 	"mon": "Monday",
@@ -907,11 +904,11 @@ def sync_inquiry_course_session(inquiry_doc):
 
 	if inquiry_doc.status == "Cancelled":
 		if not inquiry_doc.is_new():
-			remove_attendance_entries_by_source("Inquiry", inquiry_doc.name)
+			remove_trial_inquiry_attendance_entries(inquiry_doc.name)
 		return
 
 	if old_course_session and old_course_session != inquiry_doc.course_session:
-		remove_attendance_entries_by_source("Inquiry", inquiry_doc.name)
+		remove_trial_inquiry_attendance_entries(inquiry_doc.name)
 
 	if not inquiry_doc.course_session:
 		return
@@ -930,25 +927,7 @@ def sync_inquiry_course_session(inquiry_doc):
 
 
 def ensure_inquiry_attendance_entry(inquiry_doc):
-	if inquiry_doc.inquiry_type != "Trial Lesson":
-		return
-	if inquiry_doc.status == "Cancelled":
-		return
-	if not inquiry_doc.course_session or not inquiry_doc.student:
-		return
-
-	if get_attendance_entry_by_source("Inquiry", inquiry_doc.name, course_session=inquiry_doc.course_session):
-		return
-	create_attendance_entry(
-		course_session=inquiry_doc.course_session,
-		student=inquiry_doc.student,
-		enrollment_type=TRIAL_ENROLLMENT_TYPE,
-		source_doctype="Inquiry",
-		source_document=inquiry_doc.name,
-		status=DEFAULT_ATTENDANCE_STATUS,
-		comments=f"Added from Inquiry {inquiry_doc.name}",
-		prevent_student_duplicate=True,
-	)
+	return ensure_trial_inquiry_attendance_entry(inquiry_doc)
 
 
 def _apply_session_to_inquiry(inquiry_doc, session_context):
