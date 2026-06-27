@@ -11,6 +11,7 @@ from qas_custom.services.billing_enrollment import (
 	mark_inquiry_inactive_core,
 )
 from qas_custom.services.class_attendance import get_attendance_entries
+from qas_custom.services.display_labels import get_makeup_voucher_label, get_student_display_name
 from qas_custom.services.inquiry import (
 	add_inquiry_note_core,
 	build_inquiry_detail,
@@ -165,7 +166,7 @@ def get_campus_admin_contacts_data(from_date=None, to_date=None, campus=None, co
 			"start_time": str(timeslot.start_time) if timeslot else None,
 			"end_time": str(timeslot.end_time) if timeslot else None,
 			"student": attendance.student,
-			"student_name": student.get("student_name") if student else attendance.student,
+			"student_name": get_student_display_name(student) if student else attendance.student,
 			"parent": student.get("guardian") if student else None,
 			"parent_name": parent.get("parent_name") if parent else None,
 			"phone": parent.get("mobile_number") if parent else None,
@@ -175,6 +176,7 @@ def get_campus_admin_contacts_data(from_date=None, to_date=None, campus=None, co
 			"source_doctype": attendance.source_doctype,
 			"source_document": attendance.source_document,
 			"makeup_voucher": attendance.makeup_voucher,
+			"makeup_voucher_label": get_makeup_voucher_label(attendance.makeup_voucher),
 			"comments": attendance.comments,
 		}
 		if _contact_matches_query(item, query):
@@ -183,11 +185,17 @@ def get_campus_admin_contacts_data(from_date=None, to_date=None, campus=None, co
 	session_counts = {}
 	for item in contacts:
 		session_counts[item["course_session"]] = session_counts.get(item["course_session"], 0) + 1
+	visible_sessions = []
+	for session in sessions:
+		timeslot = timeslot_map.get(session.weekly_timeslot)
+		if query and not session_counts.get(session.name) and not _contact_session_matches_query(session, timeslot, query):
+			continue
+		visible_sessions.append(session)
 
 	return {
 		"sessions": [
 			_build_contact_session_item(session, timeslot_map.get(session.weekly_timeslot), session_counts.get(session.name, 0))
-			for session in sessions
+			for session in visible_sessions
 		],
 		"contacts": contacts,
 	}
@@ -419,7 +427,7 @@ def _get_attendance_dashboard_items(campuses, start_date, end_date, enrollment_t
 			{
 				"type": "makeup_booking" if enrollment_type == "Makeup" else "adhoc_booking",
 				"student": attendance.student,
-				"student_name": student.get("student_name") if student else attendance.student,
+				"student_name": get_student_display_name(student) if student else attendance.student,
 				"parent": student.get("guardian") if student else None,
 				"contact_name": parent.get("parent_name") if parent else None,
 				"phone": parent.get("mobile_number") if parent else None,
@@ -434,6 +442,7 @@ def _get_attendance_dashboard_items(campuses, start_date, end_date, enrollment_t
 				"attendance_entry": attendance.name,
 				"latest_note": attendance.comments,
 				"makeup_voucher": attendance.makeup_voucher,
+				"makeup_voucher_label": get_makeup_voucher_label(attendance.makeup_voucher),
 			}
 		)
 	return items
@@ -524,7 +533,7 @@ def _get_student_map(student_ids):
 		for row in frappe.get_all(
 			"Student",
 			filters={"name": ["in", student_ids]},
-			fields=["name", "student_name", "guardian"],
+			fields=_safe_fields("Student", ["name", "student_name", "student_code", "guardian"]),
 		)
 	}
 
@@ -574,8 +583,37 @@ def _contact_matches_query(item, query=None):
 		item.get("phone"),
 		item.get("email"),
 		item.get("course"),
+		item.get("campus"),
+		item.get("classroom"),
+		item.get("teacher"),
+		item.get("day_of_week"),
+		item.get("session_status"),
+		item.get("attendance_status"),
 		item.get("course_session"),
 		item.get("enrollment_type"),
+		item.get("source_doctype"),
+		item.get("source_document"),
+	]
+	return any(needle in str(value).lower() for value in values if value)
+
+
+def _contact_session_matches_query(session, timeslot, query=None):
+	if not query:
+		return True
+	needle = str(query).strip().lower()
+	if not needle:
+		return True
+	values = [
+		session.name,
+		session.status,
+		session.session_date,
+		timeslot.course if timeslot else None,
+		timeslot.campus if timeslot else None,
+		timeslot.classroom if timeslot else None,
+		timeslot.teacher if timeslot else None,
+		timeslot.day_of_week if timeslot else None,
+		timeslot.start_time if timeslot else None,
+		timeslot.end_time if timeslot else None,
 	]
 	return any(needle in str(value).lower() for value in values if value)
 

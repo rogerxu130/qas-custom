@@ -12,6 +12,7 @@ from qas_custom.services.billing_enrollment import (
 	mark_inquiry_inactive_core,
 )
 from qas_custom.services.class_attendance import get_attendance_entries
+from qas_custom.services.display_labels import get_student_display_code
 from qas_custom.services.inquiry import (
 	add_inquiry_note_core,
 	build_inquiry_detail,
@@ -19,6 +20,7 @@ from qas_custom.services.inquiry import (
 	mark_inquiry_status_core,
 	reschedule_inquiry_core,
 )
+from qas_custom.services.teacher_revenue_share import get_teacher_revenue_share_session_rows
 
 
 ADMIN_ROLES = {"School Admin", "System Manager"}
@@ -288,11 +290,17 @@ def create_school_admin_manual_invoice_data(payload=None):
 	invoice.due_date = payload.get("due_date") or nowdate()
 	_set_if_field(invoice, "parent", payload.get("parent"))
 	_set_if_field(invoice, "student", payload.get("student"))
+	_set_if_field(invoice, "primary_student", payload.get("student"))
 	_set_if_field(invoice, "enrollment", payload.get("enrollment"))
 	_set_if_field(invoice, "course", payload.get("course"))
+	_set_if_field(invoice, "qas_invoice_type", payload.get("qas_invoice_type") or payload.get("invoice_type") or "Other")
+	_set_if_field(invoice, "source_doctype", payload.get("source_doctype"))
+	_set_if_field(invoice, "source_document", payload.get("source_document"))
+	_set_if_field(invoice, "billing_note", payload.get("billing_note"))
 	_set_if_field(invoice, "source_type", payload.get("source_type") or "Manual")
 	_set_if_field(invoice, "remarks", payload.get("remarks"))
 	_apply_invoice_items(invoice, items)
+	_sync_invoice_student_summary(invoice)
 	invoice.insert(ignore_permissions=True)
 	_add_comment("Sales Invoice", invoice.name, "Manual invoice created by School Admin.")
 	frappe.db.commit()
@@ -311,11 +319,25 @@ def update_school_admin_draft_invoice_data(invoice=None, payload=None):
 	for fieldname in ["customer", "due_date", "remarks"]:
 		if fieldname in payload:
 			doc.set(fieldname, payload.get(fieldname))
-	for fieldname in ["parent", "student", "enrollment", "course", "term", "source_inquiry", "source_type"]:
+	for fieldname in [
+		"parent",
+		"student",
+		"primary_student",
+		"enrollment",
+		"course",
+		"term",
+		"qas_invoice_type",
+		"source_doctype",
+		"source_document",
+		"billing_note",
+		"source_inquiry",
+		"source_type",
+	]:
 		if fieldname in payload:
 			_set_if_field(doc, fieldname, payload.get(fieldname))
 	if "items" in payload:
 		_apply_invoice_items(doc, payload.get("items") or [])
+	_sync_invoice_student_summary(doc)
 	doc.save(ignore_permissions=True)
 	_add_comment("Sales Invoice", doc.name, "Draft invoice updated by School Admin.")
 	frappe.db.commit()
@@ -414,6 +436,9 @@ def get_school_admin_weekly_timeslots_data(term=None, course=None, campus=None, 
 			"campus",
 			"classroom",
 			"teacher",
+			"revenue_share_enabled",
+			"revenue_share_teacher",
+			"revenue_share_percent",
 			"day_of_week",
 			"start_time",
 			"end_time",
@@ -481,6 +506,29 @@ def get_school_admin_course_session_data(course_session=None):
 	if payload.get("weekly_timeslot"):
 		payload["weekly_timeslot_detail"] = _get_timeslot_summary(payload.get("weekly_timeslot"))
 	return payload
+
+
+def get_school_admin_teacher_revenue_share_sessions_data(
+	from_date=None,
+	to_date=None,
+	teacher=None,
+	campus=None,
+	course=None,
+	owned_only=1,
+	limit=200,
+):
+	_require_school_admin()
+	return {
+		"items": get_teacher_revenue_share_session_rows(
+			from_date=from_date,
+			to_date=to_date,
+			teacher=teacher,
+			campus=campus,
+			course=course,
+			owned_only=owned_only,
+			limit=limit,
+		)
+	}
 
 
 def _require_school_admin():
@@ -799,8 +847,11 @@ def _get_invoice_rows(status=None, customer=None, parent=None, students=None, so
 		filters["customer"] = customer
 	if parent and _has_field("Sales Invoice", "parent"):
 		filters["parent"] = parent
-	if students and _has_field("Sales Invoice", "student"):
-		filters["student"] = ["in", students]
+	if students:
+		invoice_names = _invoice_names_for_students(students)
+		if not invoice_names:
+			return []
+		filters["name"] = ["in", sorted(invoice_names)]
 	if source:
 		_apply_invoice_source_filter(filters, source)
 	fields = _safe_fields(
@@ -816,9 +867,15 @@ def _get_invoice_rows(status=None, customer=None, parent=None, students=None, so
 			"outstanding_amount",
 			"parent",
 			"student",
+			"primary_student",
+			"student_summary",
 			"enrollment",
 			"course",
 			"term",
+			"qas_invoice_type",
+			"source_doctype",
+			"source_document",
+			"billing_note",
 			"source_inquiry",
 		],
 	)
@@ -853,6 +910,38 @@ def _apply_invoice_source_filter(filters, source):
 		filters["source_type"] = "Manual"
 
 
+def _invoice_names_for_students(students):
+	names = set()
+	if _has_field("Sales Invoice", "student"):
+		names.update(
+			frappe.get_all(
+				"Sales Invoice",
+				filters={"student": ["in", students]},
+				pluck="name",
+				limit_page_length=0,
+			)
+		)
+	if _has_field("Sales Invoice", "primary_student"):
+		names.update(
+			frappe.get_all(
+				"Sales Invoice",
+				filters={"primary_student": ["in", students]},
+				pluck="name",
+				limit_page_length=0,
+			)
+		)
+	if _doctype_available("Sales Invoice Item") and _has_field("Sales Invoice Item", "student"):
+		names.update(
+			frappe.get_all(
+				"Sales Invoice Item",
+				filters={"student": ["in", students]},
+				pluck="parent",
+				limit_page_length=0,
+			)
+		)
+	return names
+
+
 def _build_invoice_payload(doc):
 	doc = frappe.get_doc("Sales Invoice", doc) if isinstance(doc, str) else doc
 	payload = _document_payload(doc)
@@ -881,7 +970,7 @@ def _apply_invoice_items(invoice, items):
 		item_code = row.get("item_code") or row.get("item")
 		if not item_code:
 			frappe.throw(_("Invoice item code is required."))
-		invoice.append(
+		item = invoice.append(
 			"items",
 			{
 				"item_code": item_code,
@@ -891,6 +980,32 @@ def _apply_invoice_items(invoice, items):
 				"rate": flt(row.get("rate") or 0),
 			},
 		)
+		student = row.get("student")
+		_set_if_field(item, "qas_line_type", row.get("qas_line_type") or row.get("line_type") or "Other")
+		_set_if_field(item, "student", student)
+		_set_if_field(item, "student_code", row.get("student_code") or (get_student_display_code(student) if student else None))
+		_set_if_field(item, "enrollment", row.get("enrollment"))
+		_set_if_field(item, "course", row.get("course"))
+		_set_if_field(item, "term", row.get("term"))
+		_set_if_field(item, "course_session", row.get("course_session"))
+		_set_if_field(item, "session_count", row.get("session_count"))
+
+
+def _sync_invoice_student_summary(invoice):
+	students = []
+	seen = set()
+	for item in invoice.get("items", []):
+		student = item.get("student") if hasattr(item, "get") else None
+		if student and student not in seen:
+			seen.add(student)
+			students.append(student)
+	if not students:
+		return
+
+	_set_if_field(invoice, "primary_student", students[0])
+	labels = [get_student_display_code(student) or student for student in students]
+	summary = labels[0] if len(labels) == 1 else _("Multiple students: {0}").format(", ".join(labels))
+	_set_if_field(invoice, "student_summary", summary)
 
 
 def _mark_draft_invoice_cancelled(doc, reason):
@@ -987,7 +1102,19 @@ def _get_course_session_rows(
 			return []
 		if not weekly_timeslot:
 			filters["weekly_timeslot"] = ["in", timeslot_ids]
-	fields = _safe_fields("Course Sessions", ["name", "weekly_timeslot", "session_date", "status", "modified"])
+	fields = _safe_fields(
+		"Course Sessions",
+		[
+			"name",
+			"weekly_timeslot",
+			"session_date",
+			"status",
+			"revenue_share_override",
+			"revenue_share_teacher",
+			"revenue_share_percent",
+			"modified",
+		],
+	)
 	rows = frappe.get_all(
 		"Course Sessions",
 		filters=filters,
@@ -1026,7 +1153,21 @@ def _get_timeslot_map(timeslot_ids):
 		return {}
 	fields = _safe_fields(
 		"Weekly Timeslot",
-		["name", "term", "course", "campus", "classroom", "teacher", "day_of_week", "start_time", "end_time", "status"],
+		[
+			"name",
+			"term",
+			"course",
+			"campus",
+			"classroom",
+			"teacher",
+			"day_of_week",
+			"start_time",
+			"end_time",
+			"status",
+			"revenue_share_enabled",
+			"revenue_share_teacher",
+			"revenue_share_percent",
+		],
 	)
 	rows = frappe.get_all("Weekly Timeslot", filters={"name": ["in", timeslot_ids]}, fields=fields)
 	return {row.name: _normalize_row_payload("Weekly Timeslot", row) for row in rows}

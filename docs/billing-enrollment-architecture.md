@@ -159,6 +159,38 @@ Generation paths:
 
 Draft invoices are created for School Admin review. Parent Portal should continue showing only submitted invoices unless a later requirement asks to expose draft invoices.
 
+QAS should not fork or replace ERPNext `Sales Invoice` / `Sales Invoice Item`. The standard ERPNext invoice remains the accounting record, and QAS-specific context is added through custom fields.
+
+Invoice header is family/customer-level:
+
+- `customer`
+- `parent`
+- `primary_student` only as a convenience/list hint
+- `student_summary`
+- `qas_invoice_type`: Course, Store Credit Top-up, Holiday Program, Material Order, Other
+- `source_doctype`
+- `source_document`
+- `billing_note`
+
+The authoritative student/course context belongs on each `Sales Invoice Item` row:
+
+- `qas_line_type`: Course Fee, Adhoc Credit, Holiday Program, Material, Other
+- `student`
+- `student_code`
+- `enrollment`
+- `course`
+- `term`
+- `course_session`
+- `session_count`
+
+This supports one parent receiving a single draft invoice containing fees for multiple children. The item description must also be human-readable, for example:
+
+```text
+Isabella02 - Anime Art - Intermediate - Term 3 prorata, 5 sessions
+```
+
+Material orders can use the same ERPNext invoice object, but their item rows may leave student/enrollment/course fields blank and use `qas_line_type = Material`. Course store credit rules apply only to course-related invoice types/items, not to material/order invoices.
+
 ## Full-Term Conversion Flow
 
 Campus Admin can convert a completed trial lead.

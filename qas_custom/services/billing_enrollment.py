@@ -7,6 +7,7 @@ from frappe import _
 from frappe.utils import flt, getdate, nowdate
 
 from qas_custom.services.class_attendance import create_attendance_entry
+from qas_custom.services.display_labels import get_student_display_code
 
 
 FULL_TERM = "Full-Term"
@@ -249,27 +250,99 @@ def _create_prorata_invoice(
 	item_code = invoice_context["item_code"]
 	unit_rate = invoice_context["unit_rate"]
 
-	invoice = frappe.new_doc("Sales Invoice")
-	invoice.customer = customer
-	invoice.due_date = nowdate()
-	_set_if_field(invoice, "student", inquiry_doc.student)
+	invoice = _get_or_create_course_invoice(customer, inquiry_doc.parent)
 	_set_if_field(invoice, "parent", inquiry_doc.parent)
-	_set_if_field(invoice, "enrollment", enrollment.name)
-	_set_if_field(invoice, "course", course)
-	_set_if_field(invoice, "term", term)
+	_set_if_field(invoice, "qas_invoice_type", "Course")
+	_set_course_invoice_source(invoice, inquiry_doc.name)
 	_set_if_field(invoice, "source_inquiry", inquiry_doc.name)
-	invoice.append(
+
+	student_code = get_student_display_code(inquiry_doc.student) or inquiry_doc.student
+	description = _(
+		"{0} - {1} - {2} prorata, {3} sessions from {4}"
+	).format(student_code, course, term, remaining_session_count, start_session)
+	item = invoice.append(
 		"items",
 		{
 			"item_code": item_code,
 			"item_name": course,
-			"description": _("Pro rata enrollment for {0} from session {1}").format(course, start_session),
+			"description": description,
 			"qty": remaining_session_count,
 			"rate": unit_rate,
 		},
 	)
-	invoice.insert(ignore_permissions=True)
+	_set_if_field(item, "qas_line_type", "Course Fee")
+	_set_if_field(item, "student", inquiry_doc.student)
+	_set_if_field(item, "student_code", student_code)
+	_set_if_field(item, "enrollment", enrollment.name)
+	_set_if_field(item, "course", course)
+	_set_if_field(item, "term", term)
+	_set_if_field(item, "course_session", start_session)
+	_set_if_field(item, "session_count", remaining_session_count)
+	_sync_invoice_student_summary(invoice)
+
+	if _is_new_doc(invoice):
+		invoice.insert(ignore_permissions=True)
+	else:
+		invoice.save(ignore_permissions=True)
 	return invoice
+
+
+def _set_course_invoice_source(invoice, inquiry: str):
+	current_source = invoice.get("source_document") if hasattr(invoice, "get") else None
+	if not current_source:
+		_set_if_field(invoice, "source_doctype", "Inquiry")
+		_set_if_field(invoice, "source_document", inquiry)
+		_set_if_field(invoice, "billing_note", _("Draft course invoice generated from trial conversion."))
+	elif current_source != inquiry:
+		_set_if_field(
+			invoice,
+			"billing_note",
+			_("Draft course invoice contains multiple course billing items. See item rows for student and enrollment details."),
+		)
+
+
+def _get_or_create_course_invoice(customer: str, parent: str | None = None):
+	filters = {"customer": customer, "docstatus": 0}
+	if parent and _has_field("Sales Invoice", "parent"):
+		filters["parent"] = parent
+	if _has_field("Sales Invoice", "qas_invoice_type"):
+		filters["qas_invoice_type"] = "Course"
+	if _has_field("Sales Invoice", "status"):
+		filters["status"] = ["!=", "Cancelled"]
+
+	rows = frappe.get_all(
+		"Sales Invoice",
+		filters=filters,
+		fields=["name"],
+		order_by="modified desc",
+		limit=1,
+	)
+	if rows:
+		return frappe.get_doc("Sales Invoice", rows[0].name)
+
+	invoice = frappe.new_doc("Sales Invoice")
+	invoice.customer = customer
+	invoice.due_date = nowdate()
+	_set_if_field(invoice, "parent", parent)
+	_set_if_field(invoice, "qas_invoice_type", "Course")
+	return invoice
+
+
+def _sync_invoice_student_summary(invoice):
+	students = []
+	seen = set()
+	for item in invoice.get("items", []):
+		student = item.get("student") if hasattr(item, "get") else None
+		if student and student not in seen:
+			seen.add(student)
+			students.append(student)
+	if not students:
+		return
+
+	_set_if_field(invoice, "primary_student", students[0])
+	labels = [get_student_display_code(student) or student for student in students]
+	summary = labels[0] if len(labels) == 1 else _("Multiple students: {0}").format(", ".join(labels))
+	_set_if_field(invoice, "student_summary", summary)
 
 
 def _link_invoice_to_enrollment(enrollment, invoice):
@@ -362,6 +435,19 @@ def _clear_frappe_messages():
 def _set_if_field(doc, fieldname: str, value):
 	if doc.meta.has_field(fieldname):
 		doc.set(fieldname, value)
+
+
+def _has_field(doctype: str, fieldname: str):
+	try:
+		return frappe.get_meta(doctype).has_field(fieldname)
+	except Exception:
+		return False
+
+
+def _is_new_doc(doc):
+	if hasattr(doc, "is_new"):
+		return doc.is_new()
+	return bool(doc.get("__islocal"))
 
 
 def _build_session_option(session, timeslot):

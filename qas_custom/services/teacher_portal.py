@@ -12,6 +12,7 @@ from frappe.utils.file_manager import save_file
 
 from qas_custom.services.attendance import update_attendance_status
 from qas_custom.services.class_attendance import ATTENDANCE_DOCTYPE, get_attendance_entries
+from qas_custom.services.display_labels import get_makeup_voucher_label, get_student_display_name
 
 
 SPECIAL_ENROLLMENT_TYPES = {"Trial", "Makeup", "Pay-as-you-go"}
@@ -104,11 +105,12 @@ def get_teacher_session_detail_data(course_session=None):
             {
                 "row_id": row.get("name"),
                 "student": student_id,
-                "student_name": student.get("student_name") or student_id,
+                "student_name": get_student_display_name(student) or student_id,
                 "enrollment_type": row.get("enrollment_type"),
                 "status": row.get("status"),
                 "comments": row.get("comments") or "",
                 "makeup_voucher": row.get("makeup_voucher"),
+                "makeup_voucher_label": get_makeup_voucher_label(row.get("makeup_voucher")),
                 "source_doctype": row.get("source_doctype"),
                 "source_document": row.get("source_document"),
             }
@@ -530,9 +532,13 @@ def _get_student_map(student_ids: list[str]):
         for row in frappe.get_all(
             "Student",
             filters={"name": ["in", student_ids]},
-            fields=["name", "student_name"],
+            fields=_safe_fields("Student", ["name", "student_name", "student_code"]),
         )
     }
+
+
+def _safe_fields(doctype: str, candidates: list[str]):
+    return [fieldname for fieldname in candidates if frappe.db.has_column(doctype, fieldname)]
 
 
 def _get_homework_rows(course_session: str):

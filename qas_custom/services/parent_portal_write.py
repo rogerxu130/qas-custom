@@ -7,6 +7,7 @@ import frappe
 from frappe.utils import add_days, get_time, getdate, now_datetime, today
 
 from qas_custom.services.class_attendance import ATTENDANCE_DOCTYPE, create_attendance_entry
+from qas_custom.services.display_labels import get_makeup_voucher_label, sync_makeup_voucher_label
 from qas_custom.services.parent_portal_read import (
     _get_teacher_name_map,
     _get_parent_students,
@@ -51,10 +52,12 @@ def submit_parent_leave_request_data(student=None, course_session=None):
     leave_request.flags.ignore_permissions = True
     leave_request.insert()
     leave_request.reload()
+    voucher_label = sync_makeup_voucher_label(leave_request.get("makeup_voucher"))
 
     return {
         "leave_request": leave_request.name,
         "makeup_voucher": leave_request.get("makeup_voucher"),
+        "makeup_voucher_label": voucher_label or leave_request.get("makeup_voucher"),
         "session": {
             "session_id": session_doc.name,
             "student": selected_student,
@@ -70,39 +73,48 @@ def submit_parent_leave_request_data(student=None, course_session=None):
     }
 
 
-def get_parent_redeemable_sessions_data(voucher_id=None):
+def get_parent_redeemable_sessions_data(voucher_id=None, student=None):
     payload = _get_request_payload()
     voucher_id = voucher_id or payload.get("voucher_id")
+    student = student or payload.get("student") or payload.get("redeem_student")
 
     parent = _require_parent()
     voucher = _get_parent_makeup_voucher(voucher_id, parent.name)
     _validate_voucher_available_for_redeem(voucher)
+    students = _get_parent_students(parent.name)
+    selected_student = _get_redeem_student(student, voucher, students)
 
     return {
         "voucher": _build_makeup_voucher_payload(voucher),
-        "available_sessions": _get_redeemable_makeup_sessions(voucher),
+        "students": [_build_redeem_student_payload(row) for row in students],
+        "selected_student": selected_student,
+        "available_sessions": _get_redeemable_makeup_sessions(voucher, selected_student),
     }
 
 
-def redeem_parent_voucher_data(voucher_id=None, session_id=None):
+def redeem_parent_voucher_data(voucher_id=None, session_id=None, student=None):
     payload = _get_request_payload()
     voucher_id = voucher_id or payload.get("voucher_id")
     session_id = session_id or payload.get("session_id")
+    student = student or payload.get("student") or payload.get("redeem_student")
 
     if not session_id:
         frappe.throw("Please select a makeup session.")
 
     parent = _require_parent()
     voucher = _get_parent_makeup_voucher(voucher_id, parent.name)
+    students = _get_parent_students(parent.name)
+    selected_student = _get_redeem_student(student, voucher, students)
 
     if voucher.get("status") == "Used" and voucher.get("used_on_session") == session_id:
+        used_student = _get_voucher_used_by_student(voucher) or selected_student
         attendance_entry = create_attendance_entry(
             course_session=session_id,
-            student=voucher.student,
+            student=used_student,
             enrollment_type="Makeup",
             source_doctype="Makeup Voucher",
             source_document=voucher.name,
-            comments=f"Added from Makeup Voucher {voucher.name}",
+            comments=f"Added from Makeup Voucher {get_makeup_voucher_label(voucher)}",
             makeup_voucher=voucher.name,
         )
         return {
@@ -112,15 +124,15 @@ def redeem_parent_voucher_data(voucher_id=None, session_id=None):
         }
 
     _validate_voucher_available_for_redeem(voucher)
-    _validate_session_can_redeem_voucher(voucher, session_id)
+    _validate_session_can_redeem_voucher(voucher, session_id, selected_student)
 
     attendance_entry = create_attendance_entry(
         course_session=session_id,
-        student=voucher.student,
+        student=selected_student,
         enrollment_type="Makeup",
         source_doctype="Makeup Voucher",
         source_document=voucher.name,
-        comments=f"Added from Makeup Voucher {voucher.name}",
+        comments=f"Added from Makeup Voucher {get_makeup_voucher_label(voucher)}",
         makeup_voucher=voucher.name,
         prevent_student_duplicate=True,
     )
@@ -128,6 +140,9 @@ def redeem_parent_voucher_data(voucher_id=None, session_id=None):
     voucher.status = "Used"
     voucher.used_on_session = session_id
     voucher.used_date = today()
+    _set_voucher_used_by_student(voucher, selected_student)
+    if frappe.db.has_column("Makeup Voucher", "voucher_label"):
+        voucher.voucher_label = get_makeup_voucher_label({**voucher.as_dict(), "voucher_label": None})
     voucher.save(ignore_permissions=True)
 
     return {
@@ -183,7 +198,8 @@ def _validate_voucher_available_for_redeem(voucher):
         frappe.throw("This makeup voucher has expired.")
 
 
-def _get_redeemable_makeup_sessions(voucher):
+def _get_redeemable_makeup_sessions(voucher, student: str | None = None):
+    redeem_student = student or voucher.student
     session_rows = frappe.get_all(
         "Course Sessions",
         filters={
@@ -212,7 +228,7 @@ def _get_redeemable_makeup_sessions(voucher):
             continue
         if frappe.db.exists(
             ATTENDANCE_DOCTYPE,
-            {"course_session": session["name"], "student": voucher.student},
+            {"course_session": session["name"], "student": redeem_student},
         ):
             continue
 
@@ -233,9 +249,9 @@ def _get_redeemable_makeup_sessions(voucher):
     return sessions
 
 
-def _validate_session_can_redeem_voucher(voucher, session_id: str):
+def _validate_session_can_redeem_voucher(voucher, session_id: str, student: str):
     available_session_ids = {
-        row["session_id"] for row in _get_redeemable_makeup_sessions(voucher)
+        row["session_id"] for row in _get_redeemable_makeup_sessions(voucher, student)
     }
     if session_id not in available_session_ids:
         frappe.throw("This class session is not available for this makeup voucher.")
@@ -264,9 +280,13 @@ def _course_accepts_makeup_voucher(target_course: str | None, voucher_course: st
 
 
 def _build_makeup_voucher_payload(voucher):
+    voucher_label = get_makeup_voucher_label(voucher)
     return {
         "voucher_id": voucher.name,
+        "voucher_label": voucher_label,
         "student": voucher.get("student"),
+        "source_student": voucher.get("student"),
+        "used_by_student": _get_voucher_used_by_student(voucher),
         "course": voucher.get("course"),
         "status": voucher.get("status"),
         "issue_date": voucher.get("issue_date"),
@@ -275,6 +295,40 @@ def _build_makeup_voucher_payload(voucher):
         "used_date": voucher.get("used_date"),
         "leave_request": voucher.get("leave_request"),
     }
+
+
+def _build_redeem_student_payload(student):
+    return {
+        "name": student.get("name"),
+        "student_name": student.get("student_name"),
+        "student_code": student.get("student_code"),
+        "student_display": student.get("student_code") or student.get("student_name") or student.get("name"),
+        "age": student.get("age") or 0,
+        "status": student.get("status"),
+    }
+
+
+def _get_redeem_student(student: str | None, voucher, students) -> str:
+    student_names = {row["name"] for row in students}
+    preferred_student = student or voucher.student
+    if preferred_student not in student_names:
+        frappe.throw("This student is not linked to the current parent account.", frappe.PermissionError)
+    return preferred_student
+
+
+def _get_voucher_used_by_student(voucher):
+    if frappe.db.has_column("Makeup Voucher", "used_by_student"):
+        return voucher.get("used_by_student")
+    if frappe.db.has_column("Makeup Voucher", "redeemed_student"):
+        return voucher.get("redeemed_student")
+    return None
+
+
+def _set_voucher_used_by_student(voucher, student: str):
+    if frappe.db.has_column("Makeup Voucher", "used_by_student"):
+        voucher.used_by_student = student
+    elif frappe.db.has_column("Makeup Voucher", "redeemed_student"):
+        voucher.redeemed_student = student
 
 
 def _build_redeem_session_payload(session_id: str):

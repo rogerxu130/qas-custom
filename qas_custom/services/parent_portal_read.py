@@ -6,6 +6,8 @@ from datetime import datetime
 import frappe
 from frappe.utils import getdate, get_time, now_datetime, today
 
+from qas_custom.services.display_labels import get_makeup_voucher_label, get_student_display_name
+
 
 def _require_parent():
     if frappe.session.user == "Guest":
@@ -19,10 +21,13 @@ def _require_parent():
 
 
 def _get_parent_students(parent_name: str):
+    fields = ["name", "student_name", "age", "status"]
+    if frappe.db.has_column("Student", "student_code"):
+        fields.append("student_code")
     return frappe.get_all(
         "Student",
         filters={"guardian": parent_name},
-        fields=["name", "student_name", "age", "status"],
+        fields=fields,
         order_by="student_name asc",
     )
 
@@ -143,21 +148,27 @@ def get_parent_vouchers_data(student=None):
     if not student_names:
         return {"vouchers": []}
 
+    voucher_fields = [
+        "name",
+        "student",
+        "course",
+        "original_session",
+        "leave_request",
+        "status",
+        "issue_date",
+        "expiry_date",
+        "used_on_session",
+        "used_date",
+    ]
+    if frappe.db.has_column("Makeup Voucher", "used_by_student"):
+        voucher_fields.append("used_by_student")
+    if frappe.db.has_column("Makeup Voucher", "voucher_label"):
+        voucher_fields.append("voucher_label")
+
     vouchers = frappe.get_all(
         "Makeup Voucher",
         filters={"student": ["in", student_names]},
-        fields=[
-            "name",
-            "student",
-            "course",
-            "original_session",
-            "leave_request",
-            "status",
-            "issue_date",
-            "expiry_date",
-            "used_on_session",
-            "used_date",
-        ],
+        fields=voucher_fields,
         order_by="issue_date desc, modified desc",
     )
 
@@ -208,13 +219,16 @@ def get_parent_vouchers_data(student=None):
         payload.append(
             {
                 "voucher_id": voucher.get("name"),
+                "voucher_label": get_makeup_voucher_label(voucher),
                 "student": voucher.get("student"),
+                "student_display": get_student_display_name(voucher.get("student")),
                 "course": voucher.get("course"),
                 "status": voucher.get("status"),
                 "issue_date": voucher.get("issue_date"),
                 "expiry_date": voucher.get("expiry_date"),
                 "used_on_session": voucher.get("used_on_session"),
                 "used_date": voucher.get("used_date"),
+                "used_by_student": voucher.get("used_by_student"),
                 "leave_session_date": original_session.get("session_date") if original_session else None,
                 "leave_day_of_week": original_timeslot.get("day_of_week") if original_timeslot else None,
                 "leave_start_time": original_timeslot.get("start_time") if original_timeslot else None,
@@ -264,6 +278,14 @@ def get_parent_invoices_data():
                         "item_code": item.item_code,
                         "description": item.description,
                         "amount": float(item.amount or 0),
+                        "student": item.get("student"),
+                        "student_code": item.get("student_code"),
+                        "enrollment": item.get("enrollment"),
+                        "course": item.get("course"),
+                        "term": item.get("term"),
+                        "course_session": item.get("course_session"),
+                        "session_count": item.get("session_count"),
+                        "qas_line_type": item.get("qas_line_type"),
                     }
                     for item in doc.items
                 ],

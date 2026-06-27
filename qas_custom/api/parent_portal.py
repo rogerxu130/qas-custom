@@ -98,13 +98,13 @@ def parent_portal_get_vouchers(student=None):
 
 
 @frappe.whitelist()
-def parent_portal_get_redeemable_sessions(voucher_id=None):
-    return get_parent_redeemable_sessions_data(voucher_id=voucher_id)
+def parent_portal_get_redeemable_sessions(voucher_id=None, student=None):
+    return get_parent_redeemable_sessions_data(voucher_id=voucher_id, student=student)
 
 
 @frappe.whitelist()
-def parent_portal_redeem_voucher(voucher_id=None, session_id=None):
-    return redeem_parent_voucher_data(voucher_id=voucher_id, session_id=session_id)
+def parent_portal_redeem_voucher(voucher_id=None, session_id=None, student=None):
+    return redeem_parent_voucher_data(voucher_id=voucher_id, session_id=session_id, student=student)
 
 
 @frappe.whitelist()

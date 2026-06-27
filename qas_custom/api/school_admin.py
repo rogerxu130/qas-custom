@@ -18,6 +18,7 @@ from qas_custom.services.school_admin import (
 	get_school_admin_invoice_data,
 	get_school_admin_invoices_data,
 	get_school_admin_me_data,
+	get_school_admin_teacher_revenue_share_sessions_data,
 	get_school_admin_weekly_timeslot_data,
 	get_school_admin_weekly_timeslots_data,
 	mark_school_admin_inquiry_completed_data,
@@ -213,3 +214,24 @@ def school_admin_get_course_sessions(weekly_timeslot=None, term=None, course=Non
 @frappe.whitelist()
 def school_admin_get_course_session(course_session=None):
 	return get_school_admin_course_session_data(course_session=course_session)
+
+
+@frappe.whitelist()
+def school_admin_get_teacher_revenue_share_sessions(
+	from_date=None,
+	to_date=None,
+	teacher=None,
+	campus=None,
+	course=None,
+	owned_only=1,
+	limit=200,
+):
+	return get_school_admin_teacher_revenue_share_sessions_data(
+		from_date=from_date,
+		to_date=to_date,
+		teacher=teacher,
+		campus=campus,
+		course=course,
+		owned_only=owned_only,
+		limit=limit,
+	)
