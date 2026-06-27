@@ -1,5 +1,6 @@
 [pre_model_sync]
 qas_custom.patches.v2026_06_18_remove_enrollment_course_session
+qas_custom.patches.v2026_06_27_relax_payg_enrollment_fields
 # Patches added in this section will be executed before doctypes are migrated
 # Read docs to understand patches: https://frappeframework.com/docs/v14/user/en/database-migrations
 

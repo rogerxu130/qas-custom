@@ -17,7 +17,6 @@
   "status",
   "trial_session_date",
   "enrollment_date",
-  "pay_as_you_go_date",
   "billing_section",
   "invoice",
   "invoice_status",
@@ -50,24 +49,27 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Term",
-   "options": "Term",
-   "reqd": 1
+   "mandatory_depends_on": "eval:doc.enrollment_type=='Full-Term'",
+   "options": "Term"
   },
   {
+   "description": "Required for Full-Term enrollments. Pay-as-you-go students can book multiple courses and should not be locked to one course here.",
    "fieldname": "course",
    "fieldtype": "Link",
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Course",
-   "options": "Course",
-   "reqd": 1
+   "mandatory_depends_on": "eval:doc.enrollment_type=='Full-Term'",
+   "options": "Course"
   },
   {
+   "description": "Required for Full-Term enrollments. Pay-as-you-go attendance is created from individual Adhoc Bookings instead.",
    "fieldname": "weekly_timeslot",
    "fieldtype": "Link",
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Weekly Timeslot",
+   "mandatory_depends_on": "eval:doc.enrollment_type=='Full-Term'",
    "options": "Weekly Timeslot"
   },
   {
@@ -104,11 +106,6 @@
    "fieldname": "enrollment_date",
    "fieldtype": "Date",
    "label": "Enrollment Date"
-  },
-  {
-   "fieldname": "pay_as_you_go_date",
-   "fieldtype": "Date",
-   "label": "Pay as you go date"
   },
   {
    "fieldname": "billing_section",
