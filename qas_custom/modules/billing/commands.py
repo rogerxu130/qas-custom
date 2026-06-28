@@ -5,6 +5,7 @@ from frappe import _
 from frappe.utils import flt, nowdate
 
 from qas_custom.modules.common import has_field, is_new_doc, set_if_field
+from qas_custom.modules.billing.presentation import build_course_invoice_description
 from qas_custom.services.display_labels import get_student_display_code
 
 
@@ -25,9 +26,7 @@ def create_prorata_invoice(inquiry_doc, enrollment, course: str, term: str, star
 	set_if_field(invoice, "source_inquiry", inquiry_doc.name)
 
 	student_code = get_student_display_code(inquiry_doc.student) or inquiry_doc.student
-	description = _(
-		"{0} - {1} - {2} prorata, {3} sessions from {4}"
-	).format(student_code, course, term, remaining_session_count, start_session)
+	description = build_course_invoice_description(student_code, course, term, remaining_session_count)
 	item = invoice.append(
 		"items",
 		{

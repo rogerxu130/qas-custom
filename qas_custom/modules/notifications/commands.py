@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from urllib.parse import urlencode
-
 import frappe
 from frappe import _
-from frappe.utils import flt, now_datetime
+from frappe.utils import escape_html, flt, now_datetime
 
+from qas_custom.modules.billing.presentation import build_parent_invoice_context, parent_portal_invoice_link
 
-DEFAULT_PARENT_PORTAL_URL = "https://portal.queenslandartschool.com"
+PARENT_INVOICE_PRINT_FORMAT = "QAS Parent Invoice"
 
 
 def send_parent_invoice_notification(
@@ -21,7 +20,7 @@ def send_parent_invoice_notification(
 	recipient = _invoice_recipient(invoice_doc)
 	event_key = f"invoice_{event}:{invoice_doc.name}"
 	payment_link = parent_portal_invoice_link(invoice_doc.name)
-	subject = _("Queensland Art School invoice {0}").format(invoice_doc.name)
+	subject = _invoice_email_subject(invoice_doc, event)
 	message = _invoice_email_message(
 		invoice_doc,
 		event=event,
@@ -55,6 +54,7 @@ def send_parent_invoice_notification(
 			message=message,
 			reference_doctype="Sales Invoice",
 			reference_name=invoice_doc.name,
+			attachments=[_invoice_pdf_attachment(invoice_doc.name)],
 		)
 		_mark_notification_sent(log_name)
 		return {
@@ -86,7 +86,7 @@ def enqueue_parent_invoice_notification(
 	recipient = _invoice_recipient(invoice_doc)
 	event_key = f"invoice_{event}:{invoice_doc.name}"
 	payment_link = parent_portal_invoice_link(invoice_doc.name)
-	subject = _("Queensland Art School invoice {0}").format(invoice_doc.name)
+	subject = _invoice_email_subject(invoice_doc, event)
 	message = _invoice_email_message(
 		invoice_doc,
 		event=event,
@@ -152,15 +152,6 @@ def send_parent_invoice_notification_job(
 	)
 
 
-def parent_portal_invoice_link(invoice: str):
-	base_url = (
-		frappe.conf.get("qas_parent_portal_url")
-		or frappe.conf.get("parent_portal_url")
-		or DEFAULT_PARENT_PORTAL_URL
-	)
-	return f"{str(base_url).rstrip('/')}/invoices?{urlencode({'invoice': invoice})}"
-
-
 def get_invoice_notification_summary(invoice: str):
 	if not _notification_log_available() or not invoice:
 		return {"count": 0, "latest": None}
@@ -214,31 +205,120 @@ def _invoice_recipient(invoice_doc):
 	return {"email": email, "for_user": linked_user, "parent": parent, "customer": invoice_doc.customer}
 
 
-def _invoice_email_message(invoice_doc, event, store_credit_applied, payable_amount, payment_link):
-	action = "is ready" if event == "approved" else "has been resent"
-	payment_line = (
-		_("No payment is required because this invoice is fully covered.")
-		if flt(payable_amount) <= 0
-		else _("Please review the invoice and payment details in the Parent Portal.")
+def _invoice_email_subject(invoice_doc, event):
+	action = _("Invoice ready") if event == "approved" else _("Invoice resent")
+	return _("Queensland Art School - {0} {1}").format(action, invoice_doc.name)
+
+
+def _invoice_pdf_attachment(invoice: str):
+	print_format = PARENT_INVOICE_PRINT_FORMAT if frappe.db.exists("Print Format", PARENT_INVOICE_PRINT_FORMAT) else None
+	return frappe.attach_print(
+		"Sales Invoice",
+		invoice,
+		file_name=invoice,
+		print_format=print_format,
 	)
-	return """
-		<p>Hi,</p>
-		<p>Your Queensland Art School invoice <strong>{invoice}</strong> {action}.</p>
-		<p>Total: <strong>${total:.2f}</strong><br>
-		Store credit applied: <strong>${credit:.2f}</strong><br>
-		Amount payable: <strong>${payable:.2f}</strong><br>
-		Due date: <strong>{due_date}</strong></p>
-		<p>{payment_line}</p>
-		<p><a href="{payment_link}">View invoice in Parent Portal</a></p>
-	""".format(
-		invoice=invoice_doc.name,
-		action=action,
-		total=flt(invoice_doc.grand_total),
-		credit=flt(store_credit_applied),
-		payable=flt(payable_amount),
-		due_date=invoice_doc.get("due_date") or "-",
-		payment_line=payment_line,
+
+
+def _invoice_email_message(invoice_doc, event, store_credit_applied, payable_amount, payment_link):
+	context = build_parent_invoice_context(
+		invoice_doc,
+		store_credit_applied=store_credit_applied,
+		payable_amount=payable_amount,
 		payment_link=payment_link,
+	)
+	intro = (
+		_("Your invoice is ready in the Parent Portal.")
+		if event == "approved"
+		else _("We have resent this invoice for your reference.")
+	)
+	payment_line = (
+		_("No payment is required because this invoice is fully covered by store credit.")
+		if flt(context["payable_amount"]) <= 0
+		else _("You can review the invoice and complete payment securely in the Parent Portal.")
+	)
+	rows = "\n".join(_invoice_email_item_row(item) for item in context["items"])
+	if not rows:
+		rows = """<tr><td colspan="4" style="padding:12px;color:#64748b;">Invoice details are available in the Parent Portal.</td></tr>"""
+
+	return """
+		<div style="margin:0;padding:0;background:#f8fafc;font-family:Arial,sans-serif;color:#172033;">
+			<div style="max-width:640px;margin:0 auto;padding:24px;">
+				<div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;">
+					<div style="padding:22px 24px;background:#172033;color:#ffffff;">
+						<p style="margin:0 0 6px;font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:#f7b6a4;">Queensland Art School</p>
+						<h1 style="margin:0;font-size:24px;line-height:1.3;">Invoice {invoice}</h1>
+					</div>
+					<div style="padding:24px;">
+						<p style="margin:0 0 14px;font-size:16px;line-height:1.5;">Hi,</p>
+						<p style="margin:0 0 18px;font-size:16px;line-height:1.5;">{intro}</p>
+
+						<table style="width:100%;border-collapse:collapse;margin:0 0 18px;">
+							<tr>
+								<td style="padding:10px 0;color:#64748b;">Due date</td>
+								<td style="padding:10px 0;text-align:right;font-weight:700;">{due_date}</td>
+							</tr>
+							<tr>
+								<td style="padding:10px 0;color:#64748b;">Invoice total</td>
+								<td style="padding:10px 0;text-align:right;font-weight:700;">AUD ${total:.2f}</td>
+							</tr>
+							<tr>
+								<td style="padding:10px 0;color:#64748b;">Store credit applied</td>
+								<td style="padding:10px 0;text-align:right;font-weight:700;">AUD ${credit:.2f}</td>
+							</tr>
+							<tr>
+								<td style="padding:12px 0;border-top:1px solid #e5e7eb;font-size:17px;font-weight:700;">Amount payable</td>
+								<td style="padding:12px 0;border-top:1px solid #e5e7eb;text-align:right;font-size:20px;font-weight:800;color:#e85f47;">AUD ${payable:.2f}</td>
+							</tr>
+						</table>
+
+						<table style="width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin:0 0 22px;">
+							<thead>
+								<tr style="background:#f1f5f9;">
+									<th align="left" style="padding:10px;font-size:12px;color:#64748b;">Student</th>
+									<th align="left" style="padding:10px;font-size:12px;color:#64748b;">Course</th>
+									<th align="right" style="padding:10px;font-size:12px;color:#64748b;">Sessions</th>
+									<th align="right" style="padding:10px;font-size:12px;color:#64748b;">Amount</th>
+								</tr>
+							</thead>
+							<tbody>{rows}</tbody>
+						</table>
+
+						<p style="margin:0 0 18px;font-size:15px;line-height:1.5;color:#334155;">{payment_line}</p>
+						<p style="margin:0 0 22px;">
+							<a href="{payment_link}" style="display:inline-block;background:#e85f47;color:#ffffff;text-decoration:none;border-radius:10px;padding:12px 18px;font-weight:700;">View and pay invoice</a>
+						</p>
+						<p style="margin:0;font-size:13px;line-height:1.5;color:#64748b;">If you have already paid, no further action is needed.</p>
+					</div>
+				</div>
+			</div>
+		</div>
+	""".format(
+		invoice=context["invoice"],
+		intro=intro,
+		due_date=context["due_date"] or "-",
+		total=flt(context["total"]),
+		credit=flt(context["store_credit_applied"]),
+		payable=flt(context["payable_amount"]),
+		rows=rows,
+		payment_line=payment_line,
+		payment_link=context["payment_link"],
+	)
+
+
+def _invoice_email_item_row(item):
+	return """
+		<tr>
+			<td style="padding:10px;border-top:1px solid #e5e7eb;font-weight:700;">{student}</td>
+			<td style="padding:10px;border-top:1px solid #e5e7eb;">{description}</td>
+			<td style="padding:10px;border-top:1px solid #e5e7eb;text-align:right;">{sessions:g}</td>
+			<td style="padding:10px;border-top:1px solid #e5e7eb;text-align:right;font-weight:700;">AUD ${amount:.2f}</td>
+		</tr>
+	""".format(
+		student=escape_html(item.get("student") or ""),
+		description=escape_html(item.get("description") or ""),
+		sessions=flt(item.get("sessions")),
+		amount=flt(item.get("amount")),
 	)
 
 
