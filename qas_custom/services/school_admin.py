@@ -882,8 +882,8 @@ def _search_parents(query, limit):
 def _search_students(query, limit):
 	if not _doctype_available("Student"):
 		return []
-	fields = _safe_fields("Student", ["name", "student_name", "guardian", "date_of_birth", "status"])
-	return _search_doctype("Student", query, fields, ["name", "student_name", "guardian"], limit)
+	fields = _safe_fields("Student", ["name", "student_name", "guardian", "parent", "date_of_birth", "status"])
+	return _search_doctype("Student", query, fields, ["name", "student_name", "guardian", "parent"], limit)
 
 
 def _search_customers(query, limit):
@@ -960,19 +960,76 @@ def _normalize_row_payload(doctype, row):
 
 def _resolve_family_context(parent=None, student=None, customer=None, email=None):
 	context = {"parent": parent, "student": student, "customer": customer}
-	if student and not parent and _has_field("Student", "guardian"):
-		context["parent"] = frappe.db.get_value("Student", student, "guardian")
-	if parent and not customer and _has_field("Parent", "customer"):
-		context["customer"] = frappe.db.get_value("Parent", parent, "customer")
-	if customer and not parent and _has_field("Parent", "customer"):
-		context["parent"] = frappe.db.get_value("Parent", {"customer": customer}, "name")
+	if student and not context.get("parent"):
+		context["parent"] = _find_parent_for_student(student)
+	if context.get("parent") and not context.get("customer") and _has_field("Parent", "customer"):
+		context["customer"] = frappe.db.get_value("Parent", context["parent"], "customer")
+	if context.get("customer") and not context.get("parent") and _has_field("Parent", "customer"):
+		context["parent"] = frappe.db.get_value("Parent", {"customer": context["customer"]}, "name")
 	if email and not context.get("parent"):
 		context["parent"] = _find_parent_by_email(email)
 	if email and not context.get("customer"):
 		context["customer"] = _find_customer_by_email(email)
 	if context.get("parent") and not context.get("customer") and _has_field("Parent", "customer"):
 		context["customer"] = frappe.db.get_value("Parent", context["parent"], "customer")
+	if student and not context.get("customer"):
+		context["customer"] = _find_customer_for_student(student)
 	return context
+
+
+def _find_parent_for_student(student):
+	if not student:
+		return None
+	parent_field = _student_parent_field()
+	if parent_field:
+		parent = frappe.db.get_value("Student", student, parent_field)
+		if parent:
+			return parent
+	if _doctype_available("Enrollment") and _has_field("Enrollment", "parent"):
+		rows = frappe.get_all(
+			"Enrollment",
+			filters={"student": student, "parent": ["is", "set"]},
+			fields=["parent"],
+			order_by="modified desc",
+			limit=1,
+		)
+		parent = rows[0].parent if rows else None
+		if parent:
+			return parent
+	if _doctype_available("Inquiry") and _has_field("Inquiry", "parent"):
+		rows = frappe.get_all(
+			"Inquiry",
+			filters={"student": student, "parent": ["is", "set"]},
+			fields=["parent"],
+			order_by="modified desc",
+			limit=1,
+		)
+		parent = rows[0].parent if rows else None
+		if parent:
+			return parent
+	if _doctype_available("Sales Invoice") and _has_field("Sales Invoice", "parent"):
+		for invoice in _invoice_names_for_students([student]):
+			parent = frappe.db.get_value("Sales Invoice", invoice, "parent")
+			if parent:
+				return parent
+	return None
+
+
+def _find_customer_for_student(student):
+	if not student or not _doctype_available("Sales Invoice"):
+		return None
+	for invoice in _invoice_names_for_students([student]):
+		customer = frappe.db.get_value("Sales Invoice", invoice, "customer")
+		if customer:
+			return customer
+	return None
+
+
+def _student_parent_field():
+	for fieldname in ["guardian", "parent"]:
+		if _has_field("Student", fieldname):
+			return fieldname
+	return None
 
 
 def _find_parent_by_email(email):
@@ -1006,13 +1063,14 @@ def _get_customer_payload(customer):
 
 
 def _get_family_students(parent=None, student=None):
-	if student:
+	parent_field = _student_parent_field()
+	if parent and parent_field:
+		filters = {parent_field: parent}
+	elif student:
 		filters = {"name": student}
-	elif parent and _has_field("Student", "guardian"):
-		filters = {"guardian": parent}
 	else:
 		return []
-	fields = _safe_fields("Student", ["name", "student_name", "guardian", "date_of_birth", "status", "gender"])
+	fields = _safe_fields("Student", ["name", "student_name", "guardian", "parent", "date_of_birth", "status", "gender"])
 	rows = frappe.get_all("Student", filters=filters, fields=fields, order_by="student_name asc")
 	return [_normalize_row_payload("Student", row) for row in rows]
 
