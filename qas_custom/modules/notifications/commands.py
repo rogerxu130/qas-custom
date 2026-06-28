@@ -18,7 +18,7 @@ def send_parent_invoice_notification(
 	notification_log: str | None = None,
 ):
 	recipient = _invoice_recipient(invoice_doc)
-	event_key = f"invoice_{event}:{invoice_doc.name}"
+	event_key = _invoice_notification_event_key(invoice_doc, event)
 	payment_link = parent_portal_invoice_link(invoice_doc.name)
 	subject = _invoice_email_subject(invoice_doc, event)
 	message = _invoice_email_message(
@@ -84,7 +84,7 @@ def enqueue_parent_invoice_notification(
 	payable_amount: float = 0,
 ):
 	recipient = _invoice_recipient(invoice_doc)
-	event_key = f"invoice_{event}:{invoice_doc.name}"
+	event_key = _invoice_notification_event_key(invoice_doc, event)
 	payment_link = parent_portal_invoice_link(invoice_doc.name)
 	subject = _invoice_email_subject(invoice_doc, event)
 	message = _invoice_email_message(
@@ -203,6 +203,13 @@ def _invoice_recipient(invoice_doc):
 		email = frappe.db.get_value("User", linked_user, "email") or linked_user
 
 	return {"email": email, "for_user": linked_user, "parent": parent, "customer": invoice_doc.customer}
+
+
+def _invoice_notification_event_key(invoice_doc, event):
+	base = f"invoice_{event}:{invoice_doc.name}"
+	if event == "resent":
+		return f"{base}:{now_datetime().strftime('%Y%m%d%H%M%S%f')}"
+	return base
 
 
 def _invoice_email_subject(invoice_doc, event):
