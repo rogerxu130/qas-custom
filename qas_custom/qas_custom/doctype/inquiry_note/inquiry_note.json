@@ -56,9 +56,8 @@
   },
   {
    "fieldname": "source_document",
-   "fieldtype": "Dynamic Link",
+   "fieldtype": "Data",
    "label": "Source Document",
-   "options": "source_doctype",
    "read_only": 1
   },
   {

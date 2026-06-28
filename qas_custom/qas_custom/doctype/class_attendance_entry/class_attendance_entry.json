@@ -86,10 +86,9 @@
   },
   {
    "fieldname": "source_document",
-   "fieldtype": "Dynamic Link",
+   "fieldtype": "Data",
    "in_standard_filter": 1,
    "label": "Source Document",
-   "options": "source_doctype",
    "read_only": 1
   },
   {

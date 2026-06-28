@@ -193,9 +193,8 @@
   },
   {
    "fieldname": "trial_invoice",
-   "fieldtype": "Link",
-   "label": "Trial Invoice",
-   "options": "Sales Invoice"
+   "fieldtype": "Data",
+   "label": "Trial Invoice"
   },
   {
    "default": "Not Required",
@@ -213,15 +212,13 @@
   },
   {
    "fieldname": "converted_enrollment",
-   "fieldtype": "Link",
-   "label": "Converted Enrollment",
-   "options": "Enrollment"
+   "fieldtype": "Data",
+   "label": "Converted Enrollment"
   },
   {
    "fieldname": "converted_invoice",
-   "fieldtype": "Link",
-   "label": "Converted Invoice",
-   "options": "Sales Invoice"
+   "fieldtype": "Data",
+   "label": "Converted Invoice"
   },
   {
    "fieldname": "inactive_reason",

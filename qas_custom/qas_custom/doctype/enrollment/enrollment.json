@@ -114,9 +114,8 @@
   },
   {
    "fieldname": "invoice",
-   "fieldtype": "Link",
-   "label": "Invoice",
-   "options": "Sales Invoice"
+   "fieldtype": "Data",
+   "label": "Invoice"
   },
   {
    "fieldname": "invoice_status",
