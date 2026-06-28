@@ -56,6 +56,7 @@ def get_school_admin_dashboard_data():
 	_require_school_admin()
 	start_date = getdate(today())
 	end_date = getdate(add_days(start_date, 7))
+	outstanding = _get_outstanding_invoice_summary()
 	return {
 		"date": str(start_date),
 		"action_counts": {
@@ -101,6 +102,8 @@ def get_school_admin_dashboard_data():
 		"financial": {
 			"submitted_invoices": _count_sales_invoices({"docstatus": 1}),
 			"cancelled_invoices": _count_sales_invoices({"docstatus": 2}),
+			"outstanding_invoice_count": outstanding.get("count"),
+			"outstanding_amount": outstanding.get("amount"),
 		},
 	}
 
@@ -811,6 +814,32 @@ def _count_sales_invoices(filters):
 	if not _doctype_available("Sales Invoice"):
 		return 0
 	return _count("Sales Invoice", filters)
+
+
+def _get_outstanding_invoice_summary():
+	if not _doctype_available("Sales Invoice"):
+		return {"count": 0, "amount": 0}
+
+	filters = {"docstatus": 1}
+	if _has_field("Sales Invoice", "outstanding_amount"):
+		filters["outstanding_amount"] = [">", 0]
+	fields = _safe_fields("Sales Invoice", ["name", "grand_total", "outstanding_amount"])
+	rows = frappe.get_all(
+		"Sales Invoice",
+		filters=filters,
+		fields=fields,
+		limit_page_length=0,
+	)
+
+	count = 0
+	amount = 0
+	for row in rows:
+		payable = flt(_invoice_credit_payload(row).get("payable_amount"))
+		if payable <= 0:
+			continue
+		count += 1
+		amount += payable
+	return {"count": count, "amount": amount}
 
 
 def _doctype_available(doctype):
