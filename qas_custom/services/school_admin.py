@@ -2,11 +2,10 @@ from __future__ import annotations
 
 from datetime import timedelta
 import json
-from urllib.parse import urlencode
 
 import frappe
 from frappe import _
-from frappe.utils import add_days, cint, flt, get_url, getdate, now_datetime, nowdate, today
+from frappe.utils import add_days, cint, flt, getdate, now_datetime, nowdate, today
 
 from qas_custom.services.billing_enrollment import (
 	convert_inquiry_to_full_term_core,
@@ -20,6 +19,11 @@ from qas_custom.modules.billing.store_credit import (
 	get_invoice_payable_amount,
 	get_invoice_store_credit_applied,
 	get_store_credit_summary,
+)
+from qas_custom.modules.notifications import (
+	get_invoice_notification_summary,
+	parent_portal_invoice_link,
+	send_parent_invoice_notification,
 )
 from qas_custom.services.class_attendance import get_attendance_entries
 from qas_custom.services.display_labels import get_student_display_code
@@ -1287,6 +1291,7 @@ def _build_invoice_payload(doc):
 	payload["items"] = [_child_payload(row) for row in doc.get("items", [])]
 	payload["comments"] = _get_comments("Sales Invoice", doc.name)
 	payload.update(_invoice_credit_payload(doc))
+	payload["notifications"] = get_invoice_notification_summary(doc.name)
 	return payload
 
 
@@ -1304,7 +1309,7 @@ def _invoice_credit_payload(doc_or_row):
 
 
 def _invoice_payment_link(invoice):
-	return get_url("/invoices?" + urlencode({"invoice": invoice}))
+	return parent_portal_invoice_link(invoice)
 
 
 def _invoice_status_label(doc):
@@ -1374,69 +1379,14 @@ def _mark_draft_invoice_cancelled(doc, reason):
 
 
 def _send_invoice_notification(doc, event="approved"):
-	recipient = _invoice_recipient_email(doc)
-	if not recipient:
-		return {"sent": False, "reason": "No parent email found."}
-
 	store_credit_applied = get_invoice_store_credit_applied(doc.name)
 	payable_amount = get_invoice_payable_amount(doc)
-	subject = _("Queensland Art School invoice {0}").format(doc.name)
-	message = _invoice_email_message(doc, event=event, store_credit_applied=store_credit_applied, payable_amount=payable_amount)
-	try:
-		frappe.sendmail(
-			recipients=[recipient],
-			subject=subject,
-			message=message,
-			reference_doctype="Sales Invoice",
-			reference_name=doc.name,
-		)
-		return {"sent": True, "recipient": recipient}
-	except Exception:
-		frappe.log_error(frappe.get_traceback(), f"QAS invoice notification failed: {doc.name}")
-		_add_comment("Sales Invoice", doc.name, _("Invoice notification failed for {0}.").format(recipient))
-		return {"sent": False, "recipient": recipient, "reason": "Email send failed."}
-
-
-def _invoice_email_message(doc, event, store_credit_applied, payable_amount):
-	action = "is ready" if event == "approved" else "has been resent"
-	link = _invoice_payment_link(doc.name)
-	return """
-		<p>Hi,</p>
-		<p>Your Queensland Art School invoice <strong>{invoice}</strong> {action}.</p>
-		<p>Total: <strong>${total:.2f}</strong><br>
-		Store credit applied: <strong>${credit:.2f}</strong><br>
-		Amount payable: <strong>${payable:.2f}</strong></p>
-		<p><a href="{link}">View invoice and payment details</a></p>
-	""".format(
-		invoice=doc.name,
-		action=action,
-		total=flt(doc.grand_total),
-		credit=flt(store_credit_applied),
-		payable=flt(payable_amount),
-		link=link,
+	return send_parent_invoice_notification(
+		doc,
+		event=event,
+		store_credit_applied=store_credit_applied,
+		payable_amount=payable_amount,
 	)
-
-
-def _invoice_recipient_email(doc):
-	for fieldname in ["contact_email", "email", "email_id"]:
-		if _has_field("Sales Invoice", fieldname) and doc.get(fieldname):
-			return doc.get(fieldname)
-
-	parent = doc.get("parent")
-	if parent:
-		for fieldname in ["email", "email_id", "contact_email"]:
-			if _has_field("Parent", fieldname):
-				email = frappe.db.get_value("Parent", parent, fieldname)
-				if email:
-					return email
-
-	if doc.customer:
-		for fieldname in ["email_id", "email", "contact_email"]:
-			if _has_field("Customer", fieldname):
-				email = frappe.db.get_value("Customer", doc.customer, fieldname)
-				if email:
-					return email
-	return None
 
 
 def _create_payment_entry_for_invoice(doc, amount, mode_of_payment=None, reference_no=None, notes=None):

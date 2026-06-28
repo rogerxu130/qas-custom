@@ -2,16 +2,15 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime
-from urllib.parse import urlencode
-
 import frappe
-from frappe.utils import get_url, getdate, get_time, now_datetime, today
+from frappe.utils import getdate, get_time, now_datetime, today
 
 from qas_custom.modules.billing.store_credit import get_invoice_store_credit_applied
 from qas_custom.modules.course_schedule.queries import (
     get_teacher_name_map as _get_teacher_name_map,
     get_weekly_timeslot_map as _get_weekly_timeslot_map,
 )
+from qas_custom.modules.notifications import parent_portal_invoice_link
 from qas_custom.services.display_labels import get_makeup_voucher_label, get_student_display_name
 
 
@@ -253,6 +252,7 @@ def get_parent_invoices_data():
         doc = frappe.get_doc("Sales Invoice", invoice["name"])
         store_credit_applied = float(get_invoice_store_credit_applied(doc.name) or 0)
         payable_amount = max(0, float(doc.outstanding_amount or doc.grand_total or 0) - store_credit_applied)
+        payment_status = "Paid" if payable_amount <= 0 else (doc.status or "Unpaid")
         payload.append(
             {
                 "invoice_id": doc.name,
@@ -262,7 +262,8 @@ def get_parent_invoices_data():
                 "outstanding_amount": float(doc.outstanding_amount or 0),
                 "store_credit_applied": store_credit_applied,
                 "payable_amount": payable_amount,
-                "payment_link": get_url("/invoices?" + urlencode({"invoice": doc.name})),
+                "payment_link": parent_portal_invoice_link(doc.name),
+                "payment_status": payment_status,
                 "status": doc.status,
                 "items": [
                     {
