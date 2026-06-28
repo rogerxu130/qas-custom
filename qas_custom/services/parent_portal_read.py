@@ -5,6 +5,7 @@ from datetime import datetime
 import frappe
 from frappe.utils import getdate, get_time, now_datetime, today
 
+from qas_custom.modules.billing.invoice_settings import get_invoice_payment_context
 from qas_custom.modules.billing.store_credit import get_invoice_store_credit_applied
 from qas_custom.modules.course_schedule.queries import (
     get_teacher_name_map as _get_teacher_name_map,
@@ -266,6 +267,7 @@ def get_parent_invoices_data():
                 "payment_link": parent_portal_invoice_link(doc.name),
                 "payment_status": payment_status,
                 "status": doc.status,
+                **get_invoice_payment_context(doc),
                 "items": [
                     {
                         "item_code": item.item_code,

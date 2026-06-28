@@ -20,6 +20,12 @@ from qas_custom.modules.billing.store_credit import (
 	get_invoice_store_credit_applied,
 	get_store_credit_summary,
 )
+from qas_custom.modules.billing.invoice_settings import (
+	SNAPSHOT_FIELD_MAP,
+	apply_invoice_payment_snapshot,
+	get_invoice_settings,
+	update_invoice_settings,
+)
 from qas_custom.modules.notifications import (
 	enqueue_parent_invoice_notification,
 	get_invoice_notification_summary,
@@ -154,6 +160,18 @@ def get_school_admin_family_data(parent=None, student=None, customer=None, email
 def get_school_admin_store_credit_data(parent=None, customer=None, limit=50):
 	_require_school_admin()
 	return get_store_credit_summary(parent=parent, customer=customer, limit=_limit(limit, default=50, max_value=200))
+
+
+def get_school_admin_invoice_settings_data():
+	_require_school_admin()
+	return get_invoice_settings()
+
+
+def update_school_admin_invoice_settings_data(payload=None):
+	_require_school_admin()
+	settings = update_invoice_settings(_get_payload(payload))
+	frappe.db.commit()
+	return settings
 
 
 def adjust_school_admin_store_credit_data(parent=None, customer=None, amount=0, reason=None, notes=None):
@@ -338,6 +356,8 @@ def create_school_admin_manual_invoice_data(payload=None):
 	_set_if_field(invoice, "billing_note", payload.get("billing_note"))
 	_set_if_field(invoice, "source_type", payload.get("source_type") or "Manual")
 	_set_if_field(invoice, "remarks", payload.get("remarks"))
+	_apply_invoice_payment_payload(invoice, payload)
+	apply_invoice_payment_snapshot(invoice)
 	_apply_invoice_items(invoice, items)
 	_sync_invoice_student_summary(invoice)
 	invoice.insert(ignore_permissions=True)
@@ -374,6 +394,8 @@ def update_school_admin_draft_invoice_data(invoice=None, payload=None):
 	]:
 		if fieldname in payload:
 			_set_if_field(doc, fieldname, payload.get(fieldname))
+	_apply_invoice_payment_payload(doc, payload)
+	apply_invoice_payment_snapshot(doc)
 	if "items" in payload:
 		_apply_invoice_items(doc, payload.get("items") or [])
 	_sync_invoice_student_summary(doc)
@@ -390,6 +412,8 @@ def submit_school_admin_invoice_data(invoice=None):
 	doc = frappe.get_doc("Sales Invoice", invoice)
 	if cint(doc.docstatus) != 0:
 		frappe.throw(_("Only draft invoices can be submitted."))
+	if apply_invoice_payment_snapshot(doc):
+		doc.save(ignore_permissions=True)
 	doc.flags.ignore_permissions = True
 	doc.submit()
 	_add_comment("Sales Invoice", doc.name, "Invoice approved and submitted by School Admin.")
@@ -409,6 +433,8 @@ def resend_school_admin_invoice_data(invoice=None):
 	if not invoice:
 		frappe.throw(_("Invoice is required."))
 	doc = frappe.get_doc("Sales Invoice", invoice)
+	if apply_invoice_payment_snapshot(doc):
+		doc.save(ignore_permissions=True)
 	notification = _send_invoice_notification(doc, event="resent")
 	_add_comment("Sales Invoice", doc.name, "Invoice resent to parent by School Admin.")
 	frappe.db.commit()
@@ -1293,6 +1319,12 @@ def _build_invoice_payload(doc):
 	payload.update(_invoice_credit_payload(doc))
 	payload["notifications"] = get_invoice_notification_summary(doc.name)
 	return payload
+
+
+def _apply_invoice_payment_payload(doc, payload):
+	for fieldname in SNAPSHOT_FIELD_MAP.values():
+		if fieldname in payload:
+			_set_if_field(doc, fieldname, payload.get(fieldname))
 
 
 def _invoice_credit_payload(doc_or_row):

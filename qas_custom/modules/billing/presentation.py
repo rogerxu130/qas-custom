@@ -7,6 +7,7 @@ from qas_custom.modules.billing.store_credit import (
 	get_invoice_payable_amount,
 	get_invoice_store_credit_applied,
 )
+from qas_custom.modules.billing.invoice_settings import get_invoice_payment_context
 from qas_custom.services.display_labels import get_student_display_code
 
 DEFAULT_PARENT_PORTAL_URL = "https://portal.queenslandartschool.com"
@@ -36,6 +37,7 @@ def build_parent_invoice_context(invoice_doc, *, store_credit_applied=None, paya
 	store_credit = flt(store_credit_applied if store_credit_applied is not None else get_invoice_store_credit_applied(invoice_doc.name))
 	payable = flt(payable_amount if payable_amount is not None else get_invoice_payable_amount(invoice_doc))
 	portal_link = invoice_link or payment_link or parent_portal_invoice_link(invoice_doc.name)
+	payment_context = get_invoice_payment_context(invoice_doc)
 	return {
 		"invoice": invoice_doc.name,
 		"customer": invoice_doc.get("customer_name") or invoice_doc.get("customer") or "",
@@ -47,6 +49,7 @@ def build_parent_invoice_context(invoice_doc, *, store_credit_applied=None, paya
 		"payable_amount": payable,
 		"invoice_link": portal_link,
 		"payment_link": portal_link,
+		**payment_context,
 		"items": [_build_parent_invoice_item(row) for row in invoice_doc.get("items", [])],
 	}
 

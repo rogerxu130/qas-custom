@@ -22,6 +22,7 @@ from qas_custom.services.school_admin import (
 	get_school_admin_inquiry_data,
 	get_school_admin_invoice_data,
 	get_school_admin_invoices_data,
+	get_school_admin_invoice_settings_data,
 	get_school_admin_me_data,
 	get_school_admin_store_credit_data,
 	get_school_admin_teacher_revenue_share_sessions_data,
@@ -42,6 +43,7 @@ from qas_custom.services.school_admin import (
 	update_school_admin_draft_invoice_data,
 	update_school_admin_enrollment_data,
 	update_school_admin_inquiry_status_data,
+	update_school_admin_invoice_settings_data,
 	update_school_admin_voucher_data,
 	update_school_admin_weekly_timeslot_data,
 )
@@ -75,6 +77,16 @@ def school_admin_get_family(parent=None, student=None, customer=None, email=None
 @frappe.whitelist()
 def school_admin_get_store_credit(parent=None, customer=None, limit=50):
 	return get_school_admin_store_credit_data(parent=parent, customer=customer, limit=limit)
+
+
+@frappe.whitelist()
+def school_admin_get_invoice_settings():
+	return get_school_admin_invoice_settings_data()
+
+
+@frappe.whitelist()
+def school_admin_update_invoice_settings(payload=None):
+	return update_school_admin_invoice_settings_data(payload=payload)
 
 
 @frappe.whitelist()

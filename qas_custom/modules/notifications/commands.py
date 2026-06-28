@@ -242,8 +242,10 @@ def _invoice_email_message(invoice_doc, event, store_credit_applied, payable_amo
 	payment_line = (
 		_("No payment is required because this invoice is fully covered by store credit.")
 		if flt(context["payable_amount"]) <= 0
-		else _("Please arrange payment by bank transfer, cash, or POS. For bank transfers, use the invoice number as the reference.")
+		else _("Please arrange payment by {0}.").format(context["accepted_payment_methods"] or _("bank transfer, cash, or POS"))
 	)
+	invoice_message = _html_multiline(context.get("invoice_message"))
+	bank_details = _invoice_email_bank_details(context) if flt(context["payable_amount"]) > 0 else ""
 	rows = "\n".join(_invoice_email_item_row(item) for item in context["items"])
 	if not rows:
 		rows = """<tr><td colspan="4" style="padding:12px;color:#64748b;">Invoice details are available in the Parent Portal.</td></tr>"""
@@ -259,6 +261,7 @@ def _invoice_email_message(invoice_doc, event, store_credit_applied, payable_amo
 					<div style="padding:24px;">
 						<p style="margin:0 0 14px;font-size:16px;line-height:1.5;">Hi,</p>
 						<p style="margin:0 0 18px;font-size:16px;line-height:1.5;">{intro}</p>
+						{invoice_message}
 
 						<table style="width:100%;border-collapse:collapse;margin:0 0 18px;">
 							<tr>
@@ -292,6 +295,7 @@ def _invoice_email_message(invoice_doc, event, store_credit_applied, payable_amo
 						</table>
 
 						<p style="margin:0 0 18px;font-size:15px;line-height:1.5;color:#334155;">{payment_line}</p>
+						{bank_details}
 						<p style="margin:0 0 22px;">
 							<a href="{invoice_link}" style="display:inline-block;background:#e85f47;color:#ffffff;text-decoration:none;border-radius:10px;padding:12px 18px;font-weight:700;">View invoice</a>
 						</p>
@@ -303,14 +307,52 @@ def _invoice_email_message(invoice_doc, event, store_credit_applied, payable_amo
 	""".format(
 		invoice=context["invoice"],
 		intro=intro,
+		invoice_message=invoice_message,
 		due_date=context["due_date"] or "-",
 		total=flt(context["total"]),
 		credit=flt(context["store_credit_applied"]),
 		payable=flt(context["payable_amount"]),
 		rows=rows,
 		payment_line=payment_line,
+		bank_details=bank_details,
 		invoice_link=context["invoice_link"],
 	)
+
+
+def _html_multiline(value):
+	if not value:
+		return ""
+	return """<p style="margin:0 0 18px;font-size:15px;line-height:1.5;color:#334155;">{0}</p>""".format(
+		escape_html(value).replace("\n", "<br>")
+	)
+
+
+def _invoice_email_bank_details(context):
+	rows = []
+	for label, fieldname in [
+		(_("Account name"), "bank_account_name"),
+		(_("BSB"), "bank_bsb"),
+		(_("Account number"), "bank_account_number"),
+	]:
+		value = context.get(fieldname)
+		if value:
+			rows.append(
+				"""<tr><td style="padding:6px 0;color:#64748b;">{0}</td><td style="padding:6px 0;text-align:right;font-weight:700;">{1}</td></tr>""".format(
+					escape_html(label),
+					escape_html(value),
+				)
+			)
+	if not rows and not context.get("bank_reference_note"):
+		return ""
+
+	reference_note = _html_multiline(context.get("bank_reference_note"))
+	return """
+		<div style="margin:0 0 20px;padding:14px;border:1px solid #fed7aa;border-radius:10px;background:#fff7ed;">
+			<p style="margin:0 0 8px;font-weight:700;color:#7c2d12;">Bank transfer details</p>
+			<table style="width:100%;border-collapse:collapse;">{rows}</table>
+			{reference_note}
+		</div>
+	""".format(rows="".join(rows), reference_note=reference_note)
 
 
 def _invoice_email_item_row(item):

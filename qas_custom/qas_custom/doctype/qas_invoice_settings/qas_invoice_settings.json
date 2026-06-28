@@ -1,0 +1,97 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-06-28 00:00:00.000000",
+ "doctype": "DocType",
+ "document_type": "Setup",
+ "engine": "InnoDB",
+ "field_order": [
+  "invoice_message",
+  "accepted_payment_methods",
+  "bank_section",
+  "bank_account_name",
+  "bank_bsb",
+  "bank_account_number",
+  "bank_reference_note"
+ ],
+ "fields": [
+  {
+   "default": "Thank you for learning with Queensland Art School. Please contact us if you have any questions about this invoice.",
+   "fieldname": "invoice_message",
+   "fieldtype": "Small Text",
+   "label": "Invoice Message"
+  },
+  {
+   "default": "Bank transfer, cash, or POS",
+   "fieldname": "accepted_payment_methods",
+   "fieldtype": "Data",
+   "label": "Accepted Payment Methods"
+  },
+  {
+   "fieldname": "bank_section",
+   "fieldtype": "Section Break",
+   "label": "Bank Account"
+  },
+  {
+   "fieldname": "bank_account_name",
+   "fieldtype": "Data",
+   "label": "Bank Account Name"
+  },
+  {
+   "fieldname": "bank_bsb",
+   "fieldtype": "Data",
+   "label": "BSB"
+  },
+  {
+   "fieldname": "bank_account_number",
+   "fieldtype": "Data",
+   "label": "Account Number"
+  },
+  {
+   "default": "For bank transfers, please use the invoice number as the reference.",
+   "fieldname": "bank_reference_note",
+   "fieldtype": "Small Text",
+   "label": "Bank Reference Note"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-06-28 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "QAS Custom",
+ "name": "QAS Invoice Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 0,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "select": 1,
+   "share": 0,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 0,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "School Admin",
+   "select": 1,
+   "share": 0,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

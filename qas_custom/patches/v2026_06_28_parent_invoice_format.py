@@ -192,6 +192,22 @@ def _parent_invoice_print_html():
 		margin-top: 24px;
 		padding: 12px;
 	}
+	.qas-message {
+		background: #f8fafc;
+		border: 1px solid #e5e7eb;
+		border-radius: 10px;
+		margin-bottom: 18px;
+		padding: 12px;
+		white-space: pre-line;
+	}
+	.qas-bank {
+		border-collapse: collapse;
+		margin-top: 8px;
+		width: 100%;
+	}
+	.qas-bank td {
+		padding: 4px 0;
+	}
 </style>
 <div class="qas-invoice">
 	<table class="qas-header">
@@ -215,6 +231,10 @@ def _parent_invoice_print_html():
 			<td><span class="qas-muted">Amount payable</span><strong class="qas-payable">AUD ${{ "%.2f"|format(qas.payable_amount) }}</strong></td>
 		</tr>
 	</table>
+
+	{% if qas.invoice_message %}
+	<div class="qas-message">{{ qas.invoice_message }}</div>
+	{% endif %}
 
 	<table class="qas-table">
 		<thead>
@@ -247,7 +267,15 @@ def _parent_invoice_print_html():
 
 	<div class="qas-note">
 		<strong>Payment</strong><br>
-		Please arrange payment by bank transfer, cash, or POS. For bank transfers, use the invoice number as the reference. If you have already paid, no further action is needed.
+		Please arrange payment by {{ qas.accepted_payment_methods or "bank transfer, cash, or POS" }}. If you have already paid, no further action is needed.
+		{% if qas.bank_account_name or qas.bank_bsb or qas.bank_account_number %}
+		<table class="qas-bank">
+			{% if qas.bank_account_name %}<tr><td>Account name</td><td style="text-align:right;"><strong>{{ qas.bank_account_name }}</strong></td></tr>{% endif %}
+			{% if qas.bank_bsb %}<tr><td>BSB</td><td style="text-align:right;"><strong>{{ qas.bank_bsb }}</strong></td></tr>{% endif %}
+			{% if qas.bank_account_number %}<tr><td>Account number</td><td style="text-align:right;"><strong>{{ qas.bank_account_number }}</strong></td></tr>{% endif %}
+		</table>
+		{% endif %}
+		{% if qas.bank_reference_note %}<p style="margin:8px 0 0;">{{ qas.bank_reference_note }}</p>{% endif %}
 	</div>
 </div>
 """
