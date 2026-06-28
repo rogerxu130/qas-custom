@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import frappe
 from frappe import _
-from frappe.utils import flt, nowdate
+from frappe.utils import flt, getdate, nowdate
 
 from qas_custom.modules.common import has_field, is_new_doc, set_if_field
 from qas_custom.services.display_labels import get_student_display_code
@@ -47,6 +47,7 @@ def create_prorata_invoice(inquiry_doc, enrollment, course: str, term: str, star
 	set_if_field(item, "course_session", start_session)
 	set_if_field(item, "session_count", remaining_session_count)
 	sync_invoice_student_summary(invoice)
+	normalize_course_invoice_dates(invoice)
 
 	if is_new_doc(invoice):
 		invoice.insert(ignore_permissions=True)
@@ -109,6 +110,13 @@ def get_or_create_course_invoice(customer: str, parent: str | None = None):
 	set_if_field(invoice, "parent", parent)
 	set_if_field(invoice, "qas_invoice_type", "Course")
 	return invoice
+
+
+def normalize_course_invoice_dates(invoice):
+	today = nowdate()
+	invoice.posting_date = today
+	if not invoice.get("due_date") or getdate(invoice.due_date) < getdate(today):
+		invoice.due_date = today
 
 
 def sync_invoice_student_summary(invoice):
