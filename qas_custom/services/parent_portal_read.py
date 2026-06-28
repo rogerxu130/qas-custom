@@ -262,6 +262,7 @@ def get_parent_invoices_data():
                 "outstanding_amount": float(doc.outstanding_amount or 0),
                 "store_credit_applied": store_credit_applied,
                 "payable_amount": payable_amount,
+                "invoice_link": parent_portal_invoice_link(doc.name),
                 "payment_link": parent_portal_invoice_link(doc.name),
                 "payment_status": payment_status,
                 "status": doc.status,

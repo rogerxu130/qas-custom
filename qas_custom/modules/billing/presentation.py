@@ -28,13 +28,14 @@ def get_invoice_print_context(invoice_doc):
 		doc,
 		store_credit_applied=store_credit_applied,
 		payable_amount=get_invoice_payable_amount(doc),
-		payment_link=parent_portal_invoice_link(doc.name),
+		invoice_link=parent_portal_invoice_link(doc.name),
 	)
 
 
-def build_parent_invoice_context(invoice_doc, *, store_credit_applied=None, payable_amount=None, payment_link=None):
+def build_parent_invoice_context(invoice_doc, *, store_credit_applied=None, payable_amount=None, payment_link=None, invoice_link=None):
 	store_credit = flt(store_credit_applied if store_credit_applied is not None else get_invoice_store_credit_applied(invoice_doc.name))
 	payable = flt(payable_amount if payable_amount is not None else get_invoice_payable_amount(invoice_doc))
+	portal_link = invoice_link or payment_link or parent_portal_invoice_link(invoice_doc.name)
 	return {
 		"invoice": invoice_doc.name,
 		"customer": invoice_doc.get("customer_name") or invoice_doc.get("customer") or "",
@@ -44,7 +45,8 @@ def build_parent_invoice_context(invoice_doc, *, store_credit_applied=None, paya
 		"total": flt(invoice_doc.get("grand_total") or invoice_doc.get("rounded_total") or 0),
 		"store_credit_applied": store_credit,
 		"payable_amount": payable,
-		"payment_link": payment_link or parent_portal_invoice_link(invoice_doc.name),
+		"invoice_link": portal_link,
+		"payment_link": portal_link,
 		"items": [_build_parent_invoice_item(row) for row in invoice_doc.get("items", [])],
 	}
 

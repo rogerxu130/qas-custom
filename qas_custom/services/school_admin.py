@@ -1304,8 +1304,13 @@ def _invoice_credit_payload(doc_or_row):
 	return {
 		"store_credit_applied": store_credit_applied,
 		"payable_amount": payable_amount,
+		"invoice_link": _invoice_link(invoice_name) if invoice_name else None,
 		"payment_link": _invoice_payment_link(invoice_name) if invoice_name else None,
 	}
+
+
+def _invoice_link(invoice):
+	return parent_portal_invoice_link(invoice)
 
 
 def _invoice_payment_link(invoice):

@@ -242,7 +242,7 @@ def _invoice_email_message(invoice_doc, event, store_credit_applied, payable_amo
 	payment_line = (
 		_("No payment is required because this invoice is fully covered by store credit.")
 		if flt(context["payable_amount"]) <= 0
-		else _("You can review the invoice and complete payment securely in the Parent Portal.")
+		else _("Please arrange payment by bank transfer, cash, or POS. For bank transfers, use the invoice number as the reference.")
 	)
 	rows = "\n".join(_invoice_email_item_row(item) for item in context["items"])
 	if not rows:
@@ -293,7 +293,7 @@ def _invoice_email_message(invoice_doc, event, store_credit_applied, payable_amo
 
 						<p style="margin:0 0 18px;font-size:15px;line-height:1.5;color:#334155;">{payment_line}</p>
 						<p style="margin:0 0 22px;">
-							<a href="{payment_link}" style="display:inline-block;background:#e85f47;color:#ffffff;text-decoration:none;border-radius:10px;padding:12px 18px;font-weight:700;">View and pay invoice</a>
+							<a href="{invoice_link}" style="display:inline-block;background:#e85f47;color:#ffffff;text-decoration:none;border-radius:10px;padding:12px 18px;font-weight:700;">View invoice</a>
 						</p>
 						<p style="margin:0;font-size:13px;line-height:1.5;color:#64748b;">If you have already paid, no further action is needed.</p>
 					</div>
@@ -309,7 +309,7 @@ def _invoice_email_message(invoice_doc, event, store_credit_applied, payable_amo
 		payable=flt(context["payable_amount"]),
 		rows=rows,
 		payment_line=payment_line,
-		payment_link=context["payment_link"],
+		invoice_link=context["invoice_link"],
 	)
 
 

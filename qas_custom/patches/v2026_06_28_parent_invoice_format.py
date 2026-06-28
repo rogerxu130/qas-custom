@@ -247,7 +247,7 @@ def _parent_invoice_print_html():
 
 	<div class="qas-note">
 		<strong>Payment</strong><br>
-		Please open the Parent Portal to review this invoice and complete payment. If you have already paid, no further action is needed.
+		Please arrange payment by bank transfer, cash, or POS. For bank transfers, use the invoice number as the reference. If you have already paid, no further action is needed.
 	</div>
 </div>
 """
