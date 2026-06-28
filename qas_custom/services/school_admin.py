@@ -21,9 +21,9 @@ from qas_custom.modules.billing.store_credit import (
 	get_store_credit_summary,
 )
 from qas_custom.modules.notifications import (
+	enqueue_parent_invoice_notification,
 	get_invoice_notification_summary,
 	parent_portal_invoice_link,
-	send_parent_invoice_notification,
 )
 from qas_custom.services.class_attendance import get_attendance_entries
 from qas_custom.services.display_labels import get_student_display_code
@@ -1381,7 +1381,7 @@ def _mark_draft_invoice_cancelled(doc, reason):
 def _send_invoice_notification(doc, event="approved"):
 	store_credit_applied = get_invoice_store_credit_applied(doc.name)
 	payable_amount = get_invoice_payable_amount(doc)
-	return send_parent_invoice_notification(
+	return enqueue_parent_invoice_notification(
 		doc,
 		event=event,
 		store_credit_applied=store_credit_applied,

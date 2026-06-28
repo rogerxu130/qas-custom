@@ -16,6 +16,7 @@ def send_parent_invoice_notification(
 	event: str = "approved",
 	store_credit_applied: float = 0,
 	payable_amount: float = 0,
+	notification_log: str | None = None,
 ):
 	recipient = _invoice_recipient(invoice_doc)
 	event_key = f"invoice_{event}:{invoice_doc.name}"
@@ -29,7 +30,7 @@ def send_parent_invoice_notification(
 		payment_link=payment_link,
 	)
 
-	log_name = _create_notification_log(
+	log_name = notification_log or _create_notification_log(
 		event_key=event_key,
 		recipient=recipient,
 		subject=subject,
@@ -73,6 +74,82 @@ def send_parent_invoice_notification(
 			"notification_log": log_name,
 			"payment_link": payment_link,
 		}
+
+
+def enqueue_parent_invoice_notification(
+	invoice_doc,
+	*,
+	event: str = "approved",
+	store_credit_applied: float = 0,
+	payable_amount: float = 0,
+):
+	recipient = _invoice_recipient(invoice_doc)
+	event_key = f"invoice_{event}:{invoice_doc.name}"
+	payment_link = parent_portal_invoice_link(invoice_doc.name)
+	subject = _("Queensland Art School invoice {0}").format(invoice_doc.name)
+	message = _invoice_email_message(
+		invoice_doc,
+		event=event,
+		store_credit_applied=store_credit_applied,
+		payable_amount=payable_amount,
+		payment_link=payment_link,
+	)
+	log_name = _create_notification_log(
+		event_key=event_key,
+		recipient=recipient,
+		subject=subject,
+		message=message,
+		document_type="Sales Invoice",
+		document_name=invoice_doc.name,
+	)
+
+	if not recipient.get("email"):
+		_mark_notification_failed(log_name, "No parent email found.")
+		return {
+			"sent": False,
+			"queued": False,
+			"reason": "No parent email found.",
+			"notification_log": log_name,
+			"payment_link": payment_link,
+		}
+
+	_mark_notification_queued(log_name)
+	frappe.enqueue(
+		"qas_custom.modules.notifications.commands.send_parent_invoice_notification_job",
+		queue="short",
+		timeout=300,
+		enqueue_after_commit=True,
+		invoice=invoice_doc.name,
+		event=event,
+		store_credit_applied=store_credit_applied,
+		payable_amount=payable_amount,
+		notification_log=log_name,
+	)
+	return {
+		"sent": False,
+		"queued": True,
+		"recipient": recipient["email"],
+		"notification_log": log_name,
+		"payment_link": payment_link,
+	}
+
+
+def send_parent_invoice_notification_job(
+	invoice: str,
+	*,
+	event: str = "approved",
+	store_credit_applied: float = 0,
+	payable_amount: float = 0,
+	notification_log: str | None = None,
+):
+	invoice_doc = frappe.get_doc("Sales Invoice", invoice)
+	return send_parent_invoice_notification(
+		invoice_doc,
+		event=event,
+		store_credit_applied=store_credit_applied,
+		payable_amount=payable_amount,
+		notification_log=notification_log,
+	)
 
 
 def parent_portal_invoice_link(invoice: str):
@@ -200,6 +277,18 @@ def _mark_notification_sent(log_name):
 			values[fieldname] = "Sent"
 	if meta.has_field("sent_at"):
 		values["sent_at"] = now_datetime()
+	if values:
+		frappe.db.set_value("Notification Log", log_name, values, update_modified=False)
+
+
+def _mark_notification_queued(log_name):
+	if not log_name:
+		return
+	values = {}
+	meta = frappe.get_meta("Notification Log")
+	for fieldname in ["status", "delivery_status", "email_status"]:
+		if meta.has_field(fieldname):
+			values[fieldname] = "Queued"
 	if values:
 		frappe.db.set_value("Notification Log", log_name, values, update_modified=False)
 
