@@ -2,9 +2,14 @@ import frappe
 
 from qas_custom.services.school_admin import (
 	add_school_admin_inquiry_note_data,
+	adjust_school_admin_store_credit_data,
 	cancel_school_admin_invoice_data,
 	convert_school_admin_inquiry_data,
+	create_school_admin_enrollment_data,
 	create_school_admin_manual_invoice_data,
+	create_school_admin_weekly_timeslot_data,
+	end_school_admin_enrollment_data,
+	generate_school_admin_course_sessions_data,
 	get_school_admin_conversion_sessions_data,
 	get_school_admin_course_session_data,
 	get_school_admin_course_sessions_data,
@@ -18,18 +23,27 @@ from qas_custom.services.school_admin import (
 	get_school_admin_invoice_data,
 	get_school_admin_invoices_data,
 	get_school_admin_me_data,
+	get_school_admin_store_credit_data,
 	get_school_admin_teacher_revenue_share_sessions_data,
+	get_school_admin_vouchers_data,
 	get_school_admin_weekly_timeslot_data,
 	get_school_admin_weekly_timeslots_data,
+	mark_school_admin_invoice_paid_data,
 	mark_school_admin_inquiry_completed_data,
 	mark_school_admin_inquiry_follow_up_data,
 	mark_school_admin_inquiry_inactive_data,
 	mark_school_admin_inquiry_no_show_data,
 	reschedule_school_admin_inquiry_data,
+	resend_school_admin_invoice_data,
 	school_admin_global_search_data,
 	submit_school_admin_invoice_data,
+	transfer_school_admin_enrollment_data,
+	update_school_admin_attendance_data,
 	update_school_admin_draft_invoice_data,
+	update_school_admin_enrollment_data,
 	update_school_admin_inquiry_status_data,
+	update_school_admin_voucher_data,
+	update_school_admin_weekly_timeslot_data,
 )
 
 
@@ -56,6 +70,22 @@ def school_admin_global_search(query=None, limit=20):
 @frappe.whitelist()
 def school_admin_get_family(parent=None, student=None, customer=None, email=None):
 	return get_school_admin_family_data(parent=parent, student=student, customer=customer, email=email)
+
+
+@frappe.whitelist()
+def school_admin_get_store_credit(parent=None, customer=None, limit=50):
+	return get_school_admin_store_credit_data(parent=parent, customer=customer, limit=limit)
+
+
+@frappe.whitelist()
+def school_admin_adjust_store_credit(parent=None, customer=None, amount=0, reason=None, notes=None):
+	return adjust_school_admin_store_credit_data(
+		parent=parent,
+		customer=customer,
+		amount=amount,
+		reason=reason,
+		notes=notes,
+	)
 
 
 @frappe.whitelist()
@@ -159,6 +189,16 @@ def school_admin_submit_invoice(invoice=None):
 
 
 @frappe.whitelist()
+def school_admin_resend_invoice(invoice=None):
+	return resend_school_admin_invoice_data(invoice=invoice)
+
+
+@frappe.whitelist()
+def school_admin_mark_invoice_paid(invoice=None, payload=None):
+	return mark_school_admin_invoice_paid_data(invoice=invoice, payload=payload)
+
+
+@frappe.whitelist()
 def school_admin_cancel_invoice(invoice=None, reason=None):
 	return cancel_school_admin_invoice_data(invoice=invoice, reason=reason)
 
@@ -182,6 +222,26 @@ def school_admin_get_enrollment(enrollment=None):
 
 
 @frappe.whitelist()
+def school_admin_create_enrollment(payload=None):
+	return create_school_admin_enrollment_data(payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_update_enrollment(enrollment=None, payload=None):
+	return update_school_admin_enrollment_data(enrollment=enrollment, payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_transfer_enrollment(enrollment=None, payload=None):
+	return transfer_school_admin_enrollment_data(enrollment=enrollment, payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_end_enrollment(enrollment=None, payload=None):
+	return end_school_admin_enrollment_data(enrollment=enrollment, payload=payload)
+
+
+@frappe.whitelist()
 def school_admin_get_weekly_timeslots(term=None, course=None, campus=None, teacher=None, status=None, limit=120):
 	return get_school_admin_weekly_timeslots_data(
 		term=term,
@@ -196,6 +256,21 @@ def school_admin_get_weekly_timeslots(term=None, course=None, campus=None, teach
 @frappe.whitelist()
 def school_admin_get_weekly_timeslot(weekly_timeslot=None):
 	return get_school_admin_weekly_timeslot_data(weekly_timeslot=weekly_timeslot)
+
+
+@frappe.whitelist()
+def school_admin_create_weekly_timeslot(payload=None):
+	return create_school_admin_weekly_timeslot_data(payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_update_weekly_timeslot(weekly_timeslot=None, payload=None):
+	return update_school_admin_weekly_timeslot_data(weekly_timeslot=weekly_timeslot, payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_generate_course_sessions(weekly_timeslot=None, from_date=None, to_date=None):
+	return generate_school_admin_course_sessions_data(weekly_timeslot=weekly_timeslot, from_date=from_date, to_date=to_date)
 
 
 @frappe.whitelist()
@@ -214,6 +289,21 @@ def school_admin_get_course_sessions(weekly_timeslot=None, term=None, course=Non
 @frappe.whitelist()
 def school_admin_get_course_session(course_session=None):
 	return get_school_admin_course_session_data(course_session=course_session)
+
+
+@frappe.whitelist()
+def school_admin_update_attendance(attendance_entry=None, status=None, comments=None):
+	return update_school_admin_attendance_data(attendance_entry=attendance_entry, status=status, comments=comments)
+
+
+@frappe.whitelist()
+def school_admin_get_vouchers(student=None, status=None, limit=120):
+	return get_school_admin_vouchers_data(student=student, status=status, limit=limit)
+
+
+@frappe.whitelist()
+def school_admin_update_voucher(voucher=None, payload=None):
+	return update_school_admin_voucher_data(voucher=voucher, payload=payload)
 
 
 @frappe.whitelist()

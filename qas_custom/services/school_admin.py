@@ -1,15 +1,25 @@
 from __future__ import annotations
 
+from datetime import timedelta
 import json
+from urllib.parse import urlencode
 
 import frappe
 from frappe import _
-from frappe.utils import add_days, cint, flt, getdate, now_datetime, nowdate, today
+from frappe.utils import add_days, cint, flt, get_url, getdate, now_datetime, nowdate, today
 
 from qas_custom.services.billing_enrollment import (
 	convert_inquiry_to_full_term_core,
 	get_conversion_session_options,
 	mark_inquiry_inactive_core,
+)
+from qas_custom.modules.attendance.commands import create_full_term_attendance_entries, update_attendance_status
+from qas_custom.modules.billing.store_credit import (
+	adjust_store_credit,
+	apply_store_credit_to_invoice,
+	get_invoice_payable_amount,
+	get_invoice_store_credit_applied,
+	get_store_credit_summary,
 )
 from qas_custom.services.class_attendance import get_attendance_entries
 from qas_custom.services.display_labels import get_student_display_code
@@ -127,9 +137,31 @@ def get_school_admin_family_data(parent=None, student=None, customer=None, email
 		"parent": _get_parent_payload(parent_id) if parent_id else None,
 		"customer": _get_customer_payload(customer_id) if customer_id else None,
 		"students": students,
+		"store_credit": get_store_credit_summary(parent=parent_id, customer=customer_id, limit=20) if customer_id else None,
 		"enrollments": _get_enrollment_rows(parent=parent_id, students=student_ids, limit=80),
 		"inquiries": _get_family_inquiry_rows(parent=parent_id, students=student_ids, email=email, limit=80),
 		"invoices": _get_invoice_rows(customer=customer_id, parent=parent_id, students=student_ids, limit=80),
+	}
+
+
+def get_school_admin_store_credit_data(parent=None, customer=None, limit=50):
+	_require_school_admin()
+	return get_store_credit_summary(parent=parent, customer=customer, limit=_limit(limit, default=50, max_value=200))
+
+
+def adjust_school_admin_store_credit_data(parent=None, customer=None, amount=0, reason=None, notes=None):
+	_require_school_admin()
+	entry = adjust_store_credit(
+		parent=parent,
+		customer=customer,
+		amount=amount,
+		reason=reason,
+		notes=notes,
+	)
+	frappe.db.commit()
+	return {
+		"entry": entry.as_dict(),
+		"store_credit": get_store_credit_summary(parent=entry.parent, customer=entry.customer, limit=50),
 	}
 
 
@@ -354,8 +386,57 @@ def submit_school_admin_invoice_data(invoice=None):
 	doc.flags.ignore_permissions = True
 	doc.submit()
 	_add_comment("Sales Invoice", doc.name, "Invoice approved and submitted by School Admin.")
+	application = apply_store_credit_to_invoice(doc)
+	if flt(application.get("applied")) > 0:
+		_add_comment("Sales Invoice", doc.name, _("Store credit applied: {0}.").format(flt(application.get("applied"))))
+	notification = _send_invoice_notification(doc, event="approved")
 	frappe.db.commit()
-	return _build_invoice_payload(doc)
+	payload = _build_invoice_payload(doc)
+	payload["store_credit_application"] = application
+	payload["notification"] = notification
+	return payload
+
+
+def resend_school_admin_invoice_data(invoice=None):
+	_require_school_admin()
+	if not invoice:
+		frappe.throw(_("Invoice is required."))
+	doc = frappe.get_doc("Sales Invoice", invoice)
+	notification = _send_invoice_notification(doc, event="resent")
+	_add_comment("Sales Invoice", doc.name, "Invoice resent to parent by School Admin.")
+	frappe.db.commit()
+	payload = _build_invoice_payload(doc)
+	payload["notification"] = notification
+	return payload
+
+
+def mark_school_admin_invoice_paid_data(invoice=None, payload=None):
+	_require_school_admin()
+	if not invoice:
+		frappe.throw(_("Invoice is required."))
+	payload = _get_payload(payload)
+	doc = frappe.get_doc("Sales Invoice", invoice)
+	if cint(doc.docstatus) != 1:
+		frappe.throw(_("Only submitted invoices can be paid."))
+
+	amount = flt(payload.get("amount") or payload.get("paid_amount") or get_invoice_payable_amount(doc) or doc.outstanding_amount)
+	if amount <= 0:
+		frappe.throw(_("Payment amount is required."))
+
+	payment_entry = _create_payment_entry_for_invoice(
+		doc,
+		amount=amount,
+		mode_of_payment=payload.get("mode_of_payment"),
+		reference_no=payload.get("reference_no"),
+		notes=payload.get("notes"),
+	)
+	_add_comment(
+		"Sales Invoice",
+		doc.name,
+		_("Payment recorded by School Admin: {0}.").format(payment_entry.name),
+	)
+	frappe.db.commit()
+	return _build_invoice_payload(frappe.get_doc("Sales Invoice", invoice))
 
 
 def cancel_school_admin_invoice_data(invoice=None, reason=None):
@@ -410,6 +491,72 @@ def get_school_admin_enrollment_data(enrollment=None):
 	if not enrollment:
 		frappe.throw(_("Enrollment is required."))
 	doc = frappe.get_doc("Enrollment", enrollment)
+	return _build_enrollment_payload(doc)
+
+
+def create_school_admin_enrollment_data(payload=None):
+	_require_school_admin()
+	payload = _get_payload(payload)
+	doc = frappe.new_doc("Enrollment")
+	_apply_enrollment_payload(doc, payload)
+	doc.insert(ignore_permissions=True)
+	_create_enrollment_attendance_entries(doc)
+	_add_comment("Enrollment", doc.name, "Enrollment created by School Admin.")
+	frappe.db.commit()
+	return _build_enrollment_payload(doc)
+
+
+def update_school_admin_enrollment_data(enrollment=None, payload=None):
+	_require_school_admin()
+	if not enrollment:
+		frappe.throw(_("Enrollment is required."))
+	payload = _get_payload(payload)
+	doc = frappe.get_doc("Enrollment", enrollment)
+	previous_timeslot = doc.get("weekly_timeslot")
+	_apply_enrollment_payload(doc, payload)
+	doc.save(ignore_permissions=True)
+	if payload.get("weekly_timeslot") and payload.get("weekly_timeslot") != previous_timeslot:
+		_cancel_future_enrollment_attendance(doc.name, effective_date=payload.get("effective_date") or today())
+		_create_enrollment_attendance_entries(doc, start_date=payload.get("effective_date") or today())
+	_add_comment("Enrollment", doc.name, "Enrollment updated by School Admin.")
+	frappe.db.commit()
+	return _build_enrollment_payload(doc)
+
+
+def transfer_school_admin_enrollment_data(enrollment=None, payload=None):
+	_require_school_admin()
+	if not enrollment:
+		frappe.throw(_("Enrollment is required."))
+	payload = _get_payload(payload)
+	target_timeslot = payload.get("weekly_timeslot")
+	if not target_timeslot:
+		frappe.throw(_("Target weekly timeslot is required."))
+	doc = frappe.get_doc("Enrollment", enrollment)
+	effective_date = payload.get("effective_date") or today()
+	_cancel_future_enrollment_attendance(doc.name, effective_date=effective_date)
+	doc.weekly_timeslot = target_timeslot
+	_set_if_field(doc, "start_course_session", payload.get("start_course_session"))
+	if _has_field("Enrollment", "status"):
+		doc.status = payload.get("status") or "Active"
+	doc.save(ignore_permissions=True)
+	_create_enrollment_attendance_entries(doc, start_date=effective_date)
+	_add_comment("Enrollment", doc.name, _("Enrollment transferred to {0} by School Admin.").format(target_timeslot))
+	frappe.db.commit()
+	return _build_enrollment_payload(doc)
+
+
+def end_school_admin_enrollment_data(enrollment=None, payload=None):
+	_require_school_admin()
+	if not enrollment:
+		frappe.throw(_("Enrollment is required."))
+	payload = _get_payload(payload)
+	doc = frappe.get_doc("Enrollment", enrollment)
+	end_date = payload.get("end_date") or today()
+	doc.status = payload.get("status") or "Inactive"
+	doc.save(ignore_permissions=True)
+	_cancel_future_enrollment_attendance(doc.name, effective_date=end_date)
+	_add_comment("Enrollment", doc.name, _("Enrollment ended by School Admin from {0}.").format(end_date))
+	frappe.db.commit()
 	return _build_enrollment_payload(doc)
 
 
@@ -469,6 +616,50 @@ def get_school_admin_weekly_timeslot_data(weekly_timeslot=None):
 	return payload
 
 
+def create_school_admin_weekly_timeslot_data(payload=None):
+	_require_school_admin()
+	payload = _get_payload(payload)
+	doc = frappe.new_doc("Weekly Timeslot")
+	_apply_weekly_timeslot_payload(doc, payload)
+	doc.insert(ignore_permissions=True)
+	frappe.db.commit()
+	return get_school_admin_weekly_timeslot_data(doc.name)
+
+
+def update_school_admin_weekly_timeslot_data(weekly_timeslot=None, payload=None):
+	_require_school_admin()
+	if not weekly_timeslot:
+		frappe.throw(_("Weekly timeslot is required."))
+	payload = _get_payload(payload)
+	doc = frappe.get_doc("Weekly Timeslot", weekly_timeslot)
+	_apply_weekly_timeslot_payload(doc, payload)
+	doc.save(ignore_permissions=True)
+	frappe.db.commit()
+	return get_school_admin_weekly_timeslot_data(doc.name)
+
+
+def generate_school_admin_course_sessions_data(weekly_timeslot=None, from_date=None, to_date=None):
+	_require_school_admin()
+	if not weekly_timeslot:
+		frappe.throw(_("Weekly timeslot is required."))
+	doc = frappe.get_doc("Weekly Timeslot", weekly_timeslot)
+	from_dt = getdate(from_date or today())
+	to_dt = getdate(to_date or add_days(from_dt, 90))
+	if to_dt < from_dt:
+		frappe.throw(_("To date cannot be before from date."))
+	created = []
+	current = from_dt
+	target_weekday = _weekday_number(doc.day_of_week)
+	while current <= to_dt:
+		if current.weekday() == target_weekday:
+			session = _ensure_course_session(doc.name, current)
+			if session.get("created"):
+				created.append(session.get("name"))
+		current = current + timedelta(days=1)
+	frappe.db.commit()
+	return {"weekly_timeslot": weekly_timeslot, "created": created, "created_count": len(created)}
+
+
 def get_school_admin_course_sessions_data(
 	weekly_timeslot=None,
 	term=None,
@@ -506,6 +697,59 @@ def get_school_admin_course_session_data(course_session=None):
 	if payload.get("weekly_timeslot"):
 		payload["weekly_timeslot_detail"] = _get_timeslot_summary(payload.get("weekly_timeslot"))
 	return payload
+
+
+def update_school_admin_attendance_data(attendance_entry=None, status=None, comments=None):
+	_require_school_admin()
+	if not attendance_entry:
+		frappe.throw(_("Attendance entry is required."))
+	row = frappe.get_doc("Class Attendance Entry", attendance_entry)
+	result = update_attendance_status(
+		course_session=row.course_session,
+		attendance_row=row.name,
+		status=status,
+		actor=frappe.session.user,
+		comment=comments,
+	)
+	frappe.db.commit()
+	return result
+
+
+def get_school_admin_vouchers_data(student=None, status=None, limit=120):
+	_require_school_admin()
+	if not _doctype_available("Makeup Voucher"):
+		return {"items": []}
+	filters = {}
+	if student:
+		filters["student"] = student
+	if status:
+		filters["status"] = status
+	fields = _safe_fields(
+		"Makeup Voucher",
+		["name", "student", "course", "original_session", "leave_request", "status", "issue_date", "expiry_date", "used_on_session", "used_date", "used_by_student", "voucher_label"],
+	)
+	rows = frappe.get_all(
+		"Makeup Voucher",
+		filters=filters,
+		fields=fields,
+		order_by="modified desc",
+		limit=_limit(limit, default=120, max_value=300),
+	)
+	return {"items": [_normalize_row_payload("Makeup Voucher", row) for row in rows]}
+
+
+def update_school_admin_voucher_data(voucher=None, payload=None):
+	_require_school_admin()
+	if not voucher:
+		frappe.throw(_("Voucher is required."))
+	payload = _get_payload(payload)
+	doc = frappe.get_doc("Makeup Voucher", voucher)
+	for fieldname in ["status", "expiry_date", "used_on_session", "used_date", "used_by_student"]:
+		if fieldname in payload:
+			_set_if_field(doc, fieldname, payload.get(fieldname))
+	doc.save(ignore_permissions=True)
+	frappe.db.commit()
+	return _document_payload(doc)
 
 
 def get_school_admin_teacher_revenue_share_sessions_data(
@@ -886,7 +1130,13 @@ def _get_invoice_rows(status=None, customer=None, parent=None, students=None, so
 		order_by="modified desc",
 		limit=limit,
 	)
-	return [_normalize_row_payload("Sales Invoice", row) for row in rows]
+	return [_invoice_row_payload(row) for row in rows]
+
+
+def _invoice_row_payload(row):
+	payload = _normalize_row_payload("Sales Invoice", row)
+	payload.update(_invoice_credit_payload(payload))
+	return payload
 
 
 def _apply_invoice_status_filter(filters, status):
@@ -949,7 +1199,25 @@ def _build_invoice_payload(doc):
 	payload["status_label"] = _invoice_status_label(doc)
 	payload["items"] = [_child_payload(row) for row in doc.get("items", [])]
 	payload["comments"] = _get_comments("Sales Invoice", doc.name)
+	payload.update(_invoice_credit_payload(doc))
 	return payload
+
+
+def _invoice_credit_payload(doc_or_row):
+	invoice_name = _field_value(doc_or_row, "name")
+	grand_total = flt(_field_value(doc_or_row, "grand_total") or 0)
+	outstanding = flt(_field_value(doc_or_row, "outstanding_amount") or 0)
+	store_credit_applied = get_invoice_store_credit_applied(invoice_name) if invoice_name else 0
+	payable_amount = max(0, outstanding - store_credit_applied) if outstanding else max(0, grand_total - store_credit_applied)
+	return {
+		"store_credit_applied": store_credit_applied,
+		"payable_amount": payable_amount,
+		"payment_link": _invoice_payment_link(invoice_name) if invoice_name else None,
+	}
+
+
+def _invoice_payment_link(invoice):
+	return get_url("/invoices?" + urlencode({"invoice": invoice}))
 
 
 def _invoice_status_label(doc):
@@ -1018,6 +1286,108 @@ def _mark_draft_invoice_cancelled(doc, reason):
 		frappe.db.set_value("Sales Invoice", doc.name, "cancellation_reason", reason, update_modified=False)
 
 
+def _send_invoice_notification(doc, event="approved"):
+	recipient = _invoice_recipient_email(doc)
+	if not recipient:
+		return {"sent": False, "reason": "No parent email found."}
+
+	store_credit_applied = get_invoice_store_credit_applied(doc.name)
+	payable_amount = get_invoice_payable_amount(doc)
+	subject = _("Queensland Art School invoice {0}").format(doc.name)
+	message = _invoice_email_message(doc, event=event, store_credit_applied=store_credit_applied, payable_amount=payable_amount)
+	try:
+		frappe.sendmail(
+			recipients=[recipient],
+			subject=subject,
+			message=message,
+			reference_doctype="Sales Invoice",
+			reference_name=doc.name,
+		)
+		return {"sent": True, "recipient": recipient}
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), f"QAS invoice notification failed: {doc.name}")
+		_add_comment("Sales Invoice", doc.name, _("Invoice notification failed for {0}.").format(recipient))
+		return {"sent": False, "recipient": recipient, "reason": "Email send failed."}
+
+
+def _invoice_email_message(doc, event, store_credit_applied, payable_amount):
+	action = "is ready" if event == "approved" else "has been resent"
+	link = _invoice_payment_link(doc.name)
+	return """
+		<p>Hi,</p>
+		<p>Your Queensland Art School invoice <strong>{invoice}</strong> {action}.</p>
+		<p>Total: <strong>${total:.2f}</strong><br>
+		Store credit applied: <strong>${credit:.2f}</strong><br>
+		Amount payable: <strong>${payable:.2f}</strong></p>
+		<p><a href="{link}">View invoice and payment details</a></p>
+	""".format(
+		invoice=doc.name,
+		action=action,
+		total=flt(doc.grand_total),
+		credit=flt(store_credit_applied),
+		payable=flt(payable_amount),
+		link=link,
+	)
+
+
+def _invoice_recipient_email(doc):
+	for fieldname in ["contact_email", "email", "email_id"]:
+		if _has_field("Sales Invoice", fieldname) and doc.get(fieldname):
+			return doc.get(fieldname)
+
+	parent = doc.get("parent")
+	if parent:
+		for fieldname in ["email", "email_id", "contact_email"]:
+			if _has_field("Parent", fieldname):
+				email = frappe.db.get_value("Parent", parent, fieldname)
+				if email:
+					return email
+
+	if doc.customer:
+		for fieldname in ["email_id", "email", "contact_email"]:
+			if _has_field("Customer", fieldname):
+				email = frappe.db.get_value("Customer", doc.customer, fieldname)
+				if email:
+					return email
+	return None
+
+
+def _create_payment_entry_for_invoice(doc, amount, mode_of_payment=None, reference_no=None, notes=None):
+	from erpnext.accounts.doctype.payment_entry.payment_entry import get_payment_entry
+
+	payment_entry = get_payment_entry("Sales Invoice", doc.name)
+	payment_entry.flags.ignore_permissions = True
+	amount = flt(amount)
+	if mode_of_payment and payment_entry.meta.has_field("mode_of_payment"):
+		payment_entry.mode_of_payment = mode_of_payment
+	if reference_no and payment_entry.meta.has_field("reference_no"):
+		payment_entry.reference_no = reference_no
+	elif payment_entry.meta.has_field("reference_no"):
+		payment_entry.reference_no = _("School Admin payment {0}").format(now_datetime())
+	if payment_entry.meta.has_field("reference_date"):
+		payment_entry.reference_date = nowdate()
+	if payment_entry.meta.has_field("remarks") and notes:
+		payment_entry.remarks = notes
+	if payment_entry.meta.has_field("paid_amount"):
+		payment_entry.paid_amount = amount
+	if payment_entry.meta.has_field("received_amount"):
+		payment_entry.received_amount = amount
+
+	remaining = amount
+	for reference in payment_entry.get("references", []):
+		if reference.reference_doctype != "Sales Invoice" or reference.reference_name != doc.name:
+			continue
+		allocatable = flt(reference.outstanding_amount) or remaining
+		reference.allocated_amount = min(remaining, allocatable)
+		remaining -= flt(reference.allocated_amount)
+		if remaining <= 0:
+			break
+
+	payment_entry.insert(ignore_permissions=True)
+	payment_entry.submit()
+	return payment_entry
+
+
 def _get_enrollment_rows(parent=None, students=None, filters=None, limit=80):
 	if not _doctype_available("Enrollment"):
 		return []
@@ -1056,6 +1426,75 @@ def _get_enrollment_rows(parent=None, students=None, filters=None, limit=80):
 	return [_normalize_row_payload("Enrollment", row) for row in rows]
 
 
+def _apply_enrollment_payload(doc, payload):
+	for fieldname in [
+		"student",
+		"parent",
+		"term",
+		"course",
+		"weekly_timeslot",
+		"start_course_session",
+		"enrollment_type",
+		"status",
+		"trial_session_date",
+		"enrollment_date",
+		"invoice",
+		"invoice_status",
+		"invoice_amount",
+		"remaining_sessions",
+		"source_inquiry",
+	]:
+		if fieldname in payload:
+			_set_if_field(doc, fieldname, payload.get(fieldname))
+	if not doc.get("parent") and doc.get("student") and _has_field("Student", "guardian"):
+		_set_if_field(doc, "parent", frappe.db.get_value("Student", doc.student, "guardian"))
+	if not doc.get("status"):
+		_set_if_field(doc, "status", "Active")
+	if not doc.get("enrollment_type"):
+		_set_if_field(doc, "enrollment_type", "Full-Term")
+	if not doc.get("enrollment_date"):
+		_set_if_field(doc, "enrollment_date", today())
+
+
+def _create_enrollment_attendance_entries(doc, start_date=None):
+	if doc.get("enrollment_type") != "Full-Term" or not doc.get("weekly_timeslot") or not doc.get("student"):
+		return []
+	filters = {"weekly_timeslot": doc.weekly_timeslot, "status": ["!=", "Cancelled"]}
+	if start_date:
+		filters["session_date"] = [">=", getdate(start_date)]
+	elif doc.get("start_course_session"):
+		start_session_date = frappe.db.get_value("Course Sessions", doc.start_course_session, "session_date")
+		if start_session_date:
+			filters["session_date"] = [">=", getdate(start_session_date)]
+	rows = frappe.get_all("Course Sessions", filters=filters, fields=["name", "session_date"], order_by="session_date asc")
+	create_full_term_attendance_entries(rows, doc.student, doc.name)
+	return [row.name for row in rows]
+
+
+def _cancel_future_enrollment_attendance(enrollment, effective_date=None):
+	if not _doctype_available("Class Attendance Entry"):
+		return 0
+	session_ids = []
+	if effective_date:
+		session_ids = frappe.get_all(
+			"Course Sessions",
+			filters={"session_date": [">=", getdate(effective_date)]},
+			pluck="name",
+			limit_page_length=0,
+		)
+	filters = {
+		"source_doctype": "Enrollment",
+		"source_document": enrollment,
+		"status": ["in", ["To be started", "Scheduled"]],
+	}
+	if session_ids:
+		filters["course_session"] = ["in", session_ids]
+	rows = frappe.get_all("Class Attendance Entry", filters=filters, pluck="name", limit_page_length=0)
+	for row in rows:
+		frappe.db.set_value("Class Attendance Entry", row, "status", "Cancelled", update_modified=True)
+	return len(rows)
+
+
 def _build_enrollment_payload(doc):
 	payload = _document_payload(doc)
 	if payload.get("weekly_timeslot"):
@@ -1073,7 +1512,7 @@ def _get_invoice_summary(invoice):
 		["name", "customer", "posting_date", "due_date", "status", "docstatus", "grand_total", "outstanding_amount"],
 	)
 	rows = frappe.get_all("Sales Invoice", filters={"name": invoice}, fields=fields, limit=1)
-	return _normalize_row_payload("Sales Invoice", rows[0]) if rows else None
+	return _invoice_row_payload(rows[0]) if rows else None
 
 
 def _get_course_session_rows(
@@ -1129,6 +1568,72 @@ def _get_course_session_rows(
 		item["weekly_timeslot_detail"] = timeslot_map.get(row.weekly_timeslot)
 		items.append(item)
 	return items
+
+
+def _apply_weekly_timeslot_payload(doc, payload):
+	for fieldname in [
+		"term",
+		"course",
+		"campus",
+		"classroom",
+		"teacher",
+		"day_of_week",
+		"start_time",
+		"end_time",
+		"status",
+		"revenue_share_enabled",
+		"revenue_share_teacher",
+		"revenue_share_percent",
+	]:
+		if fieldname in payload:
+			_set_if_field(doc, fieldname, payload.get(fieldname))
+
+
+def _weekday_number(day_of_week):
+	lookup = {
+		"Monday": 0,
+		"Tuesday": 1,
+		"Wednesday": 2,
+		"Thursday": 3,
+		"Friday": 4,
+		"Saturday": 5,
+		"Sunday": 6,
+	}
+	if day_of_week not in lookup:
+		frappe.throw(_("Weekly timeslot day of week is required."))
+	return lookup[day_of_week]
+
+
+def _ensure_course_session(weekly_timeslot, session_date):
+	existing = frappe.db.exists(
+		"Course Sessions",
+		{"weekly_timeslot": weekly_timeslot, "session_date": getdate(session_date)},
+	)
+	if existing:
+		return {"name": existing, "created": False}
+	session = frappe.new_doc("Course Sessions")
+	session.weekly_timeslot = weekly_timeslot
+	session.session_date = getdate(session_date)
+	session.status = "Scheduled"
+	session.insert(ignore_permissions=True)
+	_create_session_attendance_for_active_enrollments(session)
+	return {"name": session.name, "created": True}
+
+
+def _create_session_attendance_for_active_enrollments(session):
+	rows = frappe.get_all(
+		"Enrollment",
+		filters={
+			"weekly_timeslot": session.weekly_timeslot,
+			"status": "Active",
+			"enrollment_type": "Full-Term",
+		},
+		fields=["name", "student"],
+		limit_page_length=0,
+	)
+	for enrollment in rows:
+		if enrollment.get("student"):
+			create_full_term_attendance_entries([session], enrollment.student, enrollment.name)
 
 
 def _filter_timeslots_for_session_query(term=None, course=None, campus=None):

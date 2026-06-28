@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import frappe
 
+from qas_custom.modules.billing.store_credit import get_store_credit_balance
+
 
 def get_parent_info_data():
     if frappe.session.user == "Guest":
@@ -54,6 +56,6 @@ def get_parent_info_data():
 
     return {
         "parent_name": parent.get("parent_name"),
-        "store_credit": float(parent.get("store_credit") or 0),
+        "store_credit": float(get_store_credit_balance(parent=parent.name, customer=parent.get("customer")) or 0),
         "students": payload_students,
     }
