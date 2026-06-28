@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import frappe
 from frappe import _
-from frappe.utils import flt, getdate, nowdate
+from frappe.utils import flt, nowdate
 
 from qas_custom.modules.common import has_field, is_new_doc, set_if_field
 from qas_custom.services.display_labels import get_student_display_code
@@ -115,8 +115,9 @@ def get_or_create_course_invoice(customer: str, parent: str | None = None):
 def normalize_course_invoice_dates(invoice):
 	today = nowdate()
 	invoice.posting_date = today
-	if not invoice.get("due_date") or getdate(invoice.due_date) < getdate(today):
-		invoice.due_date = today
+	invoice.due_date = today
+	for row in invoice.get("payment_schedule", []):
+		row.due_date = today
 
 
 def sync_invoice_student_summary(invoice):
