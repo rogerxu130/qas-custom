@@ -86,6 +86,23 @@ def remove_attendance_entries_by_source(source_doctype: str, source_document: st
 	return len(rows)
 
 
+def cancel_attendance_entries_by_source(source_doctype: str, source_document: str):
+	if not source_doctype or not source_document:
+		return 0
+	rows = frappe.get_all(
+		ATTENDANCE_DOCTYPE,
+		filters={
+			"source_doctype": source_doctype,
+			"source_document": source_document,
+			"status": ["!=", "Cancelled"],
+		},
+		pluck="name",
+	)
+	for name in rows:
+		frappe.db.set_value(ATTENDANCE_DOCTYPE, name, "status", "Cancelled", update_modified=True)
+	return len(rows)
+
+
 def remove_attendance_entry(attendance_entry: str | None):
 	if not attendance_entry or not frappe.db.exists(ATTENDANCE_DOCTYPE, attendance_entry):
 		return False

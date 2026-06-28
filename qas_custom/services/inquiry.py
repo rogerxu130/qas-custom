@@ -13,6 +13,7 @@ from qas_custom.services.billing_enrollment import (
 	mark_inquiry_inactive_core,
 )
 from qas_custom.modules.attendance.commands import (
+	cancel_trial_inquiry_attendance_entries,
 	ensure_trial_inquiry_attendance_entry,
 	remove_trial_inquiry_attendance_entries,
 )
@@ -904,7 +905,7 @@ def sync_inquiry_course_session(inquiry_doc):
 
 	if inquiry_doc.status == "Cancelled":
 		if not inquiry_doc.is_new():
-			remove_trial_inquiry_attendance_entries(inquiry_doc.name)
+			cancel_trial_inquiry_attendance_entries(inquiry_doc.name)
 		return
 
 	if old_course_session and old_course_session != inquiry_doc.course_session:

@@ -7,6 +7,7 @@ from frappe.utils import escape_html, now_datetime
 from qas_custom.modules.common import set_if_field
 from qas_custom.modules.inquiry.commands import sync_trial_inquiry_from_attendance
 from qas_custom.modules.inquiry.notes import add_attendance_sync_note
+from qas_custom.services.class_attendance import cancel_attendance_entries_by_source
 from qas_custom.services.class_attendance import create_attendance_entry, get_attendance_entry_by_source
 from qas_custom.services.class_attendance import ATTENDANCE_DOCTYPE
 from qas_custom.services.class_attendance import remove_attendance_entries_by_source
@@ -56,6 +57,10 @@ def ensure_trial_inquiry_attendance_entry(inquiry_doc):
 
 def remove_trial_inquiry_attendance_entries(inquiry):
 	return remove_attendance_entries_by_source("Inquiry", inquiry)
+
+
+def cancel_trial_inquiry_attendance_entries(inquiry):
+	return cancel_attendance_entries_by_source("Inquiry", inquiry)
 
 
 def update_attendance_status(course_session, attendance_row, status, actor=None, comment=None, validate_access=None):
