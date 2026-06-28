@@ -32,6 +32,18 @@ def get_student_display_name(student: str | dict | None):
 	return name
 
 
+def sync_student_code(doc, method=None):
+	if not doc or not _has_column("Student", "student_code"):
+		return
+	if doc.get("student_code"):
+		return
+
+	base = _student_code_from_name(doc.get("student_name") or doc.get("name"))
+	guardian = doc.get("guardian") if _has_column("Student", "guardian") else None
+	next_index = _next_student_code_index(base=base, guardian=guardian, current_name=doc.get("name"))
+	doc.student_code = f"{base}{next_index:02d}"
+
+
 def get_makeup_voucher_label(voucher: str | dict | None):
 	doc = _get_voucher_doc(voucher)
 	if not doc:
@@ -125,6 +137,28 @@ def _get_session_label(course_session: str | None):
 def _student_code_from_name(name: str | None):
 	base = re.sub(r"[^A-Za-z0-9]+", "", (name or "Student").strip().split(" ")[0])
 	return base or "Student"
+
+
+def _next_student_code_index(base: str, guardian: str | None, current_name: str | None):
+	filters = {}
+	if guardian and _has_column("Student", "guardian"):
+		filters["guardian"] = guardian
+
+	fields = ["name", "student_name", "student_code"]
+	rows = frappe.get_all("Student", filters=filters, fields=fields, limit_page_length=0)
+	max_index = 0
+	pattern = re.compile(rf"^{re.escape(base)}(\d+)$", re.IGNORECASE)
+	for row in rows:
+		if current_name and row.get("name") == current_name:
+			continue
+		code = row.get("student_code")
+		match = pattern.match(code or "")
+		if match:
+			max_index = max(max_index, int(match.group(1)))
+			continue
+		if _student_code_from_name(row.get("student_name") or row.get("name")).lower() == base.lower():
+			max_index += 1
+	return max_index + 1
 
 
 def _format_date(value):

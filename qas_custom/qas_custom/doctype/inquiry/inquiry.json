@@ -249,6 +249,19 @@
    "select": 1,
    "share": 0,
    "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 0,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "School Admin",
+   "select": 1,
+   "share": 0,
+   "write": 1
   }
  ],
  "sort_field": "modified",

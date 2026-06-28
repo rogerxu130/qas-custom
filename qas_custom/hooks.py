@@ -138,6 +138,9 @@ app_license = "mit"
 # Hook on document methods and events
 
 doc_events = {
+	"Student": {
+		"validate": "qas_custom.services.display_labels.sync_student_code",
+	},
 	"Session Homework": {
 		"validate": "qas_custom.services.session_homework.validate_session_homework",
 	},
