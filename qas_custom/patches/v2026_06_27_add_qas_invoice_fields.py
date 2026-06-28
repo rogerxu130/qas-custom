@@ -149,9 +149,8 @@ def _add_sales_invoice_item_fields():
 		"Sales Invoice Item",
 		{
 			"fieldname": "enrollment",
-			"fieldtype": "Link",
+			"fieldtype": "Data",
 			"label": "Enrollment",
-			"options": "Enrollment",
 			"insert_after": "student_code",
 			"in_standard_filter": 1,
 		},
