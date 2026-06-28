@@ -16,7 +16,7 @@ from qas_custom.services.display_labels import get_makeup_voucher_label, get_stu
 
 
 SPECIAL_ENROLLMENT_TYPES = {"Trial", "Makeup", "Pay-as-you-go"}
-TEACHER_BLOCKED_ATTENDANCE_STATUSES = {"Cancelled"}
+TEACHER_BLOCKED_ATTENDANCE_STATUSES = {"Cancelled", "Leave"}
 MAX_PHOTO_UPLOADS = 12
 PHOTO_POST_PREVIEW_LIMIT = 6
 MAX_VIDEO_UPLOAD_BYTES = 100 * 1024 * 1024
@@ -725,8 +725,6 @@ def _get_attendance_status_options():
 
 def _is_blocked_teacher_attendance_update(course_session, row_id, update):
     status = (update.get("status") or "").strip()
-    if status not in TEACHER_BLOCKED_ATTENDANCE_STATUSES:
-        return False
 
     current = frappe.db.get_value(
         ATTENDANCE_DOCTYPE,
@@ -734,10 +732,21 @@ def _is_blocked_teacher_attendance_update(course_session, row_id, update):
         ["status", "comments"],
         as_dict=True,
     )
-    if current and current.status == status and (current.comments or "") == (update.get("comments") or ""):
+    if not current:
+        return False
+
+    current_status = (current.status or "").strip()
+    current_comments = current.comments or ""
+    next_comments = update.get("comments") or ""
+    if current_status == status and current_comments == next_comments:
         return True
 
-    frappe.throw(_("Teachers cannot mark attendance as {0}.").format(status))
+    if current_status in TEACHER_BLOCKED_ATTENDANCE_STATUSES:
+        frappe.throw(_("Teachers cannot change attendance marked as {0}.").format(current_status))
+    if status in TEACHER_BLOCKED_ATTENDANCE_STATUSES:
+        frappe.throw(_("Teachers cannot mark attendance as {0}.").format(status))
+
+    return False
 
 
 def _parse_attendance_updates(updates):
