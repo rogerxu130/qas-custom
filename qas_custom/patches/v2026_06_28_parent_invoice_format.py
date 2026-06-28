@@ -94,7 +94,10 @@ def _looks_like_legacy_invoice_notification(text: str) -> bool:
 
 def _parent_invoice_print_html():
 	return """
-{% set qas = frappe.get_attr("qas_custom.modules.billing.presentation.get_invoice_print_context")(doc) %}
+{% set invoice_total = doc.grand_total or doc.rounded_total or 0 %}
+{% set outstanding = doc.outstanding_amount if doc.outstanding_amount is not none else invoice_total %}
+{% set credit_applied = invoice_total - outstanding if invoice_total > outstanding else 0 %}
+{% set payable_amount = outstanding if outstanding > 0 else invoice_total %}
 <style>
 	.qas-invoice {
 		color: #172033;
@@ -215,25 +218,25 @@ def _parent_invoice_print_html():
 		<td>
 			<p class="qas-brand">Queensland Art School</p>
 			<h1 class="qas-title">Invoice</h1>
-			<p class="qas-muted">{{ qas.invoice }}</p>
+			<p class="qas-muted">{{ doc.name }}</p>
 		</td>
 		<td style="text-align:right;">
-			<p><strong>Due date</strong><br>{{ qas.due_date or "-" }}</p>
-			<p><strong>Invoice date</strong><br>{{ qas.posting_date or "-" }}</p>
+			<p><strong>Due date</strong><br>{{ doc.due_date or "-" }}</p>
+			<p><strong>Invoice date</strong><br>{{ doc.posting_date or "-" }}</p>
 		</td>
 		</tr>
 	</table>
 
 	<table class="qas-summary">
 		<tr>
-			<td><span class="qas-muted">Invoice total</span><strong>AUD ${{ "%.2f"|format(qas.total) }}</strong></td>
-			<td><span class="qas-muted">Store credit applied</span><strong>AUD ${{ "%.2f"|format(qas.store_credit_applied) }}</strong></td>
-			<td><span class="qas-muted">Amount payable</span><strong class="qas-payable">AUD ${{ "%.2f"|format(qas.payable_amount) }}</strong></td>
+			<td><span class="qas-muted">Invoice total</span><strong>AUD ${{ "%.2f"|format(invoice_total) }}</strong></td>
+			<td><span class="qas-muted">Store credit applied</span><strong>AUD ${{ "%.2f"|format(credit_applied) }}</strong></td>
+			<td><span class="qas-muted">Amount payable</span><strong class="qas-payable">AUD ${{ "%.2f"|format(payable_amount) }}</strong></td>
 		</tr>
 	</table>
 
-	{% if qas.invoice_message %}
-	<div class="qas-message">{{ qas.invoice_message }}</div>
+	{% if doc.qas_invoice_message %}
+	<div class="qas-message">{{ doc.qas_invoice_message }}</div>
 	{% endif %}
 
 	<table class="qas-table">
@@ -247,11 +250,11 @@ def _parent_invoice_print_html():
 			</tr>
 		</thead>
 		<tbody>
-			{% for item in qas.items %}
+			{% for item in doc.items %}
 			<tr>
-				<td><strong>{{ item.student }}</strong></td>
+				<td><strong>{{ item.student_code or item.student or "Student" }}</strong></td>
 				<td>{{ item.description }}</td>
-				<td class="right">{{ item.sessions }}</td>
+				<td class="right">{{ item.session_count or item.qty }}</td>
 				<td class="right">AUD ${{ "%.2f"|format(item.rate) }}</td>
 				<td class="right"><strong>AUD ${{ "%.2f"|format(item.amount) }}</strong></td>
 			</tr>
@@ -260,22 +263,22 @@ def _parent_invoice_print_html():
 	</table>
 
 	<table class="qas-total">
-		<tr><td>Invoice total</td><td style="text-align:right;"><strong>AUD ${{ "%.2f"|format(qas.total) }}</strong></td></tr>
-		<tr><td>Store credit applied</td><td style="text-align:right;"><strong>AUD ${{ "%.2f"|format(qas.store_credit_applied) }}</strong></td></tr>
-		<tr class="final"><td>Amount payable</td><td style="text-align:right;">AUD ${{ "%.2f"|format(qas.payable_amount) }}</td></tr>
+		<tr><td>Invoice total</td><td style="text-align:right;"><strong>AUD ${{ "%.2f"|format(invoice_total) }}</strong></td></tr>
+		<tr><td>Store credit applied</td><td style="text-align:right;"><strong>AUD ${{ "%.2f"|format(credit_applied) }}</strong></td></tr>
+		<tr class="final"><td>Amount payable</td><td style="text-align:right;">AUD ${{ "%.2f"|format(payable_amount) }}</td></tr>
 	</table>
 
 	<div class="qas-note">
 		<strong>Payment</strong><br>
-		Please arrange payment by {{ qas.accepted_payment_methods or "bank transfer, cash, or POS" }}. If you have already paid, no further action is needed.
-		{% if qas.bank_account_name or qas.bank_bsb or qas.bank_account_number %}
+		Please arrange payment by {{ doc.qas_accepted_payment_methods or "bank transfer, cash, or POS" }}. If you have already paid, no further action is needed.
+		{% if doc.qas_bank_account_name or doc.qas_bank_bsb or doc.qas_bank_account_number %}
 		<table class="qas-bank">
-			{% if qas.bank_account_name %}<tr><td>Account name</td><td style="text-align:right;"><strong>{{ qas.bank_account_name }}</strong></td></tr>{% endif %}
-			{% if qas.bank_bsb %}<tr><td>BSB</td><td style="text-align:right;"><strong>{{ qas.bank_bsb }}</strong></td></tr>{% endif %}
-			{% if qas.bank_account_number %}<tr><td>Account number</td><td style="text-align:right;"><strong>{{ qas.bank_account_number }}</strong></td></tr>{% endif %}
+			{% if doc.qas_bank_account_name %}<tr><td>Account name</td><td style="text-align:right;"><strong>{{ doc.qas_bank_account_name }}</strong></td></tr>{% endif %}
+			{% if doc.qas_bank_bsb %}<tr><td>BSB</td><td style="text-align:right;"><strong>{{ doc.qas_bank_bsb }}</strong></td></tr>{% endif %}
+			{% if doc.qas_bank_account_number %}<tr><td>Account number</td><td style="text-align:right;"><strong>{{ doc.qas_bank_account_number }}</strong></td></tr>{% endif %}
 		</table>
 		{% endif %}
-		{% if qas.bank_reference_note %}<p style="margin:8px 0 0;">{{ qas.bank_reference_note }}</p>{% endif %}
+		{% if doc.qas_bank_reference_note %}<p style="margin:8px 0 0;">{{ doc.qas_bank_reference_note }}</p>{% endif %}
 	</div>
 </div>
 """
