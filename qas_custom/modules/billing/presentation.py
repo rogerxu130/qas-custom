@@ -42,6 +42,7 @@ def build_parent_invoice_context(invoice_doc, *, store_credit_applied=None, paya
 		"invoice": invoice_doc.name,
 		"customer": invoice_doc.get("customer_name") or invoice_doc.get("customer") or "",
 		"parent": invoice_doc.get("parent") or "",
+		"recipient_name": _invoice_recipient_name(invoice_doc),
 		"posting_date": formatdate(invoice_doc.get("posting_date")) if invoice_doc.get("posting_date") else "",
 		"due_date": formatdate(invoice_doc.get("due_date")) if invoice_doc.get("due_date") else "",
 		"total": flt(invoice_doc.get("grand_total") or invoice_doc.get("rounded_total") or 0),
@@ -52,6 +53,24 @@ def build_parent_invoice_context(invoice_doc, *, store_credit_applied=None, paya
 		**payment_context,
 		"items": [_build_parent_invoice_item(row) for row in invoice_doc.get("items", [])],
 	}
+
+
+def _invoice_recipient_name(invoice_doc):
+	parent = invoice_doc.get("parent")
+	if parent and frappe.db.has_column("Parent", "parent_name"):
+		parent_name = frappe.db.get_value("Parent", parent, "parent_name")
+		if parent_name:
+			return parent_name
+
+	customer_name = invoice_doc.get("customer_name")
+	if customer_name:
+		return customer_name
+
+	customer = invoice_doc.get("customer")
+	if customer and frappe.db.has_column("Customer", "customer_name"):
+		return frappe.db.get_value("Customer", customer, "customer_name") or customer
+
+	return ""
 
 
 def parent_portal_invoice_link(invoice: str):

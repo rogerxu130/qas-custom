@@ -8,6 +8,7 @@ from qas_custom.services.school_admin import (
 	convert_school_admin_inquiry_data,
 	create_school_admin_enrollment_data,
 	create_school_admin_manual_invoice_data,
+	create_school_admin_term_data,
 	create_school_admin_weekly_timeslot_data,
 	end_school_admin_enrollment_data,
 	generate_school_admin_course_sessions_data,
@@ -27,6 +28,8 @@ from qas_custom.services.school_admin import (
 	get_school_admin_me_data,
 	get_school_admin_store_credit_data,
 	get_school_admin_teacher_revenue_share_sessions_data,
+	get_school_admin_term_data,
+	get_school_admin_terms_data,
 	get_school_admin_vouchers_data,
 	get_school_admin_weekly_timeslot_data,
 	get_school_admin_weekly_timeslots_data,
@@ -35,11 +38,15 @@ from qas_custom.services.school_admin import (
 	mark_school_admin_inquiry_follow_up_data,
 	mark_school_admin_inquiry_inactive_data,
 	mark_school_admin_inquiry_no_show_data,
+	populate_school_admin_term_data,
 	reschedule_school_admin_inquiry_data,
 	resend_school_admin_invoice_data,
 	school_admin_global_search_data,
 	submit_school_admin_invoice_data,
 	transfer_school_admin_enrollment_data,
+	copy_school_admin_term_data,
+	get_school_admin_rollover_plan_data,
+	update_school_admin_rollover_plan_row_data,
 	update_school_admin_attendance_data,
 	update_school_admin_draft_invoice_data,
 	update_school_admin_enrollment_data,
@@ -219,6 +226,41 @@ def school_admin_cancel_invoice(invoice=None, reason=None):
 @frappe.whitelist()
 def school_admin_bulk_invoice_action(payload=None):
 	return bulk_school_admin_invoice_action_data(payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_get_terms(status=None, limit=80):
+	return get_school_admin_terms_data(status=status, limit=limit)
+
+
+@frappe.whitelist()
+def school_admin_get_term(term=None):
+	return get_school_admin_term_data(term=term)
+
+
+@frappe.whitelist()
+def school_admin_create_term(payload=None):
+	return create_school_admin_term_data(payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_copy_term(payload=None):
+	return copy_school_admin_term_data(payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_get_rollover_plan(plan=None):
+	return get_school_admin_rollover_plan_data(plan=plan)
+
+
+@frappe.whitelist()
+def school_admin_update_rollover_plan_row(plan=None, row=None, payload=None):
+	return update_school_admin_rollover_plan_row_data(plan=plan, row=row, payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_populate_term(plan=None):
+	return populate_school_admin_term_data(plan=plan)
 
 
 @frappe.whitelist()

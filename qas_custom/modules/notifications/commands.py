@@ -234,6 +234,7 @@ def _invoice_email_message(invoice_doc, event, store_credit_applied, payable_amo
 		payable_amount=payable_amount,
 		payment_link=payment_link,
 	)
+	greeting = _invoice_email_greeting(context)
 	intro = (
 		_("Your invoice is ready in the Parent Portal.")
 		if event == "approved"
@@ -259,7 +260,7 @@ def _invoice_email_message(invoice_doc, event, store_credit_applied, payable_amo
 						<h1 style="margin:0;font-size:24px;line-height:1.3;">Invoice {invoice}</h1>
 					</div>
 					<div style="padding:24px;">
-						<p style="margin:0 0 14px;font-size:16px;line-height:1.5;">Hi,</p>
+						<p style="margin:0 0 14px;font-size:16px;line-height:1.5;">{greeting}</p>
 						<p style="margin:0 0 18px;font-size:16px;line-height:1.5;">{intro}</p>
 						{invoice_message}
 
@@ -306,6 +307,7 @@ def _invoice_email_message(invoice_doc, event, store_credit_applied, payable_amo
 		</div>
 	""".format(
 		invoice=context["invoice"],
+		greeting=greeting,
 		intro=intro,
 		invoice_message=invoice_message,
 		due_date=context["due_date"] or "-",
@@ -317,6 +319,13 @@ def _invoice_email_message(invoice_doc, event, store_credit_applied, payable_amo
 		bank_details=bank_details,
 		invoice_link=context["invoice_link"],
 	)
+
+
+def _invoice_email_greeting(context):
+	recipient_name = context.get("recipient_name")
+	if recipient_name:
+		return _("Hi {0},").format(escape_html(recipient_name))
+	return _("Hi,")
 
 
 def _html_multiline(value):

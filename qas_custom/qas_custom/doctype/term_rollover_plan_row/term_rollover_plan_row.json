@@ -1,0 +1,119 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "source_enrollment",
+  "student",
+  "parent",
+  "source_weekly_timeslot",
+  "target_weekly_timeslot",
+  "course",
+  "action",
+  "status",
+  "created_enrollment",
+  "created_invoice",
+  "error_message",
+  "notes"
+ ],
+ "fields": [
+  {
+   "fieldname": "source_enrollment",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Source Enrollment",
+   "read_only": 1
+  },
+  {
+   "fieldname": "student",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Student",
+   "options": "Student",
+   "reqd": 1
+  },
+  {
+   "fieldname": "parent",
+   "fieldtype": "Link",
+   "label": "Parent",
+   "options": "Parent"
+  },
+  {
+   "fieldname": "source_weekly_timeslot",
+   "fieldtype": "Data",
+   "label": "Source Weekly Timeslot",
+   "read_only": 1
+  },
+  {
+   "fieldname": "target_weekly_timeslot",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Target Weekly Timeslot",
+   "options": "Weekly Timeslot"
+  },
+  {
+   "fieldname": "course",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Course",
+   "options": "Course"
+  },
+  {
+   "default": "Continue",
+   "fieldname": "action",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Action",
+   "options": "Continue\nMove\nDrop\nNew",
+   "reqd": 1
+  },
+  {
+   "default": "Planned",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Status",
+   "options": "Planned\nExcluded\nPopulated\nError",
+   "reqd": 1
+  },
+  {
+   "fieldname": "created_enrollment",
+   "fieldtype": "Data",
+   "label": "Created Enrollment",
+   "read_only": 1
+  },
+  {
+   "fieldname": "created_invoice",
+   "fieldtype": "Data",
+   "label": "Created Invoice",
+   "read_only": 1
+  },
+  {
+   "fieldname": "error_message",
+   "fieldtype": "Small Text",
+   "label": "Error Message",
+   "read_only": 1
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-06-29 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "QAS Custom",
+ "name": "Term Rollover Plan Row",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "states": []
+}
