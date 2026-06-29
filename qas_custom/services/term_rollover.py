@@ -81,8 +81,34 @@ def get_term_data(term=None):
 		_count("Course Sessions", {"weekly_timeslot": ["in", timeslot_ids]}) if timeslot_ids else 0
 	)
 	payload["active_enrollment_count"] = _count("Enrollment", {"term": term, "status": "Active"})
+	payload["weekly_timeslots"] = get_school_admin_weekly_timeslots_data(
+		term=term,
+		include_inactive_terms=1,
+		include_inactive_timeslots=1,
+		limit=300,
+	).get("items", [])
 	payload["rollover_plans"] = _get_rollover_plan_rows(target_term=term, limit=20)
 	return payload
+
+
+def update_term_data(term=None, payload=None):
+	_require_school_admin()
+	if not term:
+		frappe.throw(_("Term is required."))
+	payload = _get_payload(payload)
+	doc = frappe.get_doc("Term", term)
+	for fieldname in ["term_name", "start_date", "end_date", "status", "notes"]:
+		if fieldname in payload:
+			_set_if_field(doc, fieldname, payload.get(fieldname))
+	if not doc.get("term_name"):
+		frappe.throw(_("Term name is required."))
+	if not doc.get("start_date") or not doc.get("end_date"):
+		frappe.throw(_("Term start and end dates are required."))
+	if getdate(doc.end_date) < getdate(doc.start_date):
+		frappe.throw(_("Term end date cannot be before start date."))
+	doc.save(ignore_permissions=True)
+	frappe.db.commit()
+	return get_term_data(doc.name)
 
 
 def create_term_data(payload=None):
@@ -382,9 +408,12 @@ def _generate_sessions_for_term(term):
 	term_doc = frappe.get_doc("Term", term)
 	if not term_doc.get("start_date") or not term_doc.get("end_date"):
 		frappe.throw(_("Target term dates are required before generating sessions."))
+	filters = {"term": term}
+	if _has_field("Weekly Timeslot", "status"):
+		filters["status"] = "Active"
 	timeslots = frappe.get_all(
 		"Weekly Timeslot",
-		filters={"term": term},
+		filters=filters,
 		fields=_safe_fields("Weekly Timeslot", ["name", "day_of_week"]),
 		limit_page_length=0,
 	)

@@ -264,7 +264,16 @@ def school_admin_populate_term(plan=None):
 
 
 @frappe.whitelist()
-def school_admin_get_enrollments(student=None, parent=None, course=None, term=None, enrollment_type=None, status=None, limit=80):
+def school_admin_get_enrollments(
+	student=None,
+	parent=None,
+	course=None,
+	term=None,
+	enrollment_type=None,
+	status=None,
+	include_inactive_terms=0,
+	limit=80,
+):
 	return get_school_admin_enrollments_data(
 		student=student,
 		parent=parent,
@@ -272,6 +281,7 @@ def school_admin_get_enrollments(student=None, parent=None, course=None, term=No
 		term=term,
 		enrollment_type=enrollment_type,
 		status=status,
+		include_inactive_terms=include_inactive_terms,
 		limit=limit,
 	)
 
@@ -302,13 +312,24 @@ def school_admin_end_enrollment(enrollment=None, payload=None):
 
 
 @frappe.whitelist()
-def school_admin_get_weekly_timeslots(term=None, course=None, campus=None, teacher=None, status=None, limit=120):
+def school_admin_get_weekly_timeslots(
+	term=None,
+	course=None,
+	campus=None,
+	teacher=None,
+	status=None,
+	include_inactive_terms=0,
+	include_inactive_timeslots=0,
+	limit=120,
+):
 	return get_school_admin_weekly_timeslots_data(
 		term=term,
 		course=course,
 		campus=campus,
 		teacher=teacher,
 		status=status,
+		include_inactive_terms=include_inactive_terms,
+		include_inactive_timeslots=include_inactive_timeslots,
 		limit=limit,
 	)
 
@@ -334,7 +355,17 @@ def school_admin_generate_course_sessions(weekly_timeslot=None, from_date=None, 
 
 
 @frappe.whitelist()
-def school_admin_get_course_sessions(weekly_timeslot=None, term=None, course=None, campus=None, from_date=None, to_date=None, limit=160):
+def school_admin_get_course_sessions(
+	weekly_timeslot=None,
+	term=None,
+	course=None,
+	campus=None,
+	from_date=None,
+	to_date=None,
+	include_inactive_terms=0,
+	include_inactive_timeslots=0,
+	limit=160,
+):
 	return get_school_admin_course_sessions_data(
 		weekly_timeslot=weekly_timeslot,
 		term=term,
@@ -342,6 +373,8 @@ def school_admin_get_course_sessions(weekly_timeslot=None, term=None, course=Non
 		campus=campus,
 		from_date=from_date,
 		to_date=to_date,
+		include_inactive_terms=include_inactive_terms,
+		include_inactive_timeslots=include_inactive_timeslots,
 		limit=limit,
 	)
 

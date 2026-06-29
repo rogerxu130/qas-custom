@@ -7,6 +7,7 @@ from qas_custom.services.term_rollover import (
 	get_term_data,
 	get_terms_data,
 	populate_term_data,
+	update_term_data,
 	update_rollover_plan_row_data,
 )
 
@@ -24,6 +25,11 @@ def school_terms_get_term(term=None):
 @frappe.whitelist()
 def school_terms_create_term(payload=None):
 	return create_term_data(payload=payload)
+
+
+@frappe.whitelist()
+def school_terms_update_term(term=None, payload=None):
+	return update_term_data(term=term, payload=payload)
 
 
 @frappe.whitelist()

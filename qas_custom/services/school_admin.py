@@ -54,6 +54,8 @@ from qas_custom.services.teacher_revenue_share import get_teacher_revenue_share_
 ADMIN_ROLES = {"School Admin", "System Manager"}
 INQUIRY_OPEN_STATUSES = ["New", "Needs Review", "Booked", "Rescheduled", "No-show"]
 INQUIRY_POST_VISIT_STATUSES = ["Completed", "Follow-up"]
+ACTIVE_TERM_STATUSES = ["Upcoming", "Active"]
+ACTIVE_TIMESLOT_STATUSES = ["Active"]
 
 
 def get_school_admin_me_data():
@@ -75,6 +77,8 @@ def get_school_admin_dashboard_data():
 	start_date = getdate(today())
 	end_date = getdate(add_days(start_date, 7))
 	outstanding = _get_outstanding_invoice_summary()
+	active_enrollment_filters = {"status": "Active"}
+	_apply_active_term_filter(active_enrollment_filters)
 	return {
 		"date": str(start_date),
 		"action_counts": {
@@ -91,7 +95,7 @@ def get_school_admin_dashboard_data():
 				"Inquiry",
 				{"status": ["in", INQUIRY_POST_VISIT_STATUSES]},
 			),
-			"active_enrollments": _count("Enrollment", {"status": "Active"}),
+			"active_enrollments": _count("Enrollment", active_enrollment_filters),
 		},
 		"upcoming": {
 			"from_date": str(start_date),
@@ -112,9 +116,12 @@ def get_school_admin_dashboard_data():
 					"current_appointment_date": ["between", [start_date, end_date]],
 				},
 			),
-			"course_sessions": _count(
-				"Course Sessions",
-				{"session_date": ["between", [start_date, end_date]]},
+			"course_sessions": len(
+				_get_course_session_rows(
+					from_date=start_date,
+					to_date=end_date,
+					limit=500,
+				)
 			),
 		},
 		"financial": {
@@ -601,6 +608,12 @@ def get_school_admin_term_data(term=None):
 		_count("Course Sessions", {"weekly_timeslot": ["in", timeslot_ids]}) if timeslot_ids else 0
 	)
 	payload["active_enrollment_count"] = _count("Enrollment", {"term": term, "status": "Active"})
+	payload["weekly_timeslots"] = get_school_admin_weekly_timeslots_data(
+		term=term,
+		include_inactive_terms=1,
+		include_inactive_timeslots=1,
+		limit=300,
+	).get("items", [])
 	payload["rollover_plans"] = _get_rollover_plan_rows(target_term=term, limit=20)
 	return payload
 
@@ -902,9 +915,12 @@ def _generate_sessions_for_term(term):
 	term_doc = frappe.get_doc("Term", term)
 	if not term_doc.get("start_date") or not term_doc.get("end_date"):
 		frappe.throw(_("Target term dates are required before generating sessions."))
+	filters = {"term": term}
+	if _has_field("Weekly Timeslot", "status"):
+		filters["status"] = "Active"
 	timeslots = frappe.get_all(
 		"Weekly Timeslot",
-		filters={"term": term},
+		filters=filters,
 		fields=_safe_fields("Weekly Timeslot", ["name", "day_of_week"]),
 		limit_page_length=0,
 	)
@@ -1075,6 +1091,7 @@ def get_school_admin_enrollments_data(
 	term=None,
 	enrollment_type=None,
 	status=None,
+	include_inactive_terms=0,
 	limit=80,
 ):
 	_require_school_admin()
@@ -1089,6 +1106,7 @@ def get_school_admin_enrollments_data(
 	}.items():
 		if value:
 			filters[fieldname] = value
+	_apply_active_term_filter(filters, term=term, include_inactive_terms=include_inactive_terms)
 	return {"items": _get_enrollment_rows(filters=filters, limit=_limit(limit, default=80, max_value=200))}
 
 
@@ -1166,7 +1184,16 @@ def end_school_admin_enrollment_data(enrollment=None, payload=None):
 	return _build_enrollment_payload(doc)
 
 
-def get_school_admin_weekly_timeslots_data(term=None, course=None, campus=None, teacher=None, status=None, limit=120):
+def get_school_admin_weekly_timeslots_data(
+	term=None,
+	course=None,
+	campus=None,
+	teacher=None,
+	status=None,
+	include_inactive_terms=0,
+	include_inactive_timeslots=0,
+	limit=120,
+):
 	_require_school_admin()
 	if not _doctype_available("Weekly Timeslot"):
 		return {"items": []}
@@ -1180,6 +1207,9 @@ def get_school_admin_weekly_timeslots_data(term=None, course=None, campus=None, 
 	}.items():
 		if value and _has_field("Weekly Timeslot", fieldname):
 			filters[fieldname] = value
+	_apply_active_term_filter(filters, term=term, include_inactive_terms=include_inactive_terms)
+	if not status:
+		_apply_active_timeslot_filter(filters, include_inactive_timeslots=include_inactive_timeslots)
 	fields = _safe_fields(
 		"Weekly Timeslot",
 		[
@@ -1273,6 +1303,8 @@ def get_school_admin_course_sessions_data(
 	campus=None,
 	from_date=None,
 	to_date=None,
+	include_inactive_terms=0,
+	include_inactive_timeslots=0,
 	limit=160,
 ):
 	_require_school_admin()
@@ -1286,6 +1318,8 @@ def get_school_admin_course_sessions_data(
 			campus=campus,
 			from_date=from_date,
 			to_date=to_date,
+			include_inactive_terms=include_inactive_terms,
+			include_inactive_timeslots=include_inactive_timeslots,
 			limit=_limit(limit, default=160, max_value=300),
 		)
 	}
@@ -1411,6 +1445,37 @@ def _count(doctype, filters):
 		return frappe.db.count(doctype, filters)
 	except Exception:
 		return 0
+
+
+def _is_truthy(value):
+	return str(value).lower() in {"1", "true", "yes", "y"}
+
+
+def _active_term_names():
+	if not _doctype_available("Term") or not _has_field("Term", "status"):
+		return None
+	return frappe.get_all(
+		"Term",
+		filters={"status": ["in", ACTIVE_TERM_STATUSES]},
+		pluck="name",
+		limit_page_length=0,
+	)
+
+
+def _apply_active_term_filter(filters, term=None, include_inactive_terms=0):
+	if term or _is_truthy(include_inactive_terms):
+		return
+	active_terms = _active_term_names()
+	if active_terms is None:
+		return
+	filters["term"] = ["in", active_terms or ["__qas_no_active_term__"]]
+
+
+def _apply_active_timeslot_filter(filters, include_inactive_timeslots=0):
+	if _is_truthy(include_inactive_timeslots):
+		return
+	if _has_field("Weekly Timeslot", "status"):
+		filters["status"] = ["in", ACTIVE_TIMESLOT_STATUSES]
 
 
 def _count_sales_invoices(filters):
@@ -2170,6 +2235,8 @@ def _get_course_session_rows(
 	campus=None,
 	from_date=None,
 	to_date=None,
+	include_inactive_terms=0,
+	include_inactive_timeslots=0,
 	limit=160,
 ):
 	if not _doctype_available("Course Sessions"):
@@ -2183,7 +2250,13 @@ def _get_course_session_rows(
 		filters["session_date"] = [">=", getdate(from_date)]
 	elif to_date:
 		filters["session_date"] = ["<=", getdate(to_date)]
-	timeslot_ids = _filter_timeslots_for_session_query(term=term, course=course, campus=campus)
+	timeslot_ids = _filter_timeslots_for_session_query(
+		term=term,
+		course=course,
+		campus=campus,
+		include_inactive_terms=include_inactive_terms,
+		include_inactive_timeslots=include_inactive_timeslots,
+	)
 	if timeslot_ids is not None:
 		if weekly_timeslot and weekly_timeslot not in timeslot_ids:
 			return []
@@ -2284,15 +2357,21 @@ def _create_session_attendance_for_active_enrollments(session):
 			create_full_term_attendance_entries([session], enrollment.student, enrollment.name)
 
 
-def _filter_timeslots_for_session_query(term=None, course=None, campus=None):
+def _filter_timeslots_for_session_query(
+	term=None,
+	course=None,
+	campus=None,
+	include_inactive_terms=0,
+	include_inactive_timeslots=0,
+):
 	if not _doctype_available("Weekly Timeslot"):
 		return []
-	if not any([term, course, campus]):
-		return None
 	filters = {}
 	for fieldname, value in {"term": term, "course": course, "campus": campus}.items():
 		if value and _has_field("Weekly Timeslot", fieldname):
 			filters[fieldname] = value
+	_apply_active_term_filter(filters, term=term, include_inactive_terms=include_inactive_terms)
+	_apply_active_timeslot_filter(filters, include_inactive_timeslots=include_inactive_timeslots)
 	if not filters:
 		return None
 	return [row.name for row in frappe.get_all("Weekly Timeslot", filters=filters, fields=["name"])]
