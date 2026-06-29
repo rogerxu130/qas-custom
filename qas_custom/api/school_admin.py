@@ -45,8 +45,6 @@ from qas_custom.services.school_admin import (
 	submit_school_admin_invoice_data,
 	transfer_school_admin_enrollment_data,
 	copy_school_admin_term_data,
-	get_school_admin_rollover_plan_data,
-	update_school_admin_rollover_plan_row_data,
 	update_school_admin_attendance_data,
 	update_school_admin_draft_invoice_data,
 	update_school_admin_enrollment_data,
@@ -249,18 +247,8 @@ def school_admin_copy_term(payload=None):
 
 
 @frappe.whitelist()
-def school_admin_get_rollover_plan(plan=None):
-	return get_school_admin_rollover_plan_data(plan=plan)
-
-
-@frappe.whitelist()
-def school_admin_update_rollover_plan_row(plan=None, row=None, payload=None):
-	return update_school_admin_rollover_plan_row_data(plan=plan, row=row, payload=payload)
-
-
-@frappe.whitelist()
-def school_admin_populate_term(plan=None):
-	return populate_school_admin_term_data(plan=plan)
+def school_admin_populate_term(term=None, plan=None):
+	return populate_school_admin_term_data(term=term or plan)
 
 
 @frappe.whitelist()

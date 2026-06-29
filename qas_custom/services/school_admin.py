@@ -610,13 +610,15 @@ def get_school_admin_term_data(term=None):
 		_count("Course Sessions", {"weekly_timeslot": ["in", timeslot_ids]}) if timeslot_ids else 0
 	)
 	payload["active_enrollment_count"] = _count("Enrollment", {"term": term, "status": "Active"})
+	payload["planned_enrollment_count"] = _count("Enrollment", {"term": term, "status": "Planned"})
+	payload["planned_enrollments"] = _get_enrollment_rows(filters={"term": term, "status": "Planned"}, limit=500)
 	payload["weekly_timeslots"] = get_school_admin_weekly_timeslots_data(
 		term=term,
 		include_inactive_terms=1,
 		include_inactive_timeslots=1,
 		limit=300,
 	).get("items", [])
-	payload["rollover_plans"] = _get_rollover_plan_rows(target_term=term, limit=20)
+	payload["timeslot_options"] = _get_weekly_timeslot_reference_options()
 	return payload
 
 
@@ -653,140 +655,24 @@ def copy_school_admin_term_data(payload=None):
 		frappe.throw(_("Source or target term does not exist."))
 
 	timeslot_map = _copy_term_weekly_timeslots(source_term, target_term)
-	plan = frappe.new_doc("Term Rollover Plan")
-	plan.source_term = source_term
-	plan.target_term = target_term
-	plan.status = "Draft"
-	plan.copied_timeslot_count = len(set(timeslot_map.values()))
-
-	planned_count = 0
-	for enrollment in _source_term_rollover_enrollments(source_term):
-		target_timeslot = timeslot_map.get(enrollment.get("weekly_timeslot"))
-		row = plan.append("planned_rows", {})
-		row.source_enrollment = enrollment.get("name")
-		row.student = enrollment.get("student")
-		row.family_parent = enrollment.get("parent")
-		row.source_weekly_timeslot = enrollment.get("weekly_timeslot")
-		row.target_weekly_timeslot = target_timeslot
-		row.course = enrollment.get("course")
-		row.action = "Continue"
-		row.status = "Planned" if target_timeslot else "Error"
-		if not target_timeslot:
-			row.error_message = _("Target weekly timeslot was not copied.")
-		planned_count += 1
-
-	plan.planned_enrollment_count = planned_count
-	plan.insert(ignore_permissions=True)
-	frappe.db.commit()
-	return get_school_admin_rollover_plan_data(plan.name)
-
-
-def get_school_admin_rollover_plan_data(plan=None):
-	_require_school_admin()
-	if not plan:
-		frappe.throw(_("Rollover plan is required."))
-	doc = frappe.get_doc("Term Rollover Plan", plan)
-	payload = _document_payload(doc)
-	payload["source_term_detail"] = _term_summary(doc.source_term)
-	payload["target_term_detail"] = _term_summary(doc.target_term)
-	payload["target_weekly_timeslots"] = get_school_admin_weekly_timeslots_data(term=doc.target_term, limit=300).get("items", [])
-	return payload
-
-
-def update_school_admin_rollover_plan_row_data(plan=None, row=None, payload=None):
-	_require_school_admin()
-	if not plan:
-		frappe.throw(_("Rollover plan is required."))
-	payload = _get_payload(payload)
-	doc = frappe.get_doc("Term Rollover Plan", plan)
-	if doc.status != "Draft":
-		frappe.throw(_("Only draft rollover plans can be edited."))
-	target = None
-	if row:
-		target = next((item for item in doc.get("planned_rows", []) if item.name == row), None)
-		if not target:
-			frappe.throw(_("Rollover plan row was not found."))
-	else:
-		target = doc.append("planned_rows", {})
-
-	if "parent" in payload and "family_parent" not in payload:
-		payload["family_parent"] = payload.get("parent")
-	for fieldname in ["student", "family_parent", "target_weekly_timeslot", "course", "action", "status", "notes"]:
-		if fieldname in payload:
-			target.set(fieldname, payload.get(fieldname))
-	if not target.get("student"):
-		frappe.throw(_("Student is required."))
-	if target.get("action") == "Drop":
-		target.status = "Excluded"
-	elif target.get("status") == "Excluded" and target.get("action") != "Drop":
-		target.status = "Planned"
-	if not target.get("action"):
-		target.action = "New" if not target.get("source_enrollment") else "Continue"
-	if not target.get("status"):
-		target.status = "Planned"
-
-	doc.planned_enrollment_count = len(doc.get("planned_rows", []))
-	doc.save(ignore_permissions=True)
-	frappe.db.commit()
-	return get_school_admin_rollover_plan_data(doc.name)
-
-
-def populate_school_admin_term_data(plan=None):
-	_require_school_admin()
-	if not plan:
-		frappe.throw(_("Rollover plan is required."))
-	doc = frappe.get_doc("Term Rollover Plan", plan)
-	if doc.status == "Cancelled":
-		frappe.throw(_("Cancelled rollover plans cannot be populated."))
-	target_term = frappe.get_doc("Term", doc.target_term)
-	created_sessions = _generate_sessions_for_term(doc.target_term)
-	created_enrollments = 0
-	created_invoices = 0
-	skipped = 0
-	errors = 0
-
-	for row in doc.get("planned_rows", []):
-		if row.get("action") == "Drop" or row.get("status") == "Excluded":
-			row.status = "Excluded"
-			skipped += 1
-			continue
-		if row.get("created_enrollment"):
-			skipped += 1
-			continue
-		savepoint = f"rollover_row_{row.idx or 0}"
-		frappe.db.savepoint(savepoint)
-		try:
-			result = _populate_rollover_plan_row(row, doc.target_term, target_term)
-			row.created_enrollment = result.get("enrollment")
-			row.created_invoice = result.get("invoice")
-			row.status = "Populated"
-			row.error_message = ""
-			created_enrollments += 1
-			if result.get("invoice"):
-				created_invoices += 1
-		except Exception as exc:
-			frappe.db.rollback(save_point=savepoint)
-			row.status = "Error"
-			row.error_message = _bulk_action_error_message(exc)
-			errors += 1
-
-	doc.created_session_count = cint(doc.get("created_session_count")) + len(created_sessions)
-	doc.created_enrollment_count = cint(doc.get("created_enrollment_count")) + created_enrollments
-	doc.created_invoice_count = cint(doc.get("created_invoice_count")) + created_invoices
-	if errors == 0:
-		doc.status = "Populated"
-	doc.save(ignore_permissions=True)
+	planned_count = _copy_term_planned_enrollments(source_term, target_term, timeslot_map)
 	frappe.db.commit()
 	return {
-		"plan": get_school_admin_rollover_plan_data(doc.name),
+		"term": get_school_admin_term_data(target_term),
 		"summary": {
-			"created_sessions": len(created_sessions),
-			"created_enrollments": created_enrollments,
-			"created_invoices": created_invoices,
-			"skipped": skipped,
-			"errors": errors,
+			"copied_timeslots": len(set(timeslot_map.values())),
+			"planned_enrollments": planned_count,
 		},
 	}
+
+
+def populate_school_admin_term_data(term=None):
+	_require_school_admin()
+	if not term:
+		frappe.throw(_("Term is required."))
+	if not frappe.db.exists("Term", term):
+		frappe.throw(_("Term was not found."))
+	return _populate_planned_enrollments_for_term(term)
 
 
 def _term_row_payload(row):
@@ -795,6 +681,7 @@ def _term_row_payload(row):
 	if term:
 		payload["weekly_timeslot_count"] = _count("Weekly Timeslot", {"term": term})
 		payload["active_enrollment_count"] = _count("Enrollment", {"term": term, "status": "Active"})
+		payload["planned_enrollment_count"] = _count("Enrollment", {"term": term, "status": "Planned"})
 	return payload
 
 
@@ -804,39 +691,6 @@ def _term_summary(term):
 	fields = _safe_fields("Term", ["name", "term_name", "start_date", "end_date", "status"])
 	rows = frappe.get_all("Term", filters={"name": term}, fields=fields, limit=1)
 	return _term_row_payload(rows[0]) if rows else None
-
-
-def _get_rollover_plan_rows(target_term=None, source_term=None, limit=20):
-	if not _doctype_available("Term Rollover Plan"):
-		return []
-	filters = {}
-	if target_term:
-		filters["target_term"] = target_term
-	if source_term:
-		filters["source_term"] = source_term
-	fields = _safe_fields(
-		"Term Rollover Plan",
-		[
-			"name",
-			"source_term",
-			"target_term",
-			"status",
-			"copied_timeslot_count",
-			"planned_enrollment_count",
-			"created_session_count",
-			"created_enrollment_count",
-			"created_invoice_count",
-			"modified",
-		],
-	)
-	rows = frappe.get_all(
-		"Term Rollover Plan",
-		filters=filters,
-		fields=fields,
-		order_by="modified desc",
-		limit=limit,
-	)
-	return [_normalize_row_payload("Term Rollover Plan", row) for row in rows]
 
 
 def _copy_term_weekly_timeslots(source_term, target_term):
@@ -890,7 +744,7 @@ def _matching_target_timeslot(source_row, target_term):
 	return frappe.db.exists("Weekly Timeslot", filters)
 
 
-def _source_term_rollover_enrollments(source_term):
+def _source_term_enrollments_for_planning(source_term):
 	fields = _safe_fields(
 		"Enrollment",
 		[
@@ -911,6 +765,48 @@ def _source_term_rollover_enrollments(source_term):
 		order_by="weekly_timeslot asc, student asc",
 		limit_page_length=0,
 	)
+
+
+def _copy_term_planned_enrollments(source_term, target_term, timeslot_map):
+	planned_count = 0
+	target_term_doc = frappe.get_doc("Term", target_term)
+	for enrollment in _source_term_enrollments_for_planning(source_term):
+		target_timeslot = timeslot_map.get(enrollment.get("weekly_timeslot"))
+		if not target_timeslot:
+			continue
+		if _existing_target_enrollment(enrollment.get("student"), target_term, target_timeslot, statuses=["Planned", "Active"]):
+			continue
+		doc = frappe.new_doc("Enrollment")
+		_apply_enrollment_payload(
+			doc,
+			{
+				"student": enrollment.get("student"),
+				"parent": enrollment.get("parent"),
+				"term": target_term,
+				"course": enrollment.get("course"),
+				"weekly_timeslot": target_timeslot,
+				"enrollment_type": enrollment.get("enrollment_type") or "Full-Term",
+				"status": "Planned",
+				"enrollment_date": target_term_doc.get("start_date") or today(),
+			},
+		)
+		doc.insert(ignore_permissions=True)
+		_add_comment("Enrollment", doc.name, _("Planned enrollment copied from {0}.").format(enrollment.get("name")))
+		planned_count += 1
+	return planned_count
+
+
+def _existing_target_enrollment(student, term, weekly_timeslot, statuses=None):
+	if not student or not term or not weekly_timeslot:
+		return None
+	filters = {
+		"student": student,
+		"term": term,
+		"weekly_timeslot": weekly_timeslot,
+	}
+	if statuses:
+		filters["status"] = ["in", statuses]
+	return frappe.db.exists("Enrollment", filters)
 
 
 def _generate_sessions_for_term(term):
@@ -940,65 +836,100 @@ def _generate_sessions_for_term(term):
 	return created
 
 
-def _populate_rollover_plan_row(row, target_term, target_term_doc):
-	if not row.get("student"):
-		frappe.throw(_("Student is required."))
-	if not row.get("target_weekly_timeslot"):
-		frappe.throw(_("Target weekly timeslot is required."))
+def _populate_planned_enrollments_for_term(term):
+	term_doc = frappe.get_doc("Term", term)
+	created_sessions = _generate_sessions_for_term(term)
+	activated_enrollments = 0
+	created_invoices = 0
+	skipped = 0
+	errors = 0
+	error_rows = []
+
+	planned_rows = frappe.get_all(
+		"Enrollment",
+		filters={"term": term, "status": "Planned", "enrollment_type": "Full-Term"},
+		fields=_safe_fields("Enrollment", ["name", "student", "weekly_timeslot", "course"]),
+		order_by="weekly_timeslot asc, student asc",
+		limit_page_length=0,
+	)
+	for row in planned_rows:
+		savepoint = f"planned_enrollment_{row.name}".replace("-", "_")
+		frappe.db.savepoint(savepoint)
+		try:
+			doc = frappe.get_doc("Enrollment", row.name)
+			result = _activate_planned_enrollment(doc, term_doc)
+			activated_enrollments += 1
+			if result.get("invoice"):
+				created_invoices += 1
+		except Exception as exc:
+			frappe.db.rollback(save_point=savepoint)
+			errors += 1
+			error_rows.append({"enrollment": row.name, "error": _bulk_action_error_message(exc)})
+
+	frappe.db.commit()
+	return {
+		"term": get_school_admin_term_data(term),
+		"summary": {
+			"created_sessions": len(created_sessions),
+			"created_enrollments": activated_enrollments,
+			"created_invoices": created_invoices,
+			"skipped": skipped,
+			"errors": errors,
+			"error_rows": error_rows,
+		},
+	}
+
+
+def _activate_planned_enrollment(enrollment, term_doc):
+	if enrollment.get("status") != "Planned":
+		return {"enrollment": enrollment.name, "invoice": enrollment.get("invoice")}
+	if not enrollment.get("weekly_timeslot"):
+		frappe.throw(_("Weekly timeslot is required before activating enrollment."))
 	timeslot = frappe.db.get_value(
 		"Weekly Timeslot",
-		row.target_weekly_timeslot,
+		enrollment.weekly_timeslot,
 		_safe_fields("Weekly Timeslot", ["name", "term", "course"]),
 		as_dict=True,
 	)
 	if not timeslot:
-		frappe.throw(_("Target weekly timeslot does not exist."))
-	if timeslot.get("term") != target_term:
-		frappe.throw(_("Target weekly timeslot does not belong to the target term."))
-	if _duplicate_active_enrollment(row.student, target_term, row.target_weekly_timeslot):
-		frappe.throw(_("An active enrollment already exists for this student and weekly timeslot."))
-
-	start_session = _first_course_session_for_timeslot(row.target_weekly_timeslot, target_term_doc)
-	parent = row.get("family_parent") or frappe.db.get_value("Student", row.student, "guardian")
-	course = row.get("course") or timeslot.get("course")
-
-	enrollment = frappe.new_doc("Enrollment")
-	_apply_enrollment_payload(
-		enrollment,
-		{
-			"student": row.student,
-			"parent": parent,
-			"term": target_term,
-			"course": course,
-			"weekly_timeslot": row.target_weekly_timeslot,
-			"start_course_session": start_session,
-			"enrollment_type": "Full-Term",
-			"status": "Active",
-			"enrollment_date": target_term_doc.get("start_date") or today(),
-			"source_inquiry": None,
-		},
+		frappe.throw(_("Weekly timeslot does not exist."))
+	if timeslot.get("term") != term_doc.name:
+		frappe.throw(_("Weekly timeslot does not belong to this term."))
+	duplicate = _duplicate_active_enrollment(
+		enrollment.student,
+		term_doc.name,
+		enrollment.weekly_timeslot,
+		exclude=enrollment.name,
 	)
-	enrollment.insert(ignore_permissions=True)
+	if duplicate:
+		frappe.throw(_("An active enrollment already exists for this student and weekly timeslot."))
+	start_session = _first_course_session_for_timeslot(enrollment.weekly_timeslot, term_doc)
+	_set_if_field(enrollment, "start_course_session", start_session)
+	_set_if_field(enrollment, "course", enrollment.get("course") or timeslot.get("course"))
+	_set_if_field(enrollment, "status", "Active")
+	_set_if_field(enrollment, "enrollment_date", term_doc.get("start_date") or enrollment.get("enrollment_date") or today())
+	enrollment.save(ignore_permissions=True)
 	_create_enrollment_attendance_entries(enrollment)
-	invoice = _create_rollover_enrollment_invoice(enrollment, start_session)
+	invoice = _create_term_enrollment_invoice(enrollment, start_session)
 	if invoice:
 		_set_if_field(enrollment, "invoice", invoice.name)
 		_set_if_field(enrollment, "invoice_status", "Draft")
 		_set_if_field(enrollment, "invoice_amount", invoice.get("grand_total"))
 		enrollment.save(ignore_permissions=True)
+	_add_comment("Enrollment", enrollment.name, _("Planned enrollment activated for term {0}.").format(term_doc.name))
 	return {"enrollment": enrollment.name, "invoice": invoice.name if invoice else None}
 
 
-def _duplicate_active_enrollment(student, term, weekly_timeslot):
-	return frappe.db.exists(
-		"Enrollment",
-		{
-			"student": student,
-			"term": term,
-			"weekly_timeslot": weekly_timeslot,
-			"status": "Active",
-		},
-	)
+def _duplicate_active_enrollment(student, term, weekly_timeslot, exclude=None):
+	filters = {
+		"student": student,
+		"term": term,
+		"weekly_timeslot": weekly_timeslot,
+		"status": "Active",
+	}
+	if exclude:
+		filters["name"] = ["!=", exclude]
+	return frappe.db.exists("Enrollment", filters)
 
 
 def _first_course_session_for_timeslot(weekly_timeslot, term_doc):
@@ -1018,7 +949,7 @@ def _first_course_session_for_timeslot(weekly_timeslot, term_doc):
 	return rows[0].name
 
 
-def _create_rollover_enrollment_invoice(enrollment, start_session):
+def _create_term_enrollment_invoice(enrollment, start_session):
 	parent = enrollment.get("parent")
 	course = enrollment.get("course")
 	if not parent or not course:
@@ -1042,7 +973,7 @@ def _create_rollover_enrollment_invoice(enrollment, start_session):
 	_set_if_field(invoice, "source_doctype", "Enrollment")
 	_set_if_field(invoice, "source_document", enrollment.name)
 	_set_if_field(invoice, "enrollment", enrollment.name)
-	_set_if_field(invoice, "billing_note", _("Draft course invoice generated from term rollover."))
+	_set_if_field(invoice, "billing_note", _("Draft course invoice generated from planned term enrollment."))
 
 	student_name = get_student_parent_name(enrollment.student) or enrollment.student
 	student_code = get_student_display_code(enrollment.student) or enrollment.student
@@ -1126,7 +1057,8 @@ def create_school_admin_enrollment_data(payload=None):
 	doc = frappe.new_doc("Enrollment")
 	_apply_enrollment_payload(doc, payload)
 	doc.insert(ignore_permissions=True)
-	_create_enrollment_attendance_entries(doc)
+	if doc.get("status") == "Active":
+		_create_enrollment_attendance_entries(doc)
 	_add_comment("Enrollment", doc.name, "Enrollment created by School Admin.")
 	frappe.db.commit()
 	return _build_enrollment_payload(doc)
@@ -1139,10 +1071,13 @@ def update_school_admin_enrollment_data(enrollment=None, payload=None):
 	payload = _get_payload(payload)
 	doc = frappe.get_doc("Enrollment", enrollment)
 	previous_timeslot = doc.get("weekly_timeslot")
+	previous_status = doc.get("status")
 	_apply_enrollment_payload(doc, payload)
 	doc.save(ignore_permissions=True)
-	if payload.get("weekly_timeslot") and payload.get("weekly_timeslot") != previous_timeslot:
+	if doc.get("status") == "Active" and payload.get("weekly_timeslot") and payload.get("weekly_timeslot") != previous_timeslot:
 		_cancel_future_enrollment_attendance(doc.name, effective_date=payload.get("effective_date") or today())
+		_create_enrollment_attendance_entries(doc, start_date=payload.get("effective_date") or today())
+	elif doc.get("status") == "Active" and previous_status != "Active":
 		_create_enrollment_attendance_entries(doc, start_date=payload.get("effective_date") or today())
 	_add_comment("Enrollment", doc.name, "Enrollment updated by School Admin.")
 	frappe.db.commit()
@@ -1238,7 +1173,11 @@ def get_school_admin_weekly_timeslots_data(
 		order_by="term desc, course asc, campus asc, day_of_week asc, start_time asc",
 		limit=_limit(limit, default=120, max_value=300),
 	)
-	return {"items": [_docdict(row) for row in rows]}
+	items = [_docdict(row) for row in rows]
+	enrollment_counts = _get_active_enrollment_counts_for_timeslots([row.get("name") for row in items])
+	for item in items:
+		item["active_enrollment_count"] = enrollment_counts.get(item.get("name"), 0)
+	return {"items": items}
 
 
 def get_school_admin_weekly_timeslot_data(weekly_timeslot=None):
@@ -1447,6 +1386,57 @@ def _count(doctype, filters):
 		return frappe.db.count(doctype, filters)
 	except Exception:
 		return 0
+
+
+def _get_active_enrollment_counts_for_timeslots(weekly_timeslots):
+	weekly_timeslots = [row for row in weekly_timeslots if row]
+	if not weekly_timeslots or not _doctype_available("Enrollment") or not _has_field("Enrollment", "weekly_timeslot"):
+		return {}
+	fields = ["weekly_timeslot", "count(name) as active_count"]
+	filters = {"weekly_timeslot": ["in", weekly_timeslots]}
+	if _has_field("Enrollment", "status"):
+		filters["status"] = "Active"
+	rows = frappe.get_all(
+		"Enrollment",
+		filters=filters,
+		fields=fields,
+		group_by="weekly_timeslot",
+		limit_page_length=0,
+	)
+	return {row.get("weekly_timeslot"): cint(row.get("active_count")) for row in rows}
+
+
+def _get_weekly_timeslot_reference_options():
+	return {
+		"courses": _get_link_options("Course", label_fields=["course_name"], filters={"status": "Active"}),
+		"campuses": _get_link_options("Campus", label_fields=["campus_name"]),
+		"classrooms": _get_link_options("Classroom", label_fields=["classroom_name", "room_name"]),
+		"teachers": _get_link_options("Teacher", label_fields=["teacher_name", "teacher_full_name"]),
+	}
+
+
+def _get_link_options(doctype, label_fields=None, filters=None, limit=500):
+	if not _doctype_available(doctype):
+		return []
+	label_fields = label_fields or []
+	fields = _safe_fields(doctype, ["name", *label_fields, "status"])
+	active_filters = {}
+	if filters:
+		for fieldname, value in filters.items():
+			if _has_field(doctype, fieldname):
+				active_filters[fieldname] = value
+	rows = frappe.get_all(
+		doctype,
+		filters=active_filters,
+		fields=fields,
+		order_by="name asc",
+		limit=_limit(limit, default=500, max_value=1000),
+	)
+	items = []
+	for row in rows:
+		label = next((row.get(fieldname) for fieldname in label_fields if row.get(fieldname)), None) or row.get("name")
+		items.append({"value": row.get("name"), "label": label})
+	return items
 
 
 def _is_truthy(value):
@@ -2243,6 +2233,8 @@ def _apply_enrollment_payload(doc, payload):
 
 
 def _create_enrollment_attendance_entries(doc, start_date=None):
+	if doc.get("status") != "Active":
+		return []
 	if doc.get("enrollment_type") != "Full-Term" or not doc.get("weekly_timeslot") or not doc.get("student"):
 		return []
 	filters = {"weekly_timeslot": doc.weekly_timeslot, "status": ["!=", "Cancelled"]}

@@ -94,7 +94,7 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Status",
-   "options": "Active\nInactive\nCompleted\nCancelled",
+   "options": "Planned\nActive\nInactive\nCompleted\nCancelled",
    "reqd": 1
   },
   {
