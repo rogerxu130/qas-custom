@@ -8,6 +8,7 @@
  "engine": "InnoDB",
  "field_order": [
   "course_name",
+  "course_name_zh",
   "status",
   "duration_mins",
   "age_column",
@@ -31,6 +32,12 @@
    "label": "Course Name",
    "reqd": 1,
    "unique": 1
+  },
+  {
+   "fieldname": "course_name_zh",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Course Name (Chinese)"
   },
   {
    "default": "Active",
@@ -117,7 +124,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-06-17 00:00:00.000000",
+ "modified": "2026-06-29 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "QAS Custom",
  "name": "Course",

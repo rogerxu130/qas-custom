@@ -57,6 +57,7 @@ INQUIRY_OPEN_STATUSES = ["New", "Needs Review", "Booked", "Rescheduled", "No-sho
 INQUIRY_POST_VISIT_STATUSES = ["Completed", "Follow-up"]
 ACTIVE_TERM_STATUSES = ["Upcoming", "Active"]
 ACTIVE_TIMESLOT_STATUSES = ["Active"]
+COURSE_LABEL_FIELDS = ["name", "course_name", "course_name_zh"]
 
 
 def get_school_admin_me_data():
@@ -1205,6 +1206,7 @@ def get_school_admin_weekly_timeslots_data(
 		limit=_limit(limit, default=120, max_value=300),
 	)
 	items = [_docdict(row) for row in rows]
+	_attach_course_labels(items)
 	enrollment_counts = _get_active_enrollment_counts_for_timeslots([row.get("name") for row in items])
 	for item in items:
 		item["active_enrollment_count"] = enrollment_counts.get(item.get("name"), 0)
@@ -1450,7 +1452,10 @@ def _get_link_options(doctype, label_fields=None, filters=None, limit=500):
 	if not _doctype_available(doctype):
 		return []
 	label_fields = label_fields or []
-	fields = _safe_fields(doctype, ["name", *label_fields, "status"])
+	field_candidates = ["name", *label_fields, "status"]
+	if doctype == "Course":
+		field_candidates = [*field_candidates, *COURSE_LABEL_FIELDS]
+	fields = _safe_fields(doctype, field_candidates)
 	active_filters = {}
 	if filters:
 		for fieldname, value in filters.items():
@@ -1466,8 +1471,39 @@ def _get_link_options(doctype, label_fields=None, filters=None, limit=500):
 	items = []
 	for row in rows:
 		label = next((row.get(fieldname) for fieldname in label_fields if row.get(fieldname)), None) or row.get("name")
-		items.append({"value": row.get("name"), "label": label})
+		item = {"value": row.get("name"), "label": label}
+		if doctype == "Course":
+			_attach_course_label(item, row.get("name"), row)
+		items.append(item)
 	return items
+
+
+def _course_label_map(course_names):
+	course_names = sorted({course for course in course_names if course})
+	if not course_names or not _doctype_available("Course"):
+		return {}
+	fields = _safe_fields("Course", COURSE_LABEL_FIELDS)
+	rows = frappe.get_all("Course", filters={"name": ["in", course_names]}, fields=fields, limit_page_length=0)
+	return {row.get("name"): _docdict(row) for row in rows}
+
+
+def _attach_course_labels(items, fieldname="course"):
+	label_map = _course_label_map([item.get(fieldname) for item in items])
+	for item in items:
+		_attach_course_label(item, item.get(fieldname), label_map.get(item.get(fieldname)))
+	return items
+
+
+def _attach_course_label(item, course, course_row=None):
+	if not course:
+		return item
+	course_row = _docdict(course_row) if course_row else {}
+	label_en = course_row.get("course_name") or course
+	label_zh = course_row.get("course_name_zh") or label_en
+	item["course_label"] = label_en
+	item["course_label_en"] = label_en
+	item["course_label_zh"] = label_zh
+	return item
 
 
 def _is_truthy(value):
@@ -2240,7 +2276,7 @@ def _get_enrollment_rows(parent=None, students=None, filters=None, limit=80):
 		order_by="modified desc",
 		limit=limit,
 	)
-	return [_normalize_row_payload("Enrollment", row) for row in rows]
+	return _attach_course_labels([_normalize_row_payload("Enrollment", row) for row in rows])
 
 
 def _apply_enrollment_payload(doc, payload):
@@ -2316,6 +2352,7 @@ def _cancel_future_enrollment_attendance(enrollment, effective_date=None):
 
 def _build_enrollment_payload(doc):
 	payload = _document_payload(doc)
+	_attach_course_label(payload, payload.get("course"), _course_label_map([payload.get("course")]).get(payload.get("course")))
 	if payload.get("weekly_timeslot"):
 		payload["weekly_timeslot_detail"] = _get_timeslot_summary(payload.get("weekly_timeslot"))
 	if payload.get("invoice"):
@@ -2393,6 +2430,8 @@ def _get_course_session_rows(
 	for row in rows:
 		item = _normalize_row_payload("Course Sessions", row)
 		item["weekly_timeslot_detail"] = timeslot_map.get(row.weekly_timeslot)
+		if item.get("weekly_timeslot_detail"):
+			_attach_course_label(item, item["weekly_timeslot_detail"].get("course"), item["weekly_timeslot_detail"])
 		items.append(item)
 	return items
 
@@ -2508,7 +2547,9 @@ def _get_timeslot_map(timeslot_ids):
 		],
 	)
 	rows = frappe.get_all("Weekly Timeslot", filters={"name": ["in", timeslot_ids]}, fields=fields)
-	return {row.name: _normalize_row_payload("Weekly Timeslot", row) for row in rows}
+	items = [_normalize_row_payload("Weekly Timeslot", row) for row in rows]
+	_attach_course_labels(items)
+	return {row.get("name"): row for row in items}
 
 
 def _get_timeslot_summary(weekly_timeslot):
