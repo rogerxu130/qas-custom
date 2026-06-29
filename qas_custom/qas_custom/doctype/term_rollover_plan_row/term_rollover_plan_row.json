@@ -8,7 +8,7 @@
  "field_order": [
   "source_enrollment",
   "student",
-  "parent",
+  "family_parent",
   "source_weekly_timeslot",
   "target_weekly_timeslot",
   "course",
@@ -35,11 +35,11 @@
    "options": "Student",
    "reqd": 1
   },
-  {
-   "fieldname": "parent",
-   "fieldtype": "Link",
-   "label": "Parent",
-   "options": "Parent"
+ {
+  "fieldname": "family_parent",
+  "fieldtype": "Link",
+  "label": "Parent",
+  "options": "Parent"
   },
   {
    "fieldname": "source_weekly_timeslot",

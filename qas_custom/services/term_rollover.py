@@ -130,7 +130,7 @@ def copy_term_data(payload=None):
 		row = plan.append("planned_rows", {})
 		row.source_enrollment = enrollment.get("name")
 		row.student = enrollment.get("student")
-		row.parent = enrollment.get("parent")
+		row.family_parent = enrollment.get("parent")
 		row.source_weekly_timeslot = enrollment.get("weekly_timeslot")
 		row.target_weekly_timeslot = target_timeslot
 		row.course = enrollment.get("course")
@@ -174,7 +174,9 @@ def update_rollover_plan_row_data(plan=None, row=None, payload=None):
 	else:
 		target = doc.append("planned_rows", {})
 
-	for fieldname in ["student", "parent", "target_weekly_timeslot", "course", "action", "status", "notes"]:
+	if "parent" in payload and "family_parent" not in payload:
+		payload["family_parent"] = payload.get("parent")
+	for fieldname in ["student", "family_parent", "target_weekly_timeslot", "course", "action", "status", "notes"]:
 		if fieldname in payload:
 			target.set(fieldname, payload.get(fieldname))
 	if not target.get("student"):
@@ -419,7 +421,7 @@ def _populate_rollover_plan_row(row, target_term, target_term_doc):
 		frappe.throw(_("An active enrollment already exists for this student and weekly timeslot."))
 
 	start_session = _first_course_session_for_timeslot(row.target_weekly_timeslot, target_term_doc)
-	parent = row.get("parent") or frappe.db.get_value("Student", row.student, "guardian")
+	parent = row.get("family_parent") or frappe.db.get_value("Student", row.student, "guardian")
 	course = row.get("course") or timeslot.get("course")
 
 	enrollment = frappe.new_doc("Enrollment")
