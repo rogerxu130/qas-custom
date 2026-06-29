@@ -138,10 +138,20 @@ def _add_sales_invoice_item_fields():
 	_ensure_custom_field(
 		"Sales Invoice Item",
 		{
+			"fieldname": "student_display_name",
+			"fieldtype": "Data",
+			"label": "Student Name",
+			"insert_after": "student",
+			"read_only": 1,
+		},
+	)
+	_ensure_custom_field(
+		"Sales Invoice Item",
+		{
 			"fieldname": "student_code",
 			"fieldtype": "Data",
 			"label": "Student Code",
-			"insert_after": "student",
+			"insert_after": "student_display_name",
 			"read_only": 1,
 		},
 	)

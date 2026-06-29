@@ -274,7 +274,7 @@ def get_parent_invoices_data():
                         "description": item.description,
                         "amount": float(item.amount or 0),
                         "student": item.get("student"),
-                        "student_code": item.get("student_code"),
+                        "student_display_name": item.get("student_display_name"),
                         "enrollment": item.get("enrollment"),
                         "course": item.get("course"),
                         "term": item.get("term"),

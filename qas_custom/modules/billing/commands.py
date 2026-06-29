@@ -7,7 +7,7 @@ from frappe.utils import flt, nowdate
 from qas_custom.modules.common import has_field, is_new_doc, set_if_field
 from qas_custom.modules.billing.presentation import build_course_invoice_description
 from qas_custom.modules.billing.invoice_settings import apply_invoice_payment_snapshot
-from qas_custom.services.display_labels import get_student_display_code
+from qas_custom.services.display_labels import get_student_display_code, get_student_parent_name
 
 
 def create_prorata_invoice(inquiry_doc, enrollment, course: str, term: str, start_session: str, remaining_session_count: int):
@@ -26,8 +26,9 @@ def create_prorata_invoice(inquiry_doc, enrollment, course: str, term: str, star
 	set_course_invoice_source(invoice, inquiry_doc.name)
 	set_if_field(invoice, "source_inquiry", inquiry_doc.name)
 
+	student_name = get_student_parent_name(inquiry_doc.student) or inquiry_doc.student
 	student_code = get_student_display_code(inquiry_doc.student) or inquiry_doc.student
-	description = build_course_invoice_description(student_code, course, term, remaining_session_count)
+	description = build_course_invoice_description(student_name, course, term, remaining_session_count)
 	item = invoice.append(
 		"items",
 		{
@@ -40,6 +41,7 @@ def create_prorata_invoice(inquiry_doc, enrollment, course: str, term: str, star
 	)
 	set_if_field(item, "qas_line_type", "Course Fee")
 	set_if_field(item, "student", inquiry_doc.student)
+	set_if_field(item, "student_display_name", student_name)
 	set_if_field(item, "student_code", student_code)
 	set_if_field(item, "enrollment", enrollment.name)
 	set_if_field(item, "course", course)
@@ -134,7 +136,7 @@ def sync_invoice_student_summary(invoice):
 		return
 
 	set_if_field(invoice, "primary_student", students[0])
-	labels = [get_student_display_code(student) or student for student in students]
+	labels = [get_student_parent_name(student) or student for student in students]
 	summary = labels[0] if len(labels) == 1 else _("Multiple students: {0}").format(", ".join(labels))
 	set_if_field(invoice, "student_summary", summary)
 

@@ -32,6 +32,13 @@ def get_student_display_name(student: str | dict | None):
 	return name
 
 
+def get_student_parent_name(student: str | dict | None):
+	doc = _get_student_doc(student)
+	if not doc:
+		return student if isinstance(student, str) else None
+	return doc.get("student_name") or doc.get("name")
+
+
 def sync_student_code(doc, method=None):
 	if not doc or not _has_column("Student", "student_code"):
 		return

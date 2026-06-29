@@ -8,18 +8,18 @@ from qas_custom.modules.billing.store_credit import (
 	get_invoice_store_credit_applied,
 )
 from qas_custom.modules.billing.invoice_settings import get_invoice_payment_context
-from qas_custom.services.display_labels import get_student_display_code
+from qas_custom.services.display_labels import get_student_parent_name
 
 DEFAULT_PARENT_PORTAL_URL = "https://portal.queenslandartschool.com"
 
 
-def build_course_invoice_description(student_code: str, course: str, term: str, session_count: int) -> str:
+def build_course_invoice_description(student_name: str, course: str, term: str, session_count: int) -> str:
 	parts = [course]
 	if term:
 		parts.append(f"({term})")
 	count = int(session_count or 0)
 	session_label = "1 session" if count == 1 else f"{count} sessions"
-	return f"{student_code} - {' '.join(parts)}, {session_label}"
+	return f"{student_name} - {' '.join(parts)}, {session_label}"
 
 
 def get_invoice_print_context(invoice_doc):
@@ -67,8 +67,8 @@ def parent_portal_invoice_link(invoice: str):
 
 def _build_parent_invoice_item(row):
 	student = row.get("student") if hasattr(row, "get") else None
-	student_code = row.get("student_code") if hasattr(row, "get") else None
-	student_label = student_code or get_student_display_code(student) or student or "Student"
+	student_display_name = row.get("student_display_name") if hasattr(row, "get") else None
+	student_label = student_display_name or get_student_parent_name(student) or student or "Student"
 	course = row.get("course") or row.get("item_name") or row.get("item_code") or "Course"
 	term = row.get("term") or ""
 	session_count = int(flt(row.get("session_count") or row.get("qty") or 0))

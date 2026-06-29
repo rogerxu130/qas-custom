@@ -32,7 +32,7 @@ from qas_custom.modules.notifications import (
 	parent_portal_invoice_link,
 )
 from qas_custom.services.class_attendance import get_attendance_entries
-from qas_custom.services.display_labels import get_student_display_code
+from qas_custom.services.display_labels import get_student_display_code, get_student_parent_name
 from qas_custom.services.inquiry import (
 	add_inquiry_note_core,
 	build_inquiry_detail,
@@ -1380,6 +1380,7 @@ def _apply_invoice_items(invoice, items):
 		student = row.get("student")
 		_set_if_field(item, "qas_line_type", row.get("qas_line_type") or row.get("line_type") or "Other")
 		_set_if_field(item, "student", student)
+		_set_if_field(item, "student_display_name", row.get("student_display_name") or (get_student_parent_name(student) if student else None))
 		_set_if_field(item, "student_code", row.get("student_code") or (get_student_display_code(student) if student else None))
 		_set_if_field(item, "enrollment", row.get("enrollment"))
 		_set_if_field(item, "course", row.get("course"))
@@ -1400,7 +1401,7 @@ def _sync_invoice_student_summary(invoice):
 		return
 
 	_set_if_field(invoice, "primary_student", students[0])
-	labels = [get_student_display_code(student) or student for student in students]
+	labels = [get_student_parent_name(student) or student for student in students]
 	summary = labels[0] if len(labels) == 1 else _("Multiple students: {0}").format(", ".join(labels))
 	_set_if_field(invoice, "student_summary", summary)
 

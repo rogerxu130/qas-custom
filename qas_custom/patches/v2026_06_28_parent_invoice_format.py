@@ -252,7 +252,7 @@ def _parent_invoice_print_html():
 		<tbody>
 			{% for item in doc.items %}
 			<tr>
-				<td><strong>{{ item.student_code or item.student or "Student" }}</strong></td>
+				<td><strong>{{ item.student_display_name or item.student or "Student" }}</strong></td>
 				<td>{{ item.description }}</td>
 				<td class="right">{{ item.session_count or item.qty }}</td>
 				<td class="right">AUD ${{ "%.2f"|format(item.rate) }}</td>
