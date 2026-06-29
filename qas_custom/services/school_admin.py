@@ -2068,37 +2068,42 @@ def _send_invoice_notification(doc, event="approved"):
 def _create_payment_entry_for_invoice(doc, amount, mode_of_payment=None, reference_no=None, notes=None):
 	from erpnext.accounts.doctype.payment_entry.payment_entry import get_payment_entry
 
-	payment_entry = get_payment_entry("Sales Invoice", doc.name)
-	payment_entry.flags.ignore_permissions = True
-	amount = flt(amount)
-	if mode_of_payment and payment_entry.meta.has_field("mode_of_payment"):
-		payment_entry.mode_of_payment = mode_of_payment
-	if reference_no and payment_entry.meta.has_field("reference_no"):
-		payment_entry.reference_no = reference_no
-	elif payment_entry.meta.has_field("reference_no"):
-		payment_entry.reference_no = _("School Admin payment {0}").format(now_datetime())
-	if payment_entry.meta.has_field("reference_date"):
-		payment_entry.reference_date = nowdate()
-	if payment_entry.meta.has_field("remarks") and notes:
-		payment_entry.remarks = notes
-	if payment_entry.meta.has_field("paid_amount"):
-		payment_entry.paid_amount = amount
-	if payment_entry.meta.has_field("received_amount"):
-		payment_entry.received_amount = amount
+	original_user = frappe.session.user
+	try:
+		frappe.set_user("Administrator")
+		payment_entry = get_payment_entry("Sales Invoice", doc.name)
+		payment_entry.flags.ignore_permissions = True
+		amount = flt(amount)
+		if mode_of_payment and payment_entry.meta.has_field("mode_of_payment"):
+			payment_entry.mode_of_payment = mode_of_payment
+		if reference_no and payment_entry.meta.has_field("reference_no"):
+			payment_entry.reference_no = reference_no
+		elif payment_entry.meta.has_field("reference_no"):
+			payment_entry.reference_no = _("School Admin payment {0}").format(now_datetime())
+		if payment_entry.meta.has_field("reference_date"):
+			payment_entry.reference_date = nowdate()
+		if payment_entry.meta.has_field("remarks") and notes:
+			payment_entry.remarks = notes
+		if payment_entry.meta.has_field("paid_amount"):
+			payment_entry.paid_amount = amount
+		if payment_entry.meta.has_field("received_amount"):
+			payment_entry.received_amount = amount
 
-	remaining = amount
-	for reference in payment_entry.get("references", []):
-		if reference.reference_doctype != "Sales Invoice" or reference.reference_name != doc.name:
-			continue
-		allocatable = flt(reference.outstanding_amount) or remaining
-		reference.allocated_amount = min(remaining, allocatable)
-		remaining -= flt(reference.allocated_amount)
-		if remaining <= 0:
-			break
+		remaining = amount
+		for reference in payment_entry.get("references", []):
+			if reference.reference_doctype != "Sales Invoice" or reference.reference_name != doc.name:
+				continue
+			allocatable = flt(reference.outstanding_amount) or remaining
+			reference.allocated_amount = min(remaining, allocatable)
+			remaining -= flt(reference.allocated_amount)
+			if remaining <= 0:
+				break
 
-	payment_entry.insert(ignore_permissions=True)
-	payment_entry.submit()
-	return payment_entry
+		payment_entry.insert(ignore_permissions=True)
+		payment_entry.submit()
+		return payment_entry
+	finally:
+		frappe.set_user(original_user)
 
 
 def _get_enrollment_rows(parent=None, students=None, filters=None, limit=80):
