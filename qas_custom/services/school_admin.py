@@ -498,6 +498,72 @@ def cancel_school_admin_invoice_data(invoice=None, reason=None):
 	return _build_invoice_payload(frappe.get_doc("Sales Invoice", invoice))
 
 
+def bulk_school_admin_invoice_action_data(payload=None):
+	_require_school_admin()
+	payload = _get_payload(payload)
+	action = (payload.get("action") or "").strip().lower()
+	invoices = payload.get("invoices") or []
+	reason = (payload.get("reason") or "").strip()
+
+	if action not in {"submit", "cancel"}:
+		frappe.throw(_("Bulk invoice action must be submit or cancel."))
+	if not isinstance(invoices, list) or not invoices:
+		frappe.throw(_("At least one invoice is required."))
+	if len(invoices) > 100:
+		frappe.throw(_("Bulk actions are limited to 100 invoices at a time."))
+	if action == "cancel" and not reason:
+		frappe.throw(_("Cancellation reason is required."))
+
+	results = []
+	for invoice in invoices:
+		invoice_name = (invoice or "").strip()
+		if not invoice_name:
+			continue
+		try:
+			if action == "submit":
+				result = submit_school_admin_invoice_data(invoice=invoice_name)
+			else:
+				result = cancel_school_admin_invoice_data(invoice=invoice_name, reason=reason)
+			results.append(
+				{
+					"invoice": invoice_name,
+					"ok": True,
+					"status": result.get("status"),
+					"docstatus": result.get("docstatus"),
+					"message": _("Done"),
+				}
+			)
+		except Exception as exc:
+			frappe.db.rollback()
+			results.append(
+				{
+					"invoice": invoice_name,
+					"ok": False,
+					"message": _bulk_action_error_message(exc),
+				}
+			)
+
+	succeeded = len([row for row in results if row.get("ok")])
+	failed = len(results) - succeeded
+	return {
+		"action": action,
+		"total": len(results),
+		"succeeded": succeeded,
+		"failed": failed,
+		"results": results,
+	}
+
+
+def _bulk_action_error_message(exc):
+	if frappe.message_log:
+		message = frappe.message_log.pop()
+		frappe.message_log.clear()
+		if isinstance(message, dict):
+			return message.get("message") or message.get("title") or str(exc)
+		return str(message)
+	return str(exc)
+
+
 def get_school_admin_enrollments_data(
 	student=None,
 	parent=None,
