@@ -16,6 +16,7 @@ from qas_custom.modules.attendance.commands import create_full_term_attendance_e
 from qas_custom.modules.billing.store_credit import (
 	adjust_store_credit,
 	apply_store_credit_to_invoice,
+	create_store_credit_entry,
 	get_invoice_payable_amount,
 	get_invoice_store_credit_applied,
 	get_store_credit_summary,
@@ -501,11 +502,12 @@ def cancel_school_admin_invoice_data(invoice=None, reason=None):
 	if cint(doc.docstatus) == 2:
 		return _build_invoice_payload(doc)
 	if cint(doc.docstatus) == 1:
-		doc.flags.ignore_permissions = True
-		doc.cancel()
+		_cancel_invoice_payment_entries(doc.name)
+		_reverse_invoice_store_credit_application(doc, reason)
+		_cancel_submitted_invoice_as_admin(doc.name)
 		_add_comment("Sales Invoice", doc.name, f"Invoice cancelled by School Admin. Reason: {reason}")
 		frappe.db.commit()
-		return _build_invoice_payload(doc)
+		return _build_invoice_payload(frappe.get_doc("Sales Invoice", invoice))
 
 	_mark_draft_invoice_cancelled(doc, reason)
 	frappe.db.commit()
@@ -2052,6 +2054,72 @@ def _mark_draft_invoice_cancelled(doc, reason):
 		frappe.db.set_value("Sales Invoice", doc.name, "cancel_reason", reason, update_modified=False)
 	elif _has_field("Sales Invoice", "cancellation_reason"):
 		frappe.db.set_value("Sales Invoice", doc.name, "cancellation_reason", reason, update_modified=False)
+
+
+def _cancel_submitted_invoice_as_admin(invoice):
+	original_user = frappe.session.user
+	try:
+		frappe.set_user("Administrator")
+		doc = frappe.get_doc("Sales Invoice", invoice)
+		doc.flags.ignore_permissions = True
+		doc.cancel()
+	finally:
+		frappe.set_user(original_user)
+
+
+def _cancel_invoice_payment_entries(invoice):
+	if not _doctype_available("Payment Entry Reference") or not _doctype_available("Payment Entry"):
+		return []
+	rows = frappe.get_all(
+		"Payment Entry Reference",
+		filters={
+			"reference_doctype": "Sales Invoice",
+			"reference_name": invoice,
+			"parenttype": "Payment Entry",
+		},
+		fields=["parent"],
+		limit_page_length=0,
+	)
+	payment_entries = sorted({row.get("parent") for row in rows if row.get("parent")})
+	cancelled = []
+	original_user = frappe.session.user
+	try:
+		frappe.set_user("Administrator")
+		for payment_entry_name in payment_entries:
+			payment_entry = frappe.get_doc("Payment Entry", payment_entry_name)
+			if cint(payment_entry.docstatus) != 1:
+				continue
+			payment_entry.flags.ignore_permissions = True
+			payment_entry.cancel()
+			cancelled.append(payment_entry.name)
+	finally:
+		frappe.set_user(original_user)
+	return cancelled
+
+
+def _reverse_invoice_store_credit_application(doc, reason):
+	applied = get_invoice_store_credit_applied(doc.name)
+	if applied <= 0:
+		return None
+	parent = doc.get("parent")
+	customer = doc.get("customer")
+	if not customer:
+		return None
+	return create_store_credit_entry(
+		parent=parent,
+		customer=customer,
+		student=doc.get("primary_student") or doc.get("student"),
+		transaction_type="Correction",
+		credit_amount=applied,
+		invoice=doc.name,
+		enrollment=doc.get("enrollment"),
+		reference_doctype="Sales Invoice",
+		reference_document=doc.name,
+		source_doctype="Sales Invoice",
+		source_document=doc.name,
+		reason="Invoice cancellation",
+		notes=_("Reversed store credit because invoice {0} was cancelled. Reason: {1}").format(doc.name, reason),
+	)
 
 
 def _send_invoice_notification(doc, event="approved"):
