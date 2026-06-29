@@ -6,6 +6,7 @@
  "document_type": "Setup",
  "engine": "InnoDB",
  "field_order": [
+  "payment_due_days",
   "invoice_message",
   "accepted_payment_methods",
   "bank_section",
@@ -15,6 +16,12 @@
   "bank_reference_note"
  ],
  "fields": [
+  {
+   "default": "7",
+   "fieldname": "payment_due_days",
+   "fieldtype": "Int",
+   "label": "Default Payment Due Days"
+  },
   {
    "default": "Thank you for learning with Queensland Art School. Please contact us if you have any questions about this invoice.",
    "fieldname": "invoice_message",

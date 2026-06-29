@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import frappe
+from frappe.utils import add_days, cint, nowdate
 
 from qas_custom.modules.common import has_field, set_if_field
 
@@ -8,6 +9,7 @@ from qas_custom.modules.common import has_field, set_if_field
 SETTINGS_DOCTYPE = "QAS Invoice Settings"
 
 DEFAULT_INVOICE_SETTINGS = {
+	"payment_due_days": 7,
 	"invoice_message": "Thank you for learning with Queensland Art School. Please contact us if you have any questions about this invoice.",
 	"accepted_payment_methods": "Bank transfer, cash, or POS",
 	"bank_account_name": "",
@@ -34,7 +36,9 @@ def get_invoice_settings():
 	doc = frappe.get_single(SETTINGS_DOCTYPE)
 	for fieldname in settings:
 		value = doc.get(fieldname)
-		if value:
+		if fieldname == "payment_due_days":
+			settings[fieldname] = _normalize_due_days(value)
+		elif value:
 			settings[fieldname] = value
 	return settings
 
@@ -46,7 +50,10 @@ def update_invoice_settings(payload):
 	doc = frappe.get_single(SETTINGS_DOCTYPE)
 	for fieldname in DEFAULT_INVOICE_SETTINGS:
 		if fieldname in payload:
-			doc.set(fieldname, (payload.get(fieldname) or "").strip())
+			if fieldname == "payment_due_days":
+				doc.set(fieldname, _normalize_due_days(payload.get(fieldname)))
+			else:
+				doc.set(fieldname, (payload.get(fieldname) or "").strip())
 	doc.save(ignore_permissions=True)
 	return get_invoice_settings()
 
@@ -70,3 +77,30 @@ def get_invoice_payment_context(invoice_doc):
 		value = invoice_doc.get(target_field) if has_field("Sales Invoice", target_field) else None
 		context[source_field] = value or settings.get(source_field) or ""
 	return context
+
+
+def get_default_invoice_due_date(posting_date: str | None = None):
+	settings = get_invoice_settings()
+	base_date = posting_date or nowdate()
+	return add_days(base_date, _normalize_due_days(settings.get("payment_due_days")))
+
+
+def apply_default_invoice_dates(invoice_doc, *, force: bool = False):
+	posting_date = invoice_doc.get("posting_date") or nowdate()
+	changed = False
+	if force or not invoice_doc.get("posting_date"):
+		invoice_doc.posting_date = posting_date
+		changed = True
+	if force or not invoice_doc.get("due_date"):
+		invoice_doc.due_date = get_default_invoice_due_date(posting_date)
+		changed = True
+	for row in invoice_doc.get("payment_schedule", []):
+		if force or not row.get("due_date"):
+			row.due_date = invoice_doc.due_date
+			changed = True
+	return changed
+
+
+def _normalize_due_days(value):
+	days = cint(value if value is not None else DEFAULT_INVOICE_SETTINGS["payment_due_days"])
+	return max(days, 0)

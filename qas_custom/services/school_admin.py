@@ -22,6 +22,7 @@ from qas_custom.modules.billing.store_credit import (
 )
 from qas_custom.modules.billing.invoice_settings import (
 	SNAPSHOT_FIELD_MAP,
+	apply_default_invoice_dates,
 	apply_invoice_payment_snapshot,
 	get_invoice_settings,
 	update_invoice_settings,
@@ -344,7 +345,9 @@ def create_school_admin_manual_invoice_data(payload=None):
 
 	invoice = frappe.new_doc("Sales Invoice")
 	invoice.customer = customer
-	invoice.due_date = payload.get("due_date") or nowdate()
+	apply_default_invoice_dates(invoice)
+	if payload.get("due_date"):
+		invoice.due_date = payload.get("due_date")
 	_set_if_field(invoice, "parent", payload.get("parent"))
 	_set_if_field(invoice, "student", payload.get("student"))
 	_set_if_field(invoice, "primary_student", payload.get("student"))

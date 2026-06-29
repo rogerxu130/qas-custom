@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import frappe
 from frappe import _
-from frappe.utils import flt, nowdate
+from frappe.utils import flt
 
 from qas_custom.modules.common import has_field, is_new_doc, set_if_field
 from qas_custom.modules.billing.presentation import build_course_invoice_description
-from qas_custom.modules.billing.invoice_settings import apply_invoice_payment_snapshot
+from qas_custom.modules.billing.invoice_settings import apply_default_invoice_dates, apply_invoice_payment_snapshot
 from qas_custom.services.display_labels import get_student_display_code, get_student_parent_name
 
 
@@ -109,7 +109,7 @@ def get_or_create_course_invoice(customer: str, parent: str | None = None):
 
 	invoice = frappe.new_doc("Sales Invoice")
 	invoice.customer = customer
-	invoice.due_date = nowdate()
+	apply_default_invoice_dates(invoice)
 	set_if_field(invoice, "parent", parent)
 	set_if_field(invoice, "qas_invoice_type", "Course")
 	apply_invoice_payment_snapshot(invoice)
@@ -117,11 +117,7 @@ def get_or_create_course_invoice(customer: str, parent: str | None = None):
 
 
 def normalize_course_invoice_dates(invoice):
-	today = nowdate()
-	invoice.posting_date = today
-	invoice.due_date = today
-	for row in invoice.get("payment_schedule", []):
-		row.due_date = today
+	apply_default_invoice_dates(invoice, force=True)
 
 
 def sync_invoice_student_summary(invoice):
