@@ -642,6 +642,26 @@ def create_school_admin_term_data(payload=None):
 	return get_school_admin_term_data(doc.name)
 
 
+def update_school_admin_term_data(term=None, payload=None):
+	_require_school_admin()
+	if not term:
+		frappe.throw(_("Term is required."))
+	payload = _get_payload(payload)
+	doc = frappe.get_doc("Term", term)
+	for fieldname in ["term_name", "start_date", "end_date", "status", "notes"]:
+		if fieldname in payload:
+			_set_if_field(doc, fieldname, payload.get(fieldname))
+	if not doc.get("term_name"):
+		frappe.throw(_("Term name is required."))
+	if not doc.get("start_date") or not doc.get("end_date"):
+		frappe.throw(_("Term start and end dates are required."))
+	if getdate(doc.end_date) < getdate(doc.start_date):
+		frappe.throw(_("Term end date cannot be before start date."))
+	doc.save(ignore_permissions=True)
+	frappe.db.commit()
+	return get_school_admin_term_data(doc.name)
+
+
 def copy_school_admin_term_data(payload=None):
 	_require_school_admin()
 	payload = _get_payload(payload)
@@ -1024,6 +1044,7 @@ def get_school_admin_enrollments_data(
 	term=None,
 	enrollment_type=None,
 	status=None,
+	statuses=None,
 	include_inactive_terms=0,
 	limit=80,
 ):
@@ -1035,10 +1056,16 @@ def get_school_admin_enrollments_data(
 		"course": course,
 		"term": term,
 		"enrollment_type": enrollment_type,
-		"status": status,
 	}.items():
 		if value:
 			filters[fieldname] = value
+	status_values = _parse_status_list(statuses)
+	if status:
+		filters["status"] = status
+	elif status_values:
+		filters["status"] = ["in", status_values]
+	else:
+		filters["status"] = ["in", ["Planned", "Active"]]
 	_apply_active_term_filter(filters, term=term, include_inactive_terms=include_inactive_terms)
 	return {"items": _get_enrollment_rows(filters=filters, limit=_limit(limit, default=80, max_value=200))}
 
@@ -1096,6 +1123,10 @@ def transfer_school_admin_enrollment_data(enrollment=None, payload=None):
 	effective_date = payload.get("effective_date") or today()
 	_cancel_future_enrollment_attendance(doc.name, effective_date=effective_date)
 	doc.weekly_timeslot = target_timeslot
+	target_course = payload.get("course") or frappe.db.get_value("Weekly Timeslot", target_timeslot, "course")
+	target_term = payload.get("term") or frappe.db.get_value("Weekly Timeslot", target_timeslot, "term")
+	_set_if_field(doc, "course", target_course)
+	_set_if_field(doc, "term", target_term)
 	_set_if_field(doc, "start_course_session", payload.get("start_course_session"))
 	if _has_field("Enrollment", "status"):
 		doc.status = payload.get("status") or "Active"
@@ -1461,6 +1492,16 @@ def _apply_active_term_filter(filters, term=None, include_inactive_terms=0):
 	if active_terms is None:
 		return
 	filters["term"] = ["in", active_terms or ["__qas_no_active_term__"]]
+
+
+def _parse_status_list(value):
+	if not value:
+		return []
+	if isinstance(value, str):
+		return [item.strip() for item in value.split(",") if item.strip()]
+	if isinstance(value, (list, tuple, set)):
+		return [str(item).strip() for item in value if str(item).strip()]
+	return [str(value).strip()]
 
 
 def _apply_active_timeslot_filter(filters, include_inactive_timeslots=0):

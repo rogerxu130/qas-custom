@@ -259,6 +259,7 @@ def school_admin_get_enrollments(
 	term=None,
 	enrollment_type=None,
 	status=None,
+	statuses=None,
 	include_inactive_terms=0,
 	limit=80,
 ):
@@ -269,6 +270,7 @@ def school_admin_get_enrollments(
 		term=term,
 		enrollment_type=enrollment_type,
 		status=status,
+		statuses=statuses,
 		include_inactive_terms=include_inactive_terms,
 		limit=limit,
 	)
