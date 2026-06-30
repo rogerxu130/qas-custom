@@ -2822,6 +2822,7 @@ def _apply_weekly_timeslot_payload(doc, payload):
 			_set_if_field(doc, fieldname, payload.get(fieldname))
 	if "end_time" not in payload and (not doc.get("end_time") or "course" in payload or "start_time" in payload):
 		_apply_course_duration_end_time(doc)
+	_validate_weekly_timeslot_room_conflict(doc)
 
 
 def _apply_course_duration_end_time(doc):
@@ -2836,17 +2837,64 @@ def _apply_course_duration_end_time(doc):
 
 
 def _add_minutes_to_time(start_time, minutes):
-	if hasattr(start_time, "total_seconds"):
-		total_minutes = int(start_time.total_seconds() // 60)
-	elif hasattr(start_time, "hour") and hasattr(start_time, "minute"):
-		total_minutes = start_time.hour * 60 + start_time.minute
-	else:
-		time_parts = str(start_time or "").split(".")[0].split(":")
-		if len(time_parts) < 2:
-			frappe.throw(_("Start time is invalid."))
-		total_minutes = cint(time_parts[0]) * 60 + cint(time_parts[1])
+	total_minutes = _time_to_minutes(start_time, _("Start time is invalid."))
 	total_minutes = (total_minutes + cint(minutes)) % (24 * 60)
 	return f"{total_minutes // 60:02d}:{total_minutes % 60:02d}"
+
+
+def _validate_weekly_timeslot_room_conflict(doc):
+	if (doc.get("status") or "Active") != "Active":
+		return
+	if not all(doc.get(fieldname) for fieldname in ["term", "classroom", "day_of_week", "start_time", "end_time"]):
+		return
+	start_minutes = _time_to_minutes(doc.get("start_time"), _("Start time is invalid."))
+	end_minutes = _time_to_minutes(doc.get("end_time"), _("End time is invalid."))
+	if end_minutes <= start_minutes:
+		frappe.throw(_("Weekly timeslot end time must be after start time."))
+	filters = {
+		"term": doc.get("term"),
+		"classroom": doc.get("classroom"),
+		"day_of_week": doc.get("day_of_week"),
+		"status": "Active",
+	}
+	fields = _safe_fields("Weekly Timeslot", ["name", "course", "classroom", "teacher", "day_of_week", "start_time", "end_time", "status"])
+	for row in frappe.get_all("Weekly Timeslot", filters=filters, fields=fields, limit_page_length=0):
+		if row.name == doc.name or not row.get("start_time") or not row.get("end_time"):
+			continue
+		row_start = _time_to_minutes(row.start_time, _("Start time is invalid."))
+		row_end = _time_to_minutes(row.end_time, _("End time is invalid."))
+		if row_end <= row_start:
+			continue
+		if start_minutes < row_end and row_start < end_minutes:
+			frappe.throw(
+				_("Room {0} is already occupied by {1} on {2} {3}-{4}. Please choose another room or time.").format(
+					doc.get("classroom"),
+					row.get("course") or row.name,
+					doc.get("day_of_week"),
+					_format_time_for_message(row.start_time),
+					_format_time_for_message(row.end_time),
+				)
+			)
+
+
+def _time_to_minutes(value, error_message):
+	if hasattr(value, "total_seconds"):
+		return int(value.total_seconds() // 60)
+	if hasattr(value, "hour") and hasattr(value, "minute"):
+		return value.hour * 60 + value.minute
+	time_parts = str(value or "").split(".")[0].split(":")
+	if len(time_parts) < 2:
+		frappe.throw(error_message)
+	return cint(time_parts[0]) * 60 + cint(time_parts[1])
+
+
+def _format_time_for_message(value):
+	if hasattr(value, "total_seconds"):
+		total_minutes = int(value.total_seconds() // 60)
+		return f"{total_minutes // 60:02d}:{total_minutes % 60:02d}"
+	if hasattr(value, "hour") and hasattr(value, "minute"):
+		return f"{value.hour:02d}:{value.minute:02d}"
+	return str(value or "")[:5]
 
 
 def _weekday_number(day_of_week):
