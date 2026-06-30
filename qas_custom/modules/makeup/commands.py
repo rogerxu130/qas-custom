@@ -36,12 +36,13 @@ def submit_parent_leave_request_core(parent, students: list[dict], student: str,
 	leave_request.flags.ignore_permissions = True
 	leave_request.insert()
 	leave_request.reload()
-	voucher_label = sync_makeup_voucher_label(leave_request.get("makeup_voucher"))
+	voucher_id = _get_voucher_for_leave_request(leave_request)
+	voucher_label = sync_makeup_voucher_label(voucher_id)
 
 	return {
 		"leave_request": leave_request.name,
-		"makeup_voucher": leave_request.get("makeup_voucher"),
-		"makeup_voucher_label": voucher_label or leave_request.get("makeup_voucher"),
+		"makeup_voucher": voucher_id,
+		"makeup_voucher_label": voucher_label or voucher_id,
 		"session": {
 			"session_id": session_doc.name,
 			"student": selected_student,
@@ -378,3 +379,13 @@ def _validate_no_active_leave(student: str, course_session: str):
 	)
 	if existing_voucher:
 		frappe.throw("A makeup voucher already exists for this class session.")
+
+
+def _get_voucher_for_leave_request(leave_request):
+	voucher_id = frappe.db.exists("Makeup Voucher", {"leave_request": leave_request.name})
+	if voucher_id:
+		return voucher_id
+	legacy_value = leave_request.get("makeup_voucher")
+	if legacy_value and frappe.db.exists("Makeup Voucher", legacy_value):
+		return legacy_value
+	return legacy_value or None
