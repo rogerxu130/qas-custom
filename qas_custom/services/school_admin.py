@@ -41,7 +41,7 @@ from qas_custom.modules.notifications import (
 	parent_portal_invoice_link,
 )
 from qas_custom.services.class_attendance import get_attendance_entries
-from qas_custom.services.display_labels import get_course_session_snapshot_label, get_student_display_code, get_student_parent_name
+from qas_custom.services.display_labels import get_course_session_snapshot_label, get_student_display_code, get_student_display_name, get_student_parent_name
 from qas_custom.services.inquiry import (
 	add_inquiry_note_core,
 	build_inquiry_detail,
@@ -1810,7 +1810,7 @@ def get_school_admin_course_session_data(course_session=None):
 		frappe.throw(_("Course session is required."))
 	doc = frappe.get_doc("Course Sessions", course_session)
 	payload = _document_payload(doc)
-	payload["attendance"] = [_docdict(row) for row in get_attendance_entries([course_session])]
+	payload["attendance"] = _get_school_admin_attendance_rows(course_session)
 	if payload.get("weekly_timeslot"):
 		payload["weekly_timeslot_detail"] = _get_timeslot_summary(payload.get("weekly_timeslot"))
 	return payload
@@ -1830,6 +1830,36 @@ def update_school_admin_attendance_data(attendance_entry=None, status=None, comm
 	)
 	frappe.db.commit()
 	return result
+
+
+def _get_school_admin_attendance_rows(course_session):
+	rows = [_docdict(row) for row in get_attendance_entries([course_session])]
+	for row in rows:
+		student = row.get("student")
+		row["student_display"] = get_student_display_name(student) or student
+		row["student_code"] = get_student_display_code(student) or student
+		row["attendance_type"] = row.get("enrollment_type") or _infer_attendance_type(row)
+		row["source_label"] = _attendance_source_label(row)
+	return rows
+
+
+def _infer_attendance_type(row):
+	source_doctype = row.get("source_doctype")
+	if source_doctype == "Inquiry":
+		return "Trial"
+	if source_doctype == "Makeup Voucher" or row.get("makeup_voucher"):
+		return "Makeup"
+	return "Full-Term"
+
+
+def _attendance_source_label(row):
+	source_doctype = row.get("source_doctype")
+	source_document = row.get("source_document")
+	if source_doctype and source_document:
+		return f"{source_doctype} {source_document}"
+	if row.get("makeup_voucher"):
+		return f"Makeup Voucher {row.get('makeup_voucher')}"
+	return ""
 
 
 def get_school_admin_vouchers_data(student=None, status=None, limit=120):
