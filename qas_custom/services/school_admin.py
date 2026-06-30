@@ -846,12 +846,17 @@ def cancel_school_admin_invoice_data(invoice=None, reason=None):
 	if cint(doc.docstatus) == 2:
 		return _build_invoice_payload(doc)
 	if cint(doc.docstatus) == 1:
+		paid_credit_amount = _invoice_payment_amount(doc.name)
 		_cancel_invoice_payment_entries(doc.name)
 		_reverse_invoice_store_credit_application(doc, reason)
+		paid_credit = _create_invoice_cancellation_store_credit(doc, paid_credit_amount, reason)
 		_cancel_submitted_invoice_as_admin(doc.name)
 		_add_comment("Sales Invoice", doc.name, f"Invoice cancelled by School Admin. Reason: {reason}")
 		frappe.db.commit()
-		return _build_invoice_payload(frappe.get_doc("Sales Invoice", invoice))
+		payload = _build_invoice_payload(frappe.get_doc("Sales Invoice", invoice))
+		payload["cancellation_store_credit_amount"] = paid_credit_amount if paid_credit else 0
+		payload["cancellation_store_credit"] = paid_credit.name if paid_credit else None
+		return payload
 
 	_mark_draft_invoice_cancelled(doc, reason)
 	frappe.db.commit()
@@ -2777,6 +2782,59 @@ def _cancel_invoice_payment_entries(invoice):
 	finally:
 		frappe.set_user(original_user)
 	return cancelled
+
+
+def _invoice_payment_amount(invoice):
+	if not _doctype_available("Payment Entry Reference") or not _doctype_available("Payment Entry"):
+		return 0
+	rows = frappe.get_all(
+		"Payment Entry Reference",
+		filters={
+			"reference_doctype": "Sales Invoice",
+			"reference_name": invoice,
+			"parenttype": "Payment Entry",
+		},
+		fields=["parent", "allocated_amount"],
+		limit_page_length=0,
+	)
+	if not rows:
+		return 0
+	payment_names = sorted({row.get("parent") for row in rows if row.get("parent")})
+	if not payment_names:
+		return 0
+	submitted_payments = set(
+		frappe.get_all(
+			"Payment Entry",
+			filters={"name": ["in", payment_names], "docstatus": 1},
+			pluck="name",
+			limit_page_length=0,
+		)
+	)
+	return flt(sum(flt(row.get("allocated_amount")) for row in rows if row.get("parent") in submitted_payments))
+
+
+def _create_invoice_cancellation_store_credit(doc, amount, reason):
+	amount = flt(amount)
+	if amount <= 0 or not doc.get("customer"):
+		return None
+	credit = create_store_credit_entry(
+		parent=doc.get("parent"),
+		customer=doc.get("customer"),
+		student=doc.get("primary_student") or doc.get("student"),
+		transaction_type="Correction",
+		credit_amount=amount,
+		payment_amount=amount,
+		invoice=doc.name,
+		enrollment=doc.get("enrollment"),
+		reference_doctype="Sales Invoice",
+		reference_document=doc.name,
+		source_doctype="Sales Invoice",
+		source_document=doc.name,
+		reason="Paid invoice cancellation",
+		notes=_("Moved paid amount to store credit because invoice {0} was cancelled. Reason: {1}").format(doc.name, reason),
+	)
+	_add_comment("Sales Invoice", doc.name, _("Paid amount moved to store credit: {0}.").format(amount))
+	return credit
 
 
 def _reverse_invoice_store_credit_application(doc, reason):
