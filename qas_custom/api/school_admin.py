@@ -41,6 +41,7 @@ from qas_custom.services.school_admin import (
 	get_school_admin_invoice_data,
 	get_school_admin_invoices_data,
 	get_school_admin_invoice_settings_data,
+	get_school_admin_invoice_items_data,
 	get_school_admin_me_data,
 	get_school_admin_store_credit_data,
 	get_school_admin_teacher_revenue_share_sessions_data,
@@ -154,6 +155,11 @@ def school_admin_delete_student(student=None):
 @frappe.whitelist()
 def school_admin_get_courses(query=None, status=None, limit=120):
 	return get_school_admin_courses_data(query=query, status=status, limit=limit)
+
+
+@frappe.whitelist()
+def school_admin_get_invoice_items(query=None, limit=120):
+	return get_school_admin_invoice_items_data(query=query, limit=limit)
 
 
 @frappe.whitelist()

@@ -58,6 +58,7 @@ INQUIRY_POST_VISIT_STATUSES = ["Completed", "Follow-up"]
 ACTIVE_TERM_STATUSES = ["Upcoming", "Active"]
 ACTIVE_TIMESLOT_STATUSES = ["Active"]
 COURSE_LABEL_FIELDS = ["name", "course_name", "course_name_zh"]
+DEFAULT_COURSE_INVOICE_ITEM = "Tuition Fee"
 PARENT_EDIT_FIELDS = ["parent_name", "mobile_number", "phone", "email", "email_id", "address", "status", "customer"]
 STUDENT_EDIT_FIELDS = ["student_name", "first_name", "last_name", "date_of_birth", "dob", "gender", "status", "guardian", "parent"]
 COURSE_EDIT_FIELDS = [
@@ -371,6 +372,33 @@ def get_school_admin_courses_data(query=None, status=None, limit=120):
 	return {"items": items}
 
 
+def get_school_admin_invoice_items_data(query=None, limit=120):
+	_require_school_admin()
+	if not _doctype_available("Item"):
+		return {"items": []}
+	filters = {}
+	if _has_field("Item", "disabled"):
+		filters["disabled"] = 0
+	fields = _safe_fields("Item", ["name", "item_code", "item_name", "item_group", "disabled"])
+	rows = frappe.get_all(
+		"Item",
+		filters=filters,
+		or_filters=_text_search_filters("Item", query, ["name", "item_code", "item_name"]),
+		fields=fields,
+		order_by="name asc",
+		limit=_limit(limit, default=120, max_value=500),
+	)
+	items = []
+	for row in rows:
+		item = _normalize_row_payload("Item", row)
+		value = item.get("name") or item.get("item_code")
+		label = item.get("item_name") or item.get("item_code") or value
+		if item.get("item_code") and item.get("item_code") != label:
+			label = f"{label} · {item.get('item_code')}"
+		items.append({"value": value, "label": label, **item})
+	return {"items": items}
+
+
 def create_school_admin_course_data(payload=None):
 	_require_school_admin()
 	payload = _get_payload(payload)
@@ -381,6 +409,7 @@ def create_school_admin_course_data(payload=None):
 	if _has_field("Course", "status") and not doc.get("status"):
 		_set_if_field(doc, "status", "Active")
 	_apply_course_pricing_defaults(doc)
+	_apply_course_invoice_item_default(doc)
 	_validate_required(doc, ["course_name"])
 	doc.insert(ignore_permissions=True)
 	_add_comment("Course", doc.name, _("Course created by School Admin."))
@@ -396,6 +425,7 @@ def update_school_admin_course_data(course=None, payload=None):
 	payload = _get_payload(payload)
 	_apply_master_payload(doc, payload, COURSE_EDIT_FIELDS)
 	_apply_course_pricing_defaults(doc)
+	_apply_course_invoice_item_default(doc)
 	_validate_required(doc, ["course_name"])
 	doc.save(ignore_permissions=True)
 	_add_comment("Course", doc.name, _("Course updated by School Admin."))
@@ -415,6 +445,52 @@ def _apply_course_pricing_defaults(doc):
 	if total_sessions <= 0:
 		frappe.throw(_("Total sessions per term is required to calculate term session fee."))
 	_set_if_field(doc, "term_session_fee", round(full_term_fee / total_sessions, 2))
+
+
+def _apply_course_invoice_item_default(doc):
+	if not _has_field("Course", "invoice_item"):
+		return
+	item_code = str(doc.get("invoice_item") or DEFAULT_COURSE_INVOICE_ITEM).strip()
+	_set_if_field(doc, "invoice_item", _ensure_school_admin_invoice_item(item_code))
+
+
+def _ensure_school_admin_invoice_item(item_code):
+	item_code = str(item_code or "").strip()
+	if not item_code:
+		frappe.throw(_("Invoice item is required."))
+	if frappe.db.exists("Item", item_code):
+		return item_code
+	if not _doctype_available("Item"):
+		frappe.throw(_("Item is not installed on this site."))
+	doc = frappe.new_doc("Item")
+	_set_if_field(doc, "item_code", item_code)
+	_set_if_field(doc, "item_name", item_code)
+	_set_if_field(doc, "item_group", _default_school_admin_item_group())
+	_set_if_field(doc, "stock_uom", _default_school_admin_stock_uom())
+	_set_if_field(doc, "is_stock_item", 0)
+	_set_if_field(doc, "disabled", 0)
+	doc.insert(ignore_permissions=True)
+	return doc.name
+
+
+def _default_school_admin_item_group():
+	if _doctype_available("Item Group") and frappe.db.exists("Item Group", "Services"):
+		return "Services"
+	filters = {"is_group": 0} if _has_field("Item Group", "is_group") else {}
+	rows = frappe.get_all("Item Group", filters=filters, pluck="name", order_by="name asc", limit=1) if _doctype_available("Item Group") else []
+	if rows:
+		return rows[0]
+	frappe.throw(_("Create an Item Group before creating invoice items."))
+
+
+def _default_school_admin_stock_uom():
+	if _doctype_available("UOM") and frappe.db.exists("UOM", "Nos"):
+		return "Nos"
+	filters = {"enabled": 1} if _has_field("UOM", "enabled") else {}
+	rows = frappe.get_all("UOM", filters=filters, pluck="name", order_by="name asc", limit=1) if _doctype_available("UOM") else []
+	if rows:
+		return rows[0]
+	frappe.throw(_("Create a UOM before creating invoice items."))
 
 
 def set_school_admin_course_status_data(course=None, status=None):
