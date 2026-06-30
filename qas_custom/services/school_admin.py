@@ -1307,6 +1307,27 @@ def _duplicate_active_enrollment(student, term, weekly_timeslot, exclude=None):
 	return frappe.db.exists("Enrollment", filters)
 
 
+def _validate_unique_open_enrollment(enrollment):
+	if enrollment.get("enrollment_type") != "Full-Term":
+		return
+	if enrollment.get("status") not in ("Planned", "Active"):
+		return
+	if not enrollment.get("student") or not enrollment.get("term") or not enrollment.get("weekly_timeslot"):
+		return
+	filters = {
+		"student": enrollment.student,
+		"term": enrollment.term,
+		"weekly_timeslot": enrollment.weekly_timeslot,
+		"enrollment_type": "Full-Term",
+		"status": ["in", ["Planned", "Active"]],
+	}
+	if enrollment.get("name"):
+		filters["name"] = ["!=", enrollment.name]
+	duplicate = frappe.db.exists("Enrollment", filters)
+	if duplicate:
+		frappe.throw(_("This student already has an open enrollment for this term and weekly timeslot: {0}.").format(duplicate))
+
+
 def _first_course_session_for_timeslot(weekly_timeslot, term_doc):
 	rows = frappe.get_all(
 		"Course Sessions",
@@ -1438,6 +1459,7 @@ def create_school_admin_enrollment_data(payload=None):
 	payload = _get_payload(payload)
 	doc = frappe.new_doc("Enrollment")
 	_apply_enrollment_payload(doc, payload)
+	_validate_unique_open_enrollment(doc)
 	doc.insert(ignore_permissions=True)
 	if doc.get("status") == "Active":
 		_create_enrollment_attendance_entries(doc)
@@ -1455,6 +1477,7 @@ def update_school_admin_enrollment_data(enrollment=None, payload=None):
 	previous_timeslot = doc.get("weekly_timeslot")
 	previous_status = doc.get("status")
 	_apply_enrollment_payload(doc, payload)
+	_validate_unique_open_enrollment(doc)
 	doc.save(ignore_permissions=True)
 	if doc.get("status") == "Active" and payload.get("weekly_timeslot") and payload.get("weekly_timeslot") != previous_timeslot:
 		_cancel_future_enrollment_attendance(doc.name, effective_date=payload.get("effective_date") or today())
@@ -1485,6 +1508,7 @@ def transfer_school_admin_enrollment_data(enrollment=None, payload=None):
 	_set_if_field(doc, "start_course_session", payload.get("start_course_session"))
 	if _has_field("Enrollment", "status"):
 		doc.status = payload.get("status") or "Active"
+	_validate_unique_open_enrollment(doc)
 	doc.save(ignore_permissions=True)
 	_create_enrollment_attendance_entries(doc, start_date=effective_date)
 	_add_comment("Enrollment", doc.name, _("Enrollment transferred to {0} by School Admin.").format(target_timeslot))
