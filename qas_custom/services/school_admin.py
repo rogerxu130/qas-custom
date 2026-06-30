@@ -380,6 +380,7 @@ def create_school_admin_course_data(payload=None):
 		_set_if_field(doc, "course_name", payload.get("name"))
 	if _has_field("Course", "status") and not doc.get("status"):
 		_set_if_field(doc, "status", "Active")
+	_apply_course_pricing_defaults(doc)
 	_validate_required(doc, ["course_name"])
 	doc.insert(ignore_permissions=True)
 	_add_comment("Course", doc.name, _("Course created by School Admin."))
@@ -394,11 +395,26 @@ def update_school_admin_course_data(course=None, payload=None):
 	doc = frappe.get_doc("Course", course)
 	payload = _get_payload(payload)
 	_apply_master_payload(doc, payload, COURSE_EDIT_FIELDS)
+	_apply_course_pricing_defaults(doc)
 	_validate_required(doc, ["course_name"])
 	doc.save(ignore_permissions=True)
 	_add_comment("Course", doc.name, _("Course updated by School Admin."))
 	frappe.db.commit()
 	return _get_course_payload(doc.name)
+
+
+def _apply_course_pricing_defaults(doc):
+	if not _has_field("Course", "term_session_fee"):
+		return
+	full_term_fee_value = doc.get("full_term_fee")
+	total_sessions_value = doc.get("total_session_per_term")
+	if full_term_fee_value in (None, ""):
+		frappe.throw(_("Full term fee is required to calculate term session fee."))
+	full_term_fee = flt(full_term_fee_value)
+	total_sessions = flt(total_sessions_value)
+	if total_sessions <= 0:
+		frappe.throw(_("Total sessions per term is required to calculate term session fee."))
+	_set_if_field(doc, "term_session_fee", round(full_term_fee / total_sessions, 2))
 
 
 def set_school_admin_course_status_data(course=None, status=None):
