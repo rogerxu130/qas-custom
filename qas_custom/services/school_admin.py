@@ -41,7 +41,7 @@ from qas_custom.modules.notifications import (
 	parent_portal_invoice_link,
 )
 from qas_custom.services.class_attendance import get_attendance_entries
-from qas_custom.services.display_labels import get_student_display_code, get_student_parent_name
+from qas_custom.services.display_labels import get_course_session_snapshot_label, get_student_display_code, get_student_parent_name
 from qas_custom.services.inquiry import (
 	add_inquiry_note_core,
 	build_inquiry_detail,
@@ -1255,7 +1255,7 @@ def _populate_planned_enrollments_for_term(term):
 	}
 
 
-def _activate_planned_enrollment(enrollment, term_doc):
+def _activate_planned_enrollment(enrollment, term_doc, start_session=None):
 	if enrollment.get("status") != "Planned":
 		return {"enrollment": enrollment.name, "invoice": enrollment.get("invoice")}
 	if not enrollment.get("weekly_timeslot"):
@@ -1278,11 +1278,16 @@ def _activate_planned_enrollment(enrollment, term_doc):
 	)
 	if duplicate:
 		frappe.throw(_("An active enrollment already exists for this student and weekly timeslot."))
-	start_session = _first_course_session_for_timeslot(enrollment.weekly_timeslot, term_doc)
+	start_session = _validate_enrollment_start_session(
+		start_session or _first_course_session_for_timeslot(enrollment.weekly_timeslot, term_doc),
+		enrollment.weekly_timeslot,
+		term_doc,
+	)
 	_set_if_field(enrollment, "start_course_session", start_session)
 	_set_if_field(enrollment, "course", enrollment.get("course") or timeslot.get("course"))
 	_set_if_field(enrollment, "status", "Active")
-	_set_if_field(enrollment, "enrollment_date", term_doc.get("start_date") or enrollment.get("enrollment_date") or today())
+	start_date = frappe.db.get_value("Course Sessions", start_session, "session_date")
+	_set_if_field(enrollment, "enrollment_date", start_date or term_doc.get("start_date") or enrollment.get("enrollment_date") or today())
 	enrollment.save(ignore_permissions=True)
 	_create_enrollment_attendance_entries(enrollment)
 	invoice = _create_term_enrollment_invoice(enrollment, start_session)
@@ -1293,6 +1298,27 @@ def _activate_planned_enrollment(enrollment, term_doc):
 		enrollment.save(ignore_permissions=True)
 	_add_comment("Enrollment", enrollment.name, _("Planned enrollment activated for term {0}.").format(term_doc.name))
 	return {"enrollment": enrollment.name, "invoice": invoice.name if invoice else None}
+
+
+def _validate_enrollment_start_session(start_session, weekly_timeslot, term_doc):
+	if not start_session:
+		frappe.throw(_("Start session is required before activating enrollment."))
+	session = frappe.db.get_value(
+		"Course Sessions",
+		start_session,
+		["name", "weekly_timeslot", "session_date", "status"],
+		as_dict=True,
+	)
+	if not session:
+		frappe.throw(_("Start session was not found."))
+	if session.get("weekly_timeslot") != weekly_timeslot:
+		frappe.throw(_("Start session does not belong to the selected weekly timeslot."))
+	if session.get("status") == "Cancelled":
+		frappe.throw(_("Start session is cancelled."))
+	session_date = getdate(session.get("session_date"))
+	if session_date < getdate(term_doc.start_date) or session_date > getdate(term_doc.end_date):
+		frappe.throw(_("Start session is outside the selected term."))
+	return session.name
 
 
 def _duplicate_active_enrollment(student, term, weekly_timeslot, exclude=None):
@@ -1391,7 +1417,7 @@ def _create_term_enrollment_invoice(enrollment, start_session):
 	_set_if_field(item, "enrollment", enrollment.name)
 	_set_if_field(item, "course", course)
 	_set_if_field(item, "term", enrollment.term)
-	_set_if_field(item, "course_session", start_session)
+	_set_if_field(item, "course_session", get_course_session_snapshot_label(start_session))
 	_set_if_field(item, "session_count", session_count)
 	_sync_invoice_student_summary(invoice)
 	apply_invoice_payment_snapshot(invoice)
@@ -1487,6 +1513,33 @@ def update_school_admin_enrollment_data(enrollment=None, payload=None):
 	_add_comment("Enrollment", doc.name, "Enrollment updated by School Admin.")
 	frappe.db.commit()
 	return _build_enrollment_payload(doc)
+
+
+def activate_school_admin_enrollment_data(enrollment=None, payload=None):
+	_require_school_admin()
+	if not enrollment:
+		frappe.throw(_("Enrollment is required."))
+	payload = _get_payload(payload)
+	doc = frappe.get_doc("Enrollment", enrollment)
+	if doc.get("status") != "Planned":
+		frappe.throw(_("Only planned enrollments can be activated."))
+	if doc.get("invoice"):
+		frappe.throw(_("This enrollment already has an invoice."))
+	payload.pop("status", None)
+	_apply_enrollment_payload(doc, payload)
+	_validate_unique_open_enrollment(doc)
+	term_doc = frappe.get_doc("Term", doc.term)
+	result = _activate_planned_enrollment(
+		doc,
+		term_doc,
+		start_session=payload.get("start_course_session") or doc.get("start_course_session"),
+	)
+	frappe.db.commit()
+	activated = frappe.get_doc("Enrollment", result["enrollment"])
+	return {
+		"enrollment": _build_enrollment_payload(activated),
+		"invoice": result.get("invoice"),
+	}
 
 
 def transfer_school_admin_enrollment_data(enrollment=None, payload=None):
