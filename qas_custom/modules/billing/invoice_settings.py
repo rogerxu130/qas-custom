@@ -9,6 +9,13 @@ from qas_custom.modules.common import has_field, set_if_field
 SETTINGS_DOCTYPE = "QAS Invoice Settings"
 
 DEFAULT_INVOICE_SETTINGS = {
+	"school_name": "Queensland Art School",
+	"legal_name": "",
+	"abn": "",
+	"school_email": "",
+	"school_phone": "",
+	"school_website": "",
+	"school_address": "",
 	"payment_due_days": 7,
 	"invoice_message": "Thank you for learning with Queensland Art School. Please contact us if you have any questions about this invoice.",
 	"accepted_payment_methods": "Bank transfer, cash, or POS",

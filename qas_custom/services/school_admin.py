@@ -77,6 +77,35 @@ COURSE_EDIT_FIELDS = [
 	"term_session_fee",
 	"is_makeup_course",
 ]
+SCHOOL_SETUP_TYPES = {
+	"campus": {
+		"doctype": "Campus",
+		"title_field": "campus_name",
+		"fields": ["name", "campus_name", "status", "email", "phone", "address", "notes", "modified"],
+		"edit_fields": ["campus_name", "status", "email", "phone", "address", "notes"],
+		"required": ["campus_name"],
+		"search_fields": ["name", "campus_name", "email", "phone", "address"],
+		"order_by": "campus_name asc",
+	},
+	"classroom": {
+		"doctype": "Classroom",
+		"title_field": "classroom_name",
+		"fields": ["name", "classroom_name", "campus", "status", "capacity", "notes", "modified"],
+		"edit_fields": ["classroom_name", "campus", "status", "capacity", "notes"],
+		"required": ["classroom_name", "campus"],
+		"search_fields": ["name", "classroom_name", "campus", "notes"],
+		"order_by": "campus asc, classroom_name asc",
+	},
+	"teacher": {
+		"doctype": "Teacher",
+		"title_field": "teacher_name",
+		"fields": ["name", "teacher_name", "status", "email", "mobile", "phone", "notes", "modified"],
+		"edit_fields": ["teacher_name", "status", "email", "mobile", "phone", "notes"],
+		"required": ["teacher_name"],
+		"search_fields": ["name", "teacher_name", "email", "mobile", "phone"],
+		"order_by": "teacher_name asc",
+	},
+}
 
 
 def get_school_admin_me_data():
@@ -534,6 +563,59 @@ def update_school_admin_invoice_settings_data(payload=None):
 	settings = update_invoice_settings(_get_payload(payload))
 	frappe.db.commit()
 	return settings
+
+
+def get_school_admin_setup_records_data(record_type=None, query=None, status=None, limit=120):
+	_require_school_admin()
+	config = _school_setup_config(record_type)
+	doctype = config["doctype"]
+	if not _doctype_available(doctype):
+		return {"items": []}
+	filters = {}
+	if status and _has_field(doctype, "status"):
+		filters["status"] = status
+	fields = _safe_fields(doctype, config["fields"])
+	or_filters = _text_search_filters(doctype, query, config["search_fields"])
+	rows = frappe.get_all(
+		doctype,
+		filters=filters,
+		or_filters=or_filters,
+		fields=fields,
+		order_by=config["order_by"],
+		limit=_limit(limit, default=120, max_value=500),
+	)
+	return {"items": [_school_setup_payload(config, row) for row in rows]}
+
+
+def save_school_admin_setup_record_data(record_type=None, name=None, payload=None):
+	_require_school_admin()
+	config = _school_setup_config(record_type)
+	doctype = config["doctype"]
+	if not _doctype_available(doctype):
+		frappe.throw(_("{0} is not installed yet.").format(doctype))
+	payload = _get_payload(payload)
+	if name:
+		doc = frappe.get_doc(doctype, name)
+	else:
+		doc = frappe.new_doc(doctype)
+	_apply_master_payload(doc, payload, config["edit_fields"])
+	_normalize_school_setup_record(doc, config)
+	_validate_required(doc, config["required"])
+	doc.save(ignore_permissions=True)
+	frappe.db.commit()
+	return _school_setup_payload(config, doc.as_dict())
+
+
+def delete_school_admin_setup_record_data(record_type=None, name=None):
+	_require_school_admin()
+	config = _school_setup_config(record_type)
+	doctype = config["doctype"]
+	if not name:
+		frappe.throw(_("{0} is required.").format(doctype))
+	_assert_safe_delete(doctype, name)
+	frappe.delete_doc(doctype, name, ignore_permissions=True)
+	frappe.db.commit()
+	return {"deleted": True, "name": name}
 
 
 def adjust_school_admin_store_credit_data(parent=None, customer=None, amount=0, reason=None, notes=None):
@@ -2048,6 +2130,27 @@ def _attach_course_label(item, course, course_row=None):
 	return item
 
 
+def _school_setup_config(record_type):
+	key = (record_type or "").strip().lower()
+	if key not in SCHOOL_SETUP_TYPES:
+		frappe.throw(_("Unsupported school setup type: {0}").format(record_type or ""))
+	return SCHOOL_SETUP_TYPES[key]
+
+
+def _school_setup_payload(config, row):
+	payload = _normalize_row_payload(config["doctype"], row)
+	title_field = config["title_field"]
+	payload["record_type"] = next((key for key, value in SCHOOL_SETUP_TYPES.items() if value["doctype"] == config["doctype"]), "")
+	payload["label"] = payload.get(title_field) or payload.get("name")
+	return payload
+
+
+def _normalize_school_setup_record(doc, config):
+	if _has_field(doc.doctype, "status") and not doc.get("status"):
+		doc.set("status", "Active")
+	if doc.doctype == "Classroom" and doc.get("campus") and not frappe.db.exists("Campus", doc.get("campus")):
+		frappe.throw(_("Campus does not exist: {0}").format(doc.get("campus")))
+
 
 
 def _matching_student_parent_ids(query):
@@ -2231,6 +2334,12 @@ def _delete_reference_checks(doctype, name):
 		checks = [("Weekly Timeslot", "course"), ("Enrollment", "course"), ("Inquiry", "preferred_course"), ("Makeup Voucher", "course"), ("Sales Invoice Item", "course"), ("Leave Request", "course")]
 	elif doctype == "Term":
 		checks = [("Weekly Timeslot", "term"), ("Enrollment", "term"), ("Sales Invoice Item", "term")]
+	elif doctype == "Campus":
+		checks = [("Classroom", "campus"), ("Weekly Timeslot", "campus"), ("Course Sessions", "campus"), ("Inquiry", "campus")]
+	elif doctype == "Classroom":
+		checks = [("Weekly Timeslot", "classroom"), ("Course Sessions", "classroom")]
+	elif doctype == "Teacher":
+		checks = [("Weekly Timeslot", "teacher"), ("Course Sessions", "teacher")]
 	found = []
 	for target_doctype, fieldname in checks:
 		if not fieldname or not _doctype_available(target_doctype) or not _has_field(target_doctype, fieldname):

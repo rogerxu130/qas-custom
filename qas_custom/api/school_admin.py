@@ -30,6 +30,7 @@ from qas_custom.services.school_admin import (
 	create_school_admin_weekly_timeslot_data,
 	delete_school_admin_draft_invoice_data,
 	delete_school_admin_enrollment_data,
+	delete_school_admin_setup_record_data,
 	end_school_admin_enrollment_data,
 	generate_school_admin_course_sessions_data,
 	get_school_admin_conversion_sessions_data,
@@ -47,6 +48,7 @@ from qas_custom.services.school_admin import (
 	get_school_admin_invoice_settings_data,
 	get_school_admin_invoice_items_data,
 	get_school_admin_me_data,
+	get_school_admin_setup_records_data,
 	get_school_admin_store_credit_data,
 	get_school_admin_teacher_revenue_share_sessions_data,
 	get_school_admin_term_data,
@@ -62,6 +64,7 @@ from qas_custom.services.school_admin import (
 	populate_school_admin_term_data,
 	reschedule_school_admin_inquiry_data,
 	resend_school_admin_invoice_data,
+	save_school_admin_setup_record_data,
 	school_admin_global_search_data,
 	submit_school_admin_invoice_data,
 	transfer_school_admin_enrollment_data,
@@ -194,6 +197,21 @@ def school_admin_get_invoice_settings():
 @frappe.whitelist()
 def school_admin_update_invoice_settings(payload=None):
 	return update_school_admin_invoice_settings_data(payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_get_setup_records(record_type=None, query=None, status=None, limit=120):
+	return get_school_admin_setup_records_data(record_type=record_type, query=query, status=status, limit=limit)
+
+
+@frappe.whitelist()
+def school_admin_save_setup_record(record_type=None, name=None, payload=None):
+	return save_school_admin_setup_record_data(record_type=record_type, name=name, payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_delete_setup_record(record_type=None, name=None):
+	return delete_school_admin_setup_record_data(record_type=record_type, name=name)
 
 
 @frappe.whitelist()

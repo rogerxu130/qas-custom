@@ -6,6 +6,14 @@
  "document_type": "Setup",
  "engine": "InnoDB",
  "field_order": [
+  "school_section",
+  "school_name",
+  "legal_name",
+  "abn",
+  "school_email",
+  "school_phone",
+  "school_website",
+  "school_address",
   "payment_due_days",
   "invoice_message",
   "accepted_payment_methods",
@@ -18,6 +26,47 @@
   "store_credit_liability_account"
  ],
  "fields": [
+  {
+   "fieldname": "school_section",
+   "fieldtype": "Section Break",
+   "label": "School Profile"
+  },
+  {
+   "default": "Queensland Art School",
+   "fieldname": "school_name",
+   "fieldtype": "Data",
+   "label": "School Name"
+  },
+  {
+   "fieldname": "legal_name",
+   "fieldtype": "Data",
+   "label": "Legal Name"
+  },
+  {
+   "fieldname": "abn",
+   "fieldtype": "Data",
+   "label": "ABN"
+  },
+  {
+   "fieldname": "school_email",
+   "fieldtype": "Data",
+   "label": "School Email"
+  },
+  {
+   "fieldname": "school_phone",
+   "fieldtype": "Data",
+   "label": "School Phone"
+  },
+  {
+   "fieldname": "school_website",
+   "fieldtype": "Data",
+   "label": "School Website"
+  },
+  {
+   "fieldname": "school_address",
+   "fieldtype": "Small Text",
+   "label": "School Address"
+  },
   {
    "default": "7",
    "fieldname": "payment_due_days",
