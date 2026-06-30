@@ -16,6 +16,7 @@ DEFAULT_INVOICE_SETTINGS = {
 	"bank_bsb": "",
 	"bank_account_number": "",
 	"bank_reference_note": "For bank transfers, please use the invoice number as the reference.",
+	"store_credit_liability_account": "",
 }
 
 SNAPSHOT_FIELD_MAP = {

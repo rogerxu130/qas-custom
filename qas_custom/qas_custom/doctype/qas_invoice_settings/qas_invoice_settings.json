@@ -13,7 +13,9 @@
   "bank_account_name",
   "bank_bsb",
   "bank_account_number",
-  "bank_reference_note"
+  "bank_reference_note",
+  "store_credit_section",
+  "store_credit_liability_account"
  ],
  "fields": [
   {
@@ -59,6 +61,18 @@
    "fieldname": "bank_reference_note",
    "fieldtype": "Small Text",
    "label": "Bank Reference Note"
+  },
+  {
+   "fieldname": "store_credit_section",
+   "fieldtype": "Section Break",
+   "label": "Store Credit Accounting"
+  },
+  {
+   "description": "Liability account debited when QAS store credit is applied to a submitted invoice.",
+   "fieldname": "store_credit_liability_account",
+   "fieldtype": "Link",
+   "label": "Store Credit Liability Account",
+   "options": "Account"
   }
  ],
  "index_web_pages_for_search": 0,

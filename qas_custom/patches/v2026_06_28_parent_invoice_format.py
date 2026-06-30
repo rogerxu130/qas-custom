@@ -96,8 +96,10 @@ def _parent_invoice_print_html():
 	return """
 {% set invoice_total = doc.grand_total or doc.rounded_total or 0 %}
 {% set outstanding = doc.outstanding_amount if doc.outstanding_amount is not none else invoice_total %}
-{% set credit_applied = invoice_total - outstanding if invoice_total > outstanding else 0 %}
-{% set payable_amount = outstanding if outstanding > 0 else invoice_total %}
+{% set qas_credit = doc.get("qas_store_credit_applied") %}
+{% set qas_payable = doc.get("qas_amount_payable") %}
+{% set credit_applied = qas_credit if qas_credit is not none else (invoice_total - outstanding if invoice_total > outstanding else 0) %}
+{% set payable_amount = qas_payable if qas_payable is not none else (outstanding if outstanding > 0 else invoice_total - credit_applied) %}
 <style>
 	.qas-invoice {
 		color: #172033;
@@ -270,6 +272,7 @@ def _parent_invoice_print_html():
 
 	<div class="qas-note">
 		<strong>Payment</strong><br>
+		{% if payable_amount > 0 %}
 		Please arrange payment by {{ doc.qas_accepted_payment_methods or "bank transfer, cash, or POS" }}. If you have already paid, no further action is needed.
 		{% if doc.qas_bank_account_name or doc.qas_bank_bsb or doc.qas_bank_account_number %}
 		<table class="qas-bank">
@@ -279,6 +282,9 @@ def _parent_invoice_print_html():
 		</table>
 		{% endif %}
 		{% if doc.qas_bank_reference_note %}<p style="margin:8px 0 0;">{{ doc.qas_bank_reference_note }}</p>{% endif %}
+		{% else %}
+		This invoice is fully covered by store credit. No payment is required.
+		{% endif %}
 	</div>
 </div>
 """

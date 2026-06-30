@@ -16,10 +16,12 @@ from qas_custom.modules.attendance.commands import create_full_term_attendance_e
 from qas_custom.modules.billing.store_credit import (
 	adjust_store_credit,
 	apply_store_credit_to_invoice,
+	cancel_store_credit_journal_entries,
 	create_store_credit_entry,
 	get_invoice_payable_amount,
 	get_invoice_store_credit_applied,
 	get_store_credit_summary,
+	sync_invoice_store_credit_snapshot,
 )
 from qas_custom.modules.billing.invoice_settings import (
 	SNAPSHOT_FIELD_MAP,
@@ -796,6 +798,8 @@ def submit_school_admin_invoice_data(invoice=None):
 	application = apply_store_credit_to_invoice(doc)
 	if flt(application.get("applied")) > 0:
 		_add_comment("Sales Invoice", doc.name, _("Store credit applied: {0}.").format(flt(application.get("applied"))))
+	doc = frappe.get_doc("Sales Invoice", doc.name)
+	sync_invoice_store_credit_snapshot(doc)
 	notification = _send_invoice_notification(doc, event="approved")
 	frappe.db.commit()
 	payload = _build_invoice_payload(doc)
@@ -811,6 +815,8 @@ def resend_school_admin_invoice_data(invoice=None):
 	doc = frappe.get_doc("Sales Invoice", invoice)
 	if apply_invoice_payment_snapshot(doc):
 		doc.save(ignore_permissions=True)
+	sync_invoice_store_credit_snapshot(doc)
+	doc = frappe.get_doc("Sales Invoice", invoice)
 	notification = _send_invoice_notification(doc, event="resent")
 	_add_comment("Sales Invoice", doc.name, "Invoice resent to parent by School Admin.")
 	frappe.db.commit()
@@ -844,6 +850,7 @@ def mark_school_admin_invoice_paid_data(invoice=None, payload=None):
 		doc.name,
 		_("Payment recorded by School Admin: {0}.").format(payment_entry.name),
 	)
+	sync_invoice_store_credit_snapshot(doc.name)
 	frappe.db.commit()
 	return _build_invoice_payload(frappe.get_doc("Sales Invoice", invoice))
 
@@ -862,6 +869,7 @@ def cancel_school_admin_invoice_data(invoice=None, reason=None):
 	if cint(doc.docstatus) == 1:
 		paid_credit_amount = _invoice_payment_amount(doc.name)
 		_cancel_invoice_payment_entries(doc.name)
+		cancel_store_credit_journal_entries(doc.name)
 		_reverse_invoice_store_credit_application(doc, reason)
 		paid_credit = _create_invoice_cancellation_store_credit(doc, paid_credit_amount, reason)
 		_cancel_submitted_invoice_as_admin(doc.name)
@@ -2764,10 +2772,8 @@ def _apply_invoice_payment_payload(doc, payload):
 
 def _invoice_credit_payload(doc_or_row):
 	invoice_name = _field_value(doc_or_row, "name")
-	grand_total = flt(_field_value(doc_or_row, "grand_total") or 0)
-	outstanding = flt(_field_value(doc_or_row, "outstanding_amount") or 0)
 	store_credit_applied = get_invoice_store_credit_applied(invoice_name) if invoice_name else 0
-	payable_amount = max(0, outstanding - store_credit_applied) if outstanding else max(0, grand_total - store_credit_applied)
+	payable_amount = get_invoice_payable_amount(doc_or_row) if invoice_name else 0
 	return {
 		"store_credit_applied": store_credit_applied,
 		"payable_amount": payable_amount,

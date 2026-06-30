@@ -6,7 +6,7 @@ import frappe
 from frappe.utils import getdate, get_time, now_datetime, today
 
 from qas_custom.modules.billing.invoice_settings import get_invoice_payment_context
-from qas_custom.modules.billing.store_credit import get_invoice_store_credit_applied
+from qas_custom.modules.billing.store_credit import get_invoice_payable_amount, get_invoice_store_credit_applied
 from qas_custom.modules.course_schedule.queries import (
     get_teacher_name_map as _get_teacher_name_map,
     get_weekly_timeslot_map as _get_weekly_timeslot_map,
@@ -252,7 +252,7 @@ def get_parent_invoices_data():
     for invoice in invoices:
         doc = frappe.get_doc("Sales Invoice", invoice["name"])
         store_credit_applied = float(get_invoice_store_credit_applied(doc.name) or 0)
-        payable_amount = max(0, float(doc.outstanding_amount or doc.grand_total or 0) - store_credit_applied)
+        payable_amount = float(get_invoice_payable_amount(doc) or 0)
         payment_status = "Paid" if payable_amount <= 0 else (doc.status or "Unpaid")
         payload.append(
             {

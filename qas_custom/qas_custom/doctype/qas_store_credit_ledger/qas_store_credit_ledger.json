@@ -21,6 +21,7 @@
   "reference_document",
   "invoice",
   "payment_entry",
+  "journal_entry",
   "enrollment",
   "source_section",
   "source_doctype",
@@ -124,6 +125,12 @@
    "fieldtype": "Link",
    "label": "Payment Entry",
    "options": "Payment Entry"
+  },
+  {
+   "fieldname": "journal_entry",
+   "fieldtype": "Link",
+   "label": "Journal Entry",
+   "options": "Journal Entry"
   },
   {
    "fieldname": "enrollment",
