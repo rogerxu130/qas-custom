@@ -1716,7 +1716,7 @@ def _get_link_options(doctype, label_fields=None, filters=None, limit=500):
 	label_fields = label_fields or []
 	field_candidates = ["name", *label_fields, "status"]
 	if doctype == "Course":
-		field_candidates = [*field_candidates, *COURSE_LABEL_FIELDS]
+		field_candidates = [*field_candidates, *COURSE_LABEL_FIELDS, "duration_mins"]
 	fields = _safe_fields(doctype, field_candidates)
 	active_filters = {}
 	if filters:
@@ -1736,6 +1736,7 @@ def _get_link_options(doctype, label_fields=None, filters=None, limit=500):
 		item = {"value": row.get("name"), "label": label}
 		if doctype == "Course":
 			_attach_course_label(item, row.get("name"), row)
+			item["duration_mins"] = cint(row.get("duration_mins"))
 		items.append(item)
 	return items
 
@@ -2819,6 +2820,33 @@ def _apply_weekly_timeslot_payload(doc, payload):
 	]:
 		if fieldname in payload:
 			_set_if_field(doc, fieldname, payload.get(fieldname))
+	if "end_time" not in payload and (not doc.get("end_time") or "course" in payload or "start_time" in payload):
+		_apply_course_duration_end_time(doc)
+
+
+def _apply_course_duration_end_time(doc):
+	course = doc.get("course")
+	start_time = doc.get("start_time")
+	if not course or not start_time:
+		return
+	duration = cint(frappe.db.get_value("Course", course, "duration_mins")) if frappe.db.exists("Course", course) else 0
+	if not duration:
+		frappe.throw(_("Course duration is missing for {0}. Set the course duration or provide an end time.").format(course))
+	_set_if_field(doc, "end_time", _add_minutes_to_time(start_time, duration))
+
+
+def _add_minutes_to_time(start_time, minutes):
+	if hasattr(start_time, "total_seconds"):
+		total_minutes = int(start_time.total_seconds() // 60)
+	elif hasattr(start_time, "hour") and hasattr(start_time, "minute"):
+		total_minutes = start_time.hour * 60 + start_time.minute
+	else:
+		time_parts = str(start_time or "").split(".")[0].split(":")
+		if len(time_parts) < 2:
+			frappe.throw(_("Start time is invalid."))
+		total_minutes = cint(time_parts[0]) * 60 + cint(time_parts[1])
+	total_minutes = (total_minutes + cint(minutes)) % (24 * 60)
+	return f"{total_minutes // 60:02d}:{total_minutes % 60:02d}"
 
 
 def _weekday_number(day_of_week):
