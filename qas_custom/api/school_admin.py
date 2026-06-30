@@ -27,6 +27,7 @@ from qas_custom.services.school_admin import (
 	create_school_admin_manual_invoice_data,
 	create_school_admin_term_data,
 	create_school_admin_weekly_timeslot_data,
+	delete_school_admin_draft_invoice_data,
 	delete_school_admin_enrollment_data,
 	end_school_admin_enrollment_data,
 	generate_school_admin_course_sessions_data,
@@ -298,6 +299,11 @@ def school_admin_create_manual_invoice(payload=None):
 @frappe.whitelist()
 def school_admin_update_draft_invoice(invoice=None, payload=None):
 	return update_school_admin_draft_invoice_data(invoice=invoice, payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_delete_draft_invoice(invoice=None):
+	return delete_school_admin_draft_invoice_data(invoice=invoice)
 
 
 @frappe.whitelist()

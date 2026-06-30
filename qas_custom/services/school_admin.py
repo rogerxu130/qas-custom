@@ -767,6 +767,20 @@ def update_school_admin_draft_invoice_data(invoice=None, payload=None):
 	return _build_invoice_payload(doc)
 
 
+def delete_school_admin_draft_invoice_data(invoice=None):
+	_require_school_admin()
+	if not invoice:
+		frappe.throw(_("Invoice is required."))
+	doc = frappe.get_doc("Sales Invoice", invoice)
+	if cint(doc.docstatus) != 0:
+		frappe.throw(_("Only draft invoices can be deleted. Cancel submitted invoices instead."))
+	_clear_deleted_invoice_enrollment_snapshot(doc)
+	deleted = doc.name
+	frappe.delete_doc("Sales Invoice", deleted, ignore_permissions=True)
+	frappe.db.commit()
+	return {"deleted": deleted}
+
+
 def submit_school_admin_invoice_data(invoice=None):
 	_require_school_admin()
 	if not invoice:
@@ -2835,6 +2849,32 @@ def _create_invoice_cancellation_store_credit(doc, amount, reason):
 	)
 	_add_comment("Sales Invoice", doc.name, _("Paid amount moved to store credit: {0}.").format(amount))
 	return credit
+
+
+def _clear_deleted_invoice_enrollment_snapshot(doc):
+	enrollment_names = set()
+	for candidate in [doc.get("enrollment")]:
+		if candidate:
+			enrollment_names.add(candidate)
+	if doc.get("source_doctype") == "Enrollment" and doc.get("source_document"):
+		enrollment_names.add(doc.get("source_document"))
+	for item in doc.get("items", []):
+		if item.get("enrollment"):
+			enrollment_names.add(item.get("enrollment"))
+
+	for enrollment in sorted(enrollment_names):
+		if not frappe.db.exists("Enrollment", enrollment):
+			continue
+		current_invoice = frappe.db.get_value("Enrollment", enrollment, "invoice") if _has_field("Enrollment", "invoice") else None
+		if current_invoice and current_invoice != doc.name:
+			continue
+		updates = {}
+		for fieldname, value in {"invoice": None, "invoice_status": None, "invoice_amount": 0}.items():
+			if _has_field("Enrollment", fieldname):
+				updates[fieldname] = value
+		if updates:
+			frappe.db.set_value("Enrollment", enrollment, updates, update_modified=True)
+			_add_comment("Enrollment", enrollment, _("Draft invoice {0} was deleted by School Admin.").format(doc.name))
 
 
 def _reverse_invoice_store_credit_application(doc, reason):
