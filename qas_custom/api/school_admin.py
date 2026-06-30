@@ -1,6 +1,22 @@
 import frappe
 
 from qas_custom.services.school_admin import (
+	update_school_admin_student_data,
+	update_school_admin_parent_data,
+	update_school_admin_course_data,
+	set_school_admin_student_status_data,
+	set_school_admin_parent_status_data,
+	set_school_admin_course_status_data,
+	get_school_admin_students_data,
+	get_school_admin_parents_data,
+	get_school_admin_courses_data,
+	delete_school_admin_term_data,
+	delete_school_admin_student_data,
+	delete_school_admin_parent_data,
+	delete_school_admin_course_data,
+	create_school_admin_student_data,
+	create_school_admin_parent_data,
+	create_school_admin_course_data,
 	add_school_admin_inquiry_note_data,
 	adjust_school_admin_store_credit_data,
 	bulk_school_admin_invoice_action_data,
@@ -83,6 +99,81 @@ def school_admin_get_family(parent=None, student=None, customer=None, email=None
 @frappe.whitelist()
 def school_admin_get_store_credit(parent=None, customer=None, limit=50):
 	return get_school_admin_store_credit_data(parent=parent, customer=customer, limit=limit)
+
+
+@frappe.whitelist()
+def school_admin_get_parents(query=None, status=None, limit=120):
+	return get_school_admin_parents_data(query=query, status=status, limit=limit)
+
+
+@frappe.whitelist()
+def school_admin_create_parent(payload=None):
+	return create_school_admin_parent_data(payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_update_parent(parent=None, payload=None):
+	return update_school_admin_parent_data(parent=parent, payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_set_parent_status(parent=None, status=None):
+	return set_school_admin_parent_status_data(parent=parent, status=status)
+
+
+@frappe.whitelist()
+def school_admin_delete_parent(parent=None):
+	return delete_school_admin_parent_data(parent=parent)
+
+
+@frappe.whitelist()
+def school_admin_get_students(parent=None, query=None, status=None, limit=120):
+	return get_school_admin_students_data(parent=parent, query=query, status=status, limit=limit)
+
+
+@frappe.whitelist()
+def school_admin_create_student(payload=None):
+	return create_school_admin_student_data(payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_update_student(student=None, payload=None):
+	return update_school_admin_student_data(student=student, payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_set_student_status(student=None, status=None):
+	return set_school_admin_student_status_data(student=student, status=status)
+
+
+@frappe.whitelist()
+def school_admin_delete_student(student=None):
+	return delete_school_admin_student_data(student=student)
+
+
+@frappe.whitelist()
+def school_admin_get_courses(query=None, status=None, limit=120):
+	return get_school_admin_courses_data(query=query, status=status, limit=limit)
+
+
+@frappe.whitelist()
+def school_admin_create_course(payload=None):
+	return create_school_admin_course_data(payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_update_course(course=None, payload=None):
+	return update_school_admin_course_data(course=course, payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_set_course_status(course=None, status=None):
+	return set_school_admin_course_status_data(course=course, status=status)
+
+
+@frappe.whitelist()
+def school_admin_delete_course(course=None):
+	return delete_school_admin_course_data(course=course)
 
 
 @frappe.whitelist()
@@ -244,6 +335,11 @@ def school_admin_create_term(payload=None):
 @frappe.whitelist()
 def school_admin_copy_term(payload=None):
 	return copy_school_admin_term_data(payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_delete_term(term=None):
+	return delete_school_admin_term_data(term=term)
 
 
 @frappe.whitelist()

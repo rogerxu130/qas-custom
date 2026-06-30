@@ -58,6 +58,22 @@ INQUIRY_POST_VISIT_STATUSES = ["Completed", "Follow-up"]
 ACTIVE_TERM_STATUSES = ["Upcoming", "Active"]
 ACTIVE_TIMESLOT_STATUSES = ["Active"]
 COURSE_LABEL_FIELDS = ["name", "course_name", "course_name_zh"]
+PARENT_EDIT_FIELDS = ["parent_name", "mobile_number", "phone", "email", "email_id", "address", "status", "customer"]
+STUDENT_EDIT_FIELDS = ["student_name", "first_name", "last_name", "date_of_birth", "dob", "gender", "status", "guardian", "parent"]
+COURSE_EDIT_FIELDS = [
+	"course_name",
+	"course_name_zh",
+	"status",
+	"duration_mins",
+	"min_age",
+	"max_age",
+	"invoice_item",
+	"full_term_fee",
+	"pay_as_you_go_fee",
+	"total_session_per_term",
+	"term_session_fee",
+	"is_makeup_course",
+]
 
 
 def get_school_admin_me_data():
@@ -172,6 +188,241 @@ def get_school_admin_family_data(parent=None, student=None, customer=None, email
 		"inquiries": _get_family_inquiry_rows(parent=parent_id, students=student_ids, email=email, limit=80),
 		"invoices": _get_invoice_rows(customer=customer_id, parent=parent_id, students=student_ids, limit=80),
 	}
+
+
+
+
+def get_school_admin_parents_data(query=None, status=None, limit=120):
+	_require_school_admin()
+	if not _doctype_available("Parent"):
+		return {"items": []}
+	filters = {}
+	if status and _has_field("Parent", "status"):
+		filters["status"] = status
+	fields = _safe_fields("Parent", ["name", *PARENT_EDIT_FIELDS, "modified"])
+	or_filters = _text_search_filters("Parent", query, ["name", "parent_name", "mobile_number", "phone", "email", "email_id"])
+	student_parent_ids = _matching_student_parent_ids(query)
+	if student_parent_ids:
+		or_filters = or_filters or []
+		or_filters.append(["Parent", "name", "in", student_parent_ids])
+	rows = frappe.get_all(
+		"Parent",
+		filters=filters,
+		or_filters=or_filters,
+		fields=fields,
+		order_by="modified desc",
+		limit=_limit(limit, default=120, max_value=300),
+	)
+	return {"items": [_normalize_row_payload("Parent", row) for row in rows]}
+
+
+def create_school_admin_parent_data(payload=None):
+	_require_school_admin()
+	payload = _get_payload(payload)
+	doc = frappe.new_doc("Parent")
+	_apply_master_payload(doc, payload, PARENT_EDIT_FIELDS)
+	if not doc.get("parent_name") and payload.get("name"):
+		_set_if_field(doc, "parent_name", payload.get("name"))
+	if _has_field("Parent", "status") and not doc.get("status"):
+		_set_if_field(doc, "status", "Active")
+	_validate_required(doc, ["parent_name"])
+	doc.insert(ignore_permissions=True)
+	_add_comment("Parent", doc.name, _("Parent created by School Admin."))
+	frappe.db.commit()
+	return _get_parent_payload(doc.name)
+
+
+def update_school_admin_parent_data(parent=None, payload=None):
+	_require_school_admin()
+	if not parent:
+		frappe.throw(_("Parent is required."))
+	doc = frappe.get_doc("Parent", parent)
+	_apply_master_payload(doc, _get_payload(payload), PARENT_EDIT_FIELDS)
+	_validate_required(doc, ["parent_name"])
+	doc.save(ignore_permissions=True)
+	_add_comment("Parent", doc.name, _("Parent updated by School Admin."))
+	frappe.db.commit()
+	return get_school_admin_family_data(parent=doc.name)
+
+
+def set_school_admin_parent_status_data(parent=None, status=None):
+	_require_school_admin()
+	if not parent or not status:
+		frappe.throw(_("Parent and status are required."))
+	if not _has_field("Parent", "status"):
+		frappe.throw(_("Parent status is not available on this site."))
+	doc = frappe.get_doc("Parent", parent)
+	doc.status = status
+	doc.save(ignore_permissions=True)
+	_add_comment("Parent", doc.name, _("Parent status changed to {0} by School Admin.").format(status))
+	frappe.db.commit()
+	return get_school_admin_family_data(parent=doc.name)
+
+
+def delete_school_admin_parent_data(parent=None):
+	_require_school_admin()
+	if not parent:
+		frappe.throw(_("Parent is required."))
+	_assert_safe_delete("Parent", parent)
+	frappe.delete_doc("Parent", parent, ignore_permissions=True)
+	frappe.db.commit()
+	return {"deleted": parent}
+
+
+def get_school_admin_students_data(parent=None, query=None, status=None, limit=120):
+	_require_school_admin()
+	if not _doctype_available("Student"):
+		return {"items": []}
+	filters = {}
+	parent_field = _student_parent_field()
+	if parent and parent_field:
+		filters[parent_field] = parent
+	if status and _has_field("Student", "status"):
+		filters["status"] = status
+	fields = _safe_fields("Student", ["name", *STUDENT_EDIT_FIELDS, "modified"])
+	or_filters = _text_search_filters("Student", query, ["name", "student_name", "first_name", "last_name"])
+	rows = frappe.get_all(
+		"Student",
+		filters=filters,
+		or_filters=or_filters,
+		fields=fields,
+		order_by="modified desc",
+		limit=_limit(limit, default=120, max_value=300),
+	)
+	return {"items": [_normalize_row_payload("Student", row) for row in rows]}
+
+
+def create_school_admin_student_data(payload=None):
+	_require_school_admin()
+	payload = _get_payload(payload)
+	doc = frappe.new_doc("Student")
+	_apply_master_payload(doc, payload, STUDENT_EDIT_FIELDS)
+	if payload.get("parent"):
+		_set_student_parent(doc, payload.get("parent"))
+	if _has_field("Student", "status") and not doc.get("status"):
+		_set_if_field(doc, "status", "Active")
+	_validate_required(doc, ["student_name"])
+	doc.insert(ignore_permissions=True)
+	_add_comment("Student", doc.name, _("Student created by School Admin."))
+	frappe.db.commit()
+	return get_school_admin_family_data(student=doc.name)
+
+
+def update_school_admin_student_data(student=None, payload=None):
+	_require_school_admin()
+	if not student:
+		frappe.throw(_("Student is required."))
+	payload = _get_payload(payload)
+	doc = frappe.get_doc("Student", student)
+	_apply_master_payload(doc, payload, STUDENT_EDIT_FIELDS)
+	if payload.get("parent"):
+		_set_student_parent(doc, payload.get("parent"))
+	_validate_required(doc, ["student_name"])
+	doc.save(ignore_permissions=True)
+	_add_comment("Student", doc.name, _("Student updated by School Admin."))
+	frappe.db.commit()
+	return get_school_admin_family_data(student=doc.name)
+
+
+def set_school_admin_student_status_data(student=None, status=None):
+	_require_school_admin()
+	if not student or not status:
+		frappe.throw(_("Student and status are required."))
+	if not _has_field("Student", "status"):
+		frappe.throw(_("Student status is not available on this site."))
+	doc = frappe.get_doc("Student", student)
+	doc.status = status
+	doc.save(ignore_permissions=True)
+	_add_comment("Student", doc.name, _("Student status changed to {0} by School Admin.").format(status))
+	frappe.db.commit()
+	return get_school_admin_family_data(student=doc.name)
+
+
+def delete_school_admin_student_data(student=None):
+	_require_school_admin()
+	if not student:
+		frappe.throw(_("Student is required."))
+	_assert_safe_delete("Student", student)
+	frappe.delete_doc("Student", student, ignore_permissions=True)
+	frappe.db.commit()
+	return {"deleted": student}
+
+
+def get_school_admin_courses_data(query=None, status=None, limit=120):
+	_require_school_admin()
+	if not _doctype_available("Course"):
+		return {"items": []}
+	filters = {}
+	if status and _has_field("Course", "status"):
+		filters["status"] = status
+	fields = _safe_fields("Course", ["name", *COURSE_EDIT_FIELDS, "modified"])
+	or_filters = _text_search_filters("Course", query, ["name", "course_name", "course_name_zh"])
+	rows = frappe.get_all(
+		"Course",
+		filters=filters,
+		or_filters=or_filters,
+		fields=fields,
+		order_by="name asc",
+		limit=_limit(limit, default=120, max_value=500),
+	)
+	items = [_normalize_row_payload("Course", row) for row in rows]
+	for item in items:
+		_attach_course_label(item, item.get("name"), item)
+	return {"items": items}
+
+
+def create_school_admin_course_data(payload=None):
+	_require_school_admin()
+	payload = _get_payload(payload)
+	doc = frappe.new_doc("Course")
+	_apply_master_payload(doc, payload, COURSE_EDIT_FIELDS)
+	if not doc.get("course_name") and payload.get("name"):
+		_set_if_field(doc, "course_name", payload.get("name"))
+	if _has_field("Course", "status") and not doc.get("status"):
+		_set_if_field(doc, "status", "Active")
+	_validate_required(doc, ["course_name"])
+	doc.insert(ignore_permissions=True)
+	_add_comment("Course", doc.name, _("Course created by School Admin."))
+	frappe.db.commit()
+	return _get_course_payload(doc.name)
+
+
+def update_school_admin_course_data(course=None, payload=None):
+	_require_school_admin()
+	if not course:
+		frappe.throw(_("Course is required."))
+	doc = frappe.get_doc("Course", course)
+	payload = _get_payload(payload)
+	_apply_master_payload(doc, payload, COURSE_EDIT_FIELDS)
+	_validate_required(doc, ["course_name"])
+	doc.save(ignore_permissions=True)
+	_add_comment("Course", doc.name, _("Course updated by School Admin."))
+	frappe.db.commit()
+	return _get_course_payload(doc.name)
+
+
+def set_school_admin_course_status_data(course=None, status=None):
+	_require_school_admin()
+	if not course or not status:
+		frappe.throw(_("Course and status are required."))
+	if not _has_field("Course", "status"):
+		frappe.throw(_("Course status is not available on this site."))
+	doc = frappe.get_doc("Course", course)
+	doc.status = status
+	doc.save(ignore_permissions=True)
+	_add_comment("Course", doc.name, _("Course status changed to {0} by School Admin.").format(status))
+	frappe.db.commit()
+	return _get_course_payload(doc.name)
+
+
+def delete_school_admin_course_data(course=None):
+	_require_school_admin()
+	if not course:
+		frappe.throw(_("Course is required."))
+	_assert_safe_delete("Course", course)
+	frappe.delete_doc("Course", course, ignore_permissions=True)
+	frappe.db.commit()
+	return {"deleted": course}
 
 
 def get_school_admin_store_credit_data(parent=None, customer=None, limit=50):
@@ -662,6 +913,17 @@ def update_school_admin_term_data(term=None, payload=None):
 	frappe.db.commit()
 	return get_school_admin_term_data(doc.name)
 
+
+
+
+def delete_school_admin_term_data(term=None):
+	_require_school_admin()
+	if not term:
+		frappe.throw(_("Term is required."))
+	_assert_safe_delete("Term", term)
+	frappe.delete_doc("Term", term, ignore_permissions=True)
+	frappe.db.commit()
+	return {"deleted": term}
 
 def copy_school_admin_term_data(payload=None):
 	_require_school_admin()
@@ -1506,6 +1768,110 @@ def _attach_course_label(item, course, course_row=None):
 	return item
 
 
+
+
+def _matching_student_parent_ids(query):
+	query = (query or "").strip()
+	if not query or not _doctype_available("Student") or not _doctype_available("Parent"):
+		return []
+	parent_fields = [fieldname for fieldname in ["guardian", "parent"] if _has_field("Student", fieldname)]
+	if not parent_fields:
+		return []
+	student_filters = _text_search_filters("Student", query, ["name", "student_name", "first_name", "last_name"])
+	if not student_filters:
+		return []
+	fields = ["name", *parent_fields]
+	try:
+		students = frappe.get_all("Student", or_filters=student_filters, fields=fields, limit=50)
+	except Exception:
+		return []
+	parent_ids = []
+	for row in students:
+		for fieldname in parent_fields:
+			if row.get(fieldname):
+				parent_ids.append(row.get(fieldname))
+	return sorted(set(parent_ids))
+
+
+def _text_search_filters(doctype, query, fields):
+	query = (query or "").strip()
+	if not query:
+		return None
+	search_fields = [fieldname for fieldname in fields if fieldname == "name" or _has_field(doctype, fieldname)]
+	return [[doctype, fieldname, "like", f"%{query}%"] for fieldname in search_fields] or None
+
+
+def _apply_master_payload(doc, payload, candidate_fields):
+	payload = payload or {}
+	for fieldname in candidate_fields:
+		if fieldname in payload:
+			_set_if_field(doc, fieldname, payload.get(fieldname))
+
+
+def _validate_required(doc, required_fields):
+	for fieldname in required_fields:
+		if _has_field(doc.doctype, fieldname) and not doc.get(fieldname):
+			frappe.throw(_("{0} is required.").format(fieldname.replace('_', ' ').title()))
+
+
+def _set_student_parent(doc, parent):
+	if not parent:
+		return
+	if not frappe.db.exists("Parent", parent):
+		frappe.throw(_("Parent does not exist: {0}").format(parent))
+	for fieldname in ["guardian", "parent"]:
+		if _has_field("Student", fieldname):
+			_set_if_field(doc, fieldname, parent)
+			return
+
+
+def _get_course_payload(course):
+	fields = _safe_fields("Course", ["name", *COURSE_EDIT_FIELDS, "modified"])
+	rows = frappe.get_all("Course", filters={"name": course}, fields=fields, limit=1)
+	if not rows:
+		return {"doctype": "Course", "name": course}
+	payload = _normalize_row_payload("Course", rows[0])
+	_attach_course_label(payload, payload.get("name"), payload)
+	return payload
+
+
+def _assert_safe_delete(doctype, name):
+	if not frappe.db.exists(doctype, name):
+		frappe.throw(_("{0} was not found.").format(doctype))
+	references = _delete_reference_checks(doctype, name)
+	if references:
+		frappe.throw(_("Cannot delete {0} because linked business records exist: {1}. Archive or mark inactive instead.").format(doctype, ", ".join(references)))
+
+
+def _delete_reference_checks(doctype, name):
+	checks = []
+	if doctype == "Parent":
+		student_parent_fields = [fieldname for fieldname in ["guardian", "parent"] if _has_field("Student", fieldname)]
+		for field in student_parent_fields:
+			checks.append(("Student", field))
+		checks.extend([
+			("Enrollment", "parent"),
+			("Inquiry", "parent"),
+			("Sales Invoice", "parent"),
+			("QAS Store Credit Ledger", "parent"),
+		])
+	elif doctype == "Student":
+		checks = [("Enrollment", "student"), ("Inquiry", "student"), ("Class Attendance Entry", "student"), ("Makeup Voucher", "student"), ("Makeup Voucher", "used_by_student"), ("Sales Invoice Item", "student"), ("Leave Request", "student")]
+	elif doctype == "Course":
+		checks = [("Weekly Timeslot", "course"), ("Enrollment", "course"), ("Inquiry", "preferred_course"), ("Makeup Voucher", "course"), ("Sales Invoice Item", "course"), ("Leave Request", "course")]
+	elif doctype == "Term":
+		checks = [("Weekly Timeslot", "term"), ("Enrollment", "term"), ("Sales Invoice Item", "term")]
+	found = []
+	for target_doctype, fieldname in checks:
+		if not fieldname or not _doctype_available(target_doctype) or not _has_field(target_doctype, fieldname):
+			continue
+		try:
+			if frappe.db.count(target_doctype, {fieldname: name}):
+				found.append(target_doctype)
+		except Exception:
+			continue
+	return sorted(set(found))
+
 def _is_truthy(value):
 	return str(value).lower() in {"1", "true", "yes", "y"}
 
@@ -1817,7 +2183,7 @@ def _find_customer_by_email(email):
 
 
 def _get_parent_payload(parent):
-	fields = _safe_fields("Parent", ["name", "parent_name", "mobile_number", "email", "customer", "status"])
+	fields = _safe_fields("Parent", ["name", *PARENT_EDIT_FIELDS, "modified"])
 	rows = frappe.get_all("Parent", filters={"name": parent}, fields=fields, limit=1)
 	return _normalize_row_payload("Parent", rows[0]) if rows else {"doctype": "Parent", "name": parent}
 
@@ -1836,7 +2202,7 @@ def _get_family_students(parent=None, student=None):
 		filters = {"name": student}
 	else:
 		return []
-	fields = _safe_fields("Student", ["name", "student_name", "guardian", "parent", "date_of_birth", "status", "gender"])
+	fields = _safe_fields("Student", ["name", *STUDENT_EDIT_FIELDS, "modified"])
 	rows = frappe.get_all("Student", filters=filters, fields=fields, order_by="student_name asc")
 	return [_normalize_row_payload("Student", row) for row in rows]
 
