@@ -1523,12 +1523,28 @@ def end_school_admin_enrollment_data(enrollment=None, payload=None):
 	payload = _get_payload(payload)
 	doc = frappe.get_doc("Enrollment", enrollment)
 	end_date = payload.get("end_date") or today()
-	doc.status = payload.get("status") or "Inactive"
+	target_status = payload.get("status")
+	if target_status not in {"Inactive", "Completed", "Cancelled"}:
+		target_status = "Cancelled" if doc.get("status") == "Planned" else "Inactive"
+	doc.status = target_status
 	doc.save(ignore_permissions=True)
 	_cancel_future_enrollment_attendance(doc.name, effective_date=end_date)
-	_add_comment("Enrollment", doc.name, _("Enrollment ended by School Admin from {0}.").format(end_date))
+	action = _("cancelled") if target_status == "Cancelled" else _("ended")
+	_add_comment("Enrollment", doc.name, _("Enrollment {0} by School Admin from {1}.").format(action, end_date))
 	frappe.db.commit()
 	return _build_enrollment_payload(doc)
+
+
+def delete_school_admin_enrollment_data(enrollment=None):
+	_require_school_admin()
+	if not enrollment:
+		frappe.throw(_("Enrollment is required."))
+	doc = frappe.get_doc("Enrollment", enrollment)
+	_assert_safe_delete_enrollment(doc)
+	deleted = doc.name
+	frappe.delete_doc("Enrollment", deleted, ignore_permissions=True)
+	frappe.db.commit()
+	return {"deleted": deleted}
 
 
 def get_school_admin_weekly_timeslots_data(
@@ -1958,6 +1974,40 @@ def _assert_safe_delete(doctype, name):
 	references = _delete_reference_checks(doctype, name)
 	if references:
 		frappe.throw(_("Cannot delete {0} because linked business records exist: {1}. Archive or mark inactive instead.").format(doctype, ", ".join(references)))
+
+
+def _assert_safe_delete_enrollment(doc):
+	if doc.get("status") != "Planned":
+		frappe.throw(_("Only planned enrollments can be deleted. Cancel or end this enrollment instead."))
+
+	references = []
+	if doc.get("start_course_session"):
+		references.append(_("start session"))
+	if doc.get("invoice"):
+		references.append(_("invoice"))
+	if doc.get("invoice_status") or flt(doc.get("invoice_amount")):
+		references.append(_("billing snapshot"))
+	if doc.get("source_inquiry"):
+		references.append(_("source inquiry"))
+
+	if _linked_record_exists("Class Attendance Entry", {"source_doctype": "Enrollment", "source_document": doc.name}):
+		references.append(_("attendance"))
+	if _linked_record_exists("Sales Invoice Item", {"enrollment": doc.name}):
+		references.append(_("invoice item"))
+	if _linked_record_exists("Sales Invoice", {"source_doctype": "Enrollment", "source_document": doc.name}):
+		references.append(_("sales invoice"))
+
+	if references:
+		frappe.throw(_("Cannot delete this planned enrollment because linked business records exist: {0}. Cancel it instead.").format(", ".join(references)))
+
+
+def _linked_record_exists(doctype, filters):
+	if not _doctype_available(doctype):
+		return False
+	for fieldname in filters:
+		if not _has_field(doctype, fieldname):
+			return False
+	return bool(frappe.db.exists(doctype, filters))
 
 
 def _delete_reference_checks(doctype, name):
