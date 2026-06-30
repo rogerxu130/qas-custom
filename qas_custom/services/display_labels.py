@@ -87,6 +87,16 @@ def sync_makeup_voucher_label(voucher: str | dict | None):
 	return label
 
 
+def get_course_session_snapshot_label(course_session: str | None):
+	if not course_session:
+		return None
+
+	session_label = _get_session_label(course_session)
+	if session_label:
+		return f"{course_session} · {session_label}"
+	return course_session
+
+
 def _get_student_doc(student: str | dict | None):
 	if not student:
 		return None

@@ -189,10 +189,10 @@ def _add_sales_invoice_item_fields():
 		"Sales Invoice Item",
 		{
 			"fieldname": "course_session",
-			"fieldtype": "Link",
+			"fieldtype": "Data",
 			"label": "Course Session",
-			"options": "Course Sessions",
 			"insert_after": "term",
+			"read_only": 1,
 		},
 	)
 	_ensure_custom_field(

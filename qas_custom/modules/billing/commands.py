@@ -7,7 +7,11 @@ from frappe.utils import flt
 from qas_custom.modules.common import has_field, is_new_doc, set_if_field
 from qas_custom.modules.billing.presentation import build_course_invoice_description
 from qas_custom.modules.billing.invoice_settings import apply_default_invoice_dates, apply_invoice_payment_snapshot
-from qas_custom.services.display_labels import get_student_display_code, get_student_parent_name
+from qas_custom.services.display_labels import (
+	get_course_session_snapshot_label,
+	get_student_display_code,
+	get_student_parent_name,
+)
 
 
 def create_prorata_invoice(inquiry_doc, enrollment, course: str, term: str, start_session: str, remaining_session_count: int):
@@ -46,7 +50,7 @@ def create_prorata_invoice(inquiry_doc, enrollment, course: str, term: str, star
 	set_if_field(item, "enrollment", enrollment.name)
 	set_if_field(item, "course", course)
 	set_if_field(item, "term", term)
-	set_if_field(item, "course_session", start_session)
+	set_if_field(item, "course_session", get_course_session_snapshot_label(start_session))
 	set_if_field(item, "session_count", remaining_session_count)
 	sync_invoice_student_summary(invoice)
 	normalize_course_invoice_dates(invoice)
