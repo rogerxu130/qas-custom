@@ -1561,6 +1561,43 @@ def activate_school_admin_enrollment_data(enrollment=None, payload=None):
 	}
 
 
+def create_school_admin_enrollment_invoice_data(enrollment=None, payload=None):
+	_require_school_admin()
+	if not enrollment:
+		frappe.throw(_("Enrollment is required."))
+	payload = _get_payload(payload)
+	doc = frappe.get_doc("Enrollment", enrollment)
+	if doc.get("status") != "Active":
+		frappe.throw(_("Set the enrollment to Active before creating a draft invoice."))
+	existing_invoice = _existing_invoice_for_enrollment(doc)
+	if existing_invoice:
+		frappe.throw(_("This enrollment already has an invoice: {0}.").format(existing_invoice))
+	if not doc.get("weekly_timeslot"):
+		frappe.throw(_("Weekly timeslot is required before creating an invoice."))
+	term_doc = frappe.get_doc("Term", doc.term)
+	start_session = _validate_enrollment_start_session(
+		payload.get("start_course_session") or doc.get("start_course_session"),
+		doc.weekly_timeslot,
+		term_doc,
+	)
+	timeslot_course = frappe.db.get_value("Weekly Timeslot", doc.weekly_timeslot, "course")
+	_set_if_field(doc, "start_course_session", start_session)
+	_set_if_field(doc, "course", doc.get("course") or timeslot_course)
+	if not doc.get("enrollment_date"):
+		start_date = frappe.db.get_value("Course Sessions", start_session, "session_date")
+		_set_if_field(doc, "enrollment_date", start_date or term_doc.get("start_date") or today())
+	doc.save(ignore_permissions=True)
+
+	invoice = _create_term_enrollment_invoice(doc, start_session)
+	_set_if_field(doc, "invoice", invoice.name)
+	_set_if_field(doc, "invoice_status", "Draft")
+	_set_if_field(doc, "invoice_amount", invoice.get("grand_total"))
+	doc.save(ignore_permissions=True)
+	_add_comment("Enrollment", doc.name, _("Draft invoice {0} created by School Admin.").format(invoice.name))
+	frappe.db.commit()
+	return {"enrollment": _build_enrollment_payload(doc), "invoice": invoice.name}
+
+
 def transfer_school_admin_enrollment_data(enrollment=None, payload=None):
 	_require_school_admin()
 	if not enrollment:
@@ -2109,6 +2146,33 @@ def _active_sales_invoice_item_exists_for_enrollment(enrollment):
 			limit=1,
 		)
 	)
+
+
+def _existing_invoice_for_enrollment(enrollment_doc):
+	invoice = enrollment_doc.get("invoice")
+	if invoice and frappe.db.exists("Sales Invoice", invoice):
+		return invoice
+	if not _doctype_available("Sales Invoice"):
+		return None
+	if _has_field("Sales Invoice", "enrollment"):
+		rows = frappe.get_all(
+			"Sales Invoice",
+			filters={"enrollment": enrollment_doc.name, "docstatus": ["!=", 2]},
+			pluck="name",
+			limit=1,
+		)
+		if rows:
+			return rows[0]
+	if _has_field("Sales Invoice", "source_doctype") and _has_field("Sales Invoice", "source_document"):
+		rows = frappe.get_all(
+			"Sales Invoice",
+			filters={"source_doctype": "Enrollment", "source_document": enrollment_doc.name, "docstatus": ["!=", 2]},
+			pluck="name",
+			limit=1,
+		)
+		if rows:
+			return rows[0]
+	return None
 
 
 def _delete_reference_checks(doctype, name):
