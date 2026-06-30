@@ -2045,7 +2045,7 @@ def _assert_safe_delete_enrollment(doc):
 
 	if _linked_record_exists("Class Attendance Entry", {"source_doctype": "Enrollment", "source_document": doc.name}):
 		references.append(_("attendance"))
-	if _linked_record_exists("Sales Invoice Item", {"enrollment": doc.name}):
+	if _active_sales_invoice_item_exists_for_enrollment(doc.name):
 		references.append(_("invoice item"))
 	if _linked_record_exists("Sales Invoice", {"source_doctype": "Enrollment", "source_document": doc.name}):
 		references.append(_("sales invoice"))
@@ -2061,6 +2061,35 @@ def _linked_record_exists(doctype, filters):
 		if not _has_field(doctype, fieldname):
 			return False
 	return bool(frappe.db.exists(doctype, filters))
+
+
+def _active_sales_invoice_item_exists_for_enrollment(enrollment):
+	if not enrollment or not _doctype_available("Sales Invoice Item") or not _has_field("Sales Invoice Item", "enrollment"):
+		return False
+	if not _doctype_available("Sales Invoice"):
+		return _linked_record_exists("Sales Invoice Item", {"enrollment": enrollment})
+
+	filters = {"enrollment": enrollment}
+	if frappe.db.has_column("Sales Invoice Item", "parenttype"):
+		filters["parenttype"] = "Sales Invoice"
+	rows = frappe.get_all(
+		"Sales Invoice Item",
+		filters=filters,
+		fields=["name", "parent"],
+		limit_page_length=20,
+	)
+	invoice_names = [row.get("parent") for row in rows if row.get("parent")]
+	if not invoice_names:
+		return False
+
+	return bool(
+		frappe.get_all(
+			"Sales Invoice",
+			filters={"name": ["in", invoice_names], "docstatus": ["!=", 2]},
+			pluck="name",
+			limit=1,
+		)
+	)
 
 
 def _delete_reference_checks(doctype, name):
