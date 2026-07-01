@@ -8,6 +8,7 @@ import frappe
 
 LEGACY_INVOICE_SUBJECT_MARKERS = (
 	"New Invoice",
+	"Queensland Art School - New Invoice",
 )
 
 LEGACY_INVOICE_MESSAGE_MARKERS = (
@@ -57,24 +58,20 @@ def purge_legacy_invoice_email_queue(doc=None, method=None, invoice: str | None 
 		return 0
 
 	filters = {
-		"reference_doctype": "Sales Invoice",
 		"status": ("in", ["Not Sent", "Partially Sent", "Error"]),
 	}
-	if invoice_name:
-		filters["reference_name"] = invoice_name
 
 	rows = frappe.get_all(
 		"Email Queue",
 		filters=filters,
-		fields=["name", "message", "reference_name", "status", "attachments"],
+		fields=["name", "message", "reference_doctype", "reference_name", "status", "attachments"],
 		limit_page_length=0,
 	)
 	deleted = 0
 	for row in rows:
-		if not (
-			_is_legacy_invoice_email_message(row.get("message"), row.get("reference_name"))
-			or _has_sales_invoice_print_attachment(row.get("attachments"))
-		):
+		if invoice_name and not _email_queue_mentions_invoice(row, invoice_name):
+			continue
+		if not _is_legacy_invoice_email_queue(row):
 			continue
 		frappe.db.delete("Email Queue Recipient", {"parent": row.name})
 		frappe.db.delete("Email Queue", {"name": row.name})
@@ -83,13 +80,10 @@ def purge_legacy_invoice_email_queue(doc=None, method=None, invoice: str | None 
 
 
 def suppress_legacy_invoice_email_queue(doc=None, method=None):
-	if not doc or getattr(doc, "reference_doctype", None) != "Sales Invoice":
+	if not doc:
 		return
 
-	if not (
-		_is_legacy_invoice_email_message(doc.get("message"), doc.get("reference_name"))
-		or _has_sales_invoice_print_attachment(doc.get("attachments"))
-	):
+	if not _is_legacy_invoice_email_queue(doc):
 		return
 
 	doc.status = "Sent"
@@ -114,11 +108,37 @@ def _is_legacy_invoice_email_message(message, invoice_name: str | None = None) -
 	if not text:
 		return False
 	normalized_text = text.lower()
+	has_sales_invoice_name = "acc-sinv-" in normalized_text or (
+		bool(invoice_name) and invoice_name.lower() in normalized_text
+	)
 	if invoice_name and f"New Invoice {invoice_name}".lower() in normalized_text:
 		return True
-	if "Queensland Art School - New Invoice".lower() in normalized_text:
+	if has_sales_invoice_name and any(marker.lower() in normalized_text for marker in LEGACY_INVOICE_SUBJECT_MARKERS):
 		return True
-	return any(marker.lower() in normalized_text for marker in LEGACY_INVOICE_MESSAGE_MARKERS)
+	return has_sales_invoice_name and any(
+		marker.lower() in normalized_text for marker in LEGACY_INVOICE_MESSAGE_MARKERS
+	)
+
+
+def _is_legacy_invoice_email_queue(row) -> bool:
+	message = row.get("message")
+	reference_doctype = row.get("reference_doctype")
+	reference_name = row.get("reference_name")
+	attachments = row.get("attachments")
+
+	if _is_legacy_invoice_email_message(message, reference_name):
+		return True
+	if _has_legacy_sales_invoice_mime_attachment(message):
+		return True
+	if reference_doctype == "Sales Invoice" and _has_sales_invoice_print_attachment(attachments):
+		return True
+	return False
+
+
+def _email_queue_mentions_invoice(row, invoice_name: str) -> bool:
+	if row.get("reference_name") == invoice_name:
+		return True
+	return invoice_name.lower() in _decoded_text(row.get("message")).lower()
 
 
 def _clear_sales_invoice_notification_cache():
@@ -156,3 +176,15 @@ def _has_sales_invoice_print_attachment(attachments) -> bool:
 		if attachment.get("print_format_attachment") == 1 and attachment.get("doctype") == "Sales Invoice":
 			return True
 	return False
+
+
+def _has_legacy_sales_invoice_mime_attachment(message) -> bool:
+	text = _decoded_text(message).lower()
+	if not text:
+		return False
+	return (
+		"content-type: application/pdf" in text
+		and "content-disposition: attachment" in text
+		and "acc-sinv-" in text
+		and any(marker.lower() in text for marker in LEGACY_INVOICE_SUBJECT_MARKERS)
+	)
