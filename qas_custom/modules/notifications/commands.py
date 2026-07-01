@@ -3,11 +3,10 @@ from __future__ import annotations
 import frappe
 from frappe import _
 from frappe.utils import escape_html, flt, now_datetime
+from frappe.utils.pdf import get_pdf
 
 from qas_custom.modules.billing.presentation import build_parent_invoice_context, parent_portal_invoice_link
 from qas_custom.modules.billing.store_credit import get_invoice_payable_amount, get_invoice_store_credit_applied
-
-PARENT_INVOICE_PRINT_FORMAT = "QAS Parent Invoice"
 
 
 def send_parent_invoice_notification(
@@ -18,6 +17,9 @@ def send_parent_invoice_notification(
 	payable_amount: float | None = None,
 	notification_log: str | None = None,
 ):
+	amounts = _invoice_notification_amounts(invoice_doc, store_credit_applied=store_credit_applied, payable_amount=payable_amount)
+	store_credit_applied = amounts["store_credit_applied"]
+	payable_amount = amounts["payable_amount"]
 	recipient = _invoice_recipient(invoice_doc)
 	event_key = _invoice_notification_event_key(invoice_doc, event)
 	payment_link = parent_portal_invoice_link(invoice_doc.name)
@@ -90,6 +92,9 @@ def enqueue_parent_invoice_notification(
 	store_credit_applied: float | None = None,
 	payable_amount: float | None = None,
 ):
+	amounts = _invoice_notification_amounts(invoice_doc, store_credit_applied=store_credit_applied, payable_amount=payable_amount)
+	store_credit_applied = amounts["store_credit_applied"]
+	payable_amount = amounts["payable_amount"]
 	recipient = _invoice_recipient(invoice_doc)
 	event_key = _invoice_notification_event_key(invoice_doc, event)
 	payment_link = parent_portal_invoice_link(invoice_doc.name)
@@ -225,22 +230,51 @@ def _invoice_email_subject(invoice_doc, event):
 
 
 def _invoice_pdf_attachment(invoice: str, *, store_credit_applied=None, payable_amount=None):
-	print_format = PARENT_INVOICE_PRINT_FORMAT if frappe.db.exists("Print Format", PARENT_INVOICE_PRINT_FORMAT) else None
-	_sync_invoice_print_snapshot(invoice, store_credit_applied=store_credit_applied, payable_amount=payable_amount)
-	return frappe.attach_print(
-		"Sales Invoice",
-		invoice,
-		file_name=invoice,
-		print_format=print_format,
+	doc = frappe.get_doc("Sales Invoice", invoice)
+	amounts = _invoice_notification_amounts(doc, store_credit_applied=store_credit_applied, payable_amount=payable_amount)
+	context = build_parent_invoice_context(
+		doc,
+		store_credit_applied=amounts["store_credit_applied"],
+		payable_amount=amounts["payable_amount"],
+		invoice_link=parent_portal_invoice_link(doc.name),
 	)
+	html = _invoice_pdf_html(context)
+	return {
+		"fname": f"{invoice}.pdf",
+		"fcontent": get_pdf(html),
+	}
+
+
+def _invoice_notification_amounts(invoice_doc, *, store_credit_applied=None, payable_amount=None):
+	doc = frappe.get_doc("Sales Invoice", invoice_doc) if isinstance(invoice_doc, str) else invoice_doc
+	total = flt(doc.get("grand_total") or doc.get("rounded_total") or 0)
+	ledger_credit = flt(get_invoice_store_credit_applied(doc.name))
+	snapshot_credit = flt(doc.get("qas_store_credit_applied") or 0)
+	credit = flt(store_credit_applied if store_credit_applied is not None else max(ledger_credit, snapshot_credit))
+
+	if payable_amount is not None:
+		payable = flt(payable_amount)
+	elif credit > 0:
+		payable = max(0, total - credit)
+		snapshot_payable = flt(doc.get("qas_amount_payable") or 0)
+		calculated_payable = flt(get_invoice_payable_amount(doc))
+		if calculated_payable > 0:
+			payable = min(payable, calculated_payable)
+		if snapshot_payable > 0:
+			payable = min(payable, snapshot_payable)
+	else:
+		payable = flt(get_invoice_payable_amount(doc))
+
+	_sync_invoice_print_snapshot(doc.name, store_credit_applied=credit, payable_amount=payable)
+	return {"store_credit_applied": credit, "payable_amount": payable}
 
 
 def _sync_invoice_print_snapshot(invoice: str, *, store_credit_applied=None, payable_amount=None):
 	doc = frappe.get_doc("Sales Invoice", invoice)
 	if store_credit_applied is None:
-		store_credit_applied = get_invoice_store_credit_applied(invoice)
+		store_credit_applied = max(flt(get_invoice_store_credit_applied(invoice)), flt(doc.get("qas_store_credit_applied") or 0))
 	if payable_amount is None:
-		payable_amount = get_invoice_payable_amount(doc)
+		payable_amount = max(0, flt(doc.get("grand_total") or doc.get("rounded_total") or 0) - flt(store_credit_applied))
 	updates = {}
 	if store_credit_applied is not None and frappe.db.has_column("Sales Invoice", "qas_store_credit_applied"):
 		updates["qas_store_credit_applied"] = flt(store_credit_applied)
@@ -248,6 +282,165 @@ def _sync_invoice_print_snapshot(invoice: str, *, store_credit_applied=None, pay
 		updates["qas_amount_payable"] = flt(payable_amount)
 	if updates:
 		frappe.db.set_value("Sales Invoice", invoice, updates, update_modified=False)
+
+
+def _invoice_pdf_html(context):
+	rows = "\n".join(_invoice_pdf_item_row(item) for item in context["items"])
+	if not rows:
+		rows = """<tr><td colspan="5" class="muted">Invoice details are available in the Parent Portal.</td></tr>"""
+
+	payment_block = _invoice_pdf_payment_block(context)
+	invoice_message = _invoice_pdf_message(context.get("invoice_message"))
+	return """
+<!doctype html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<style>
+		@page {{ size: A4; margin: 20mm 18mm; }}
+		body {{ color: #172033; font-family: Arial, sans-serif; font-size: 12px; line-height: 1.45; }}
+		* {{ box-sizing: border-box; }}
+		.header {{ border-bottom: 2px solid #172033; margin-bottom: 22px; padding-bottom: 18px; width: 100%; }}
+		.brand {{ color: #e85f47; font-size: 12px; font-weight: 700; letter-spacing: .04em; margin: 0 0 8px; text-transform: uppercase; }}
+		h1 {{ font-size: 28px; font-weight: 800; margin: 0; }}
+		.muted {{ color: #64748b; }}
+		.summary {{ background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 12px; margin: 22px 0; width: 100%; }}
+		.summary td {{ padding: 14px 12px; width: 33.333%; }}
+		.summary span {{ color: #64748b; display: block; font-size: 12px; margin-bottom: 4px; }}
+		.summary strong {{ display: block; font-size: 18px; }}
+		.payable {{ color: #e85f47; }}
+		.note {{ background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 10px; margin: 0 0 22px; padding: 14px 16px; }}
+		table.items {{ border-collapse: collapse; margin-top: 18px; width: 100%; }}
+		table.items th {{ background: #f1f5f9; color: #64748b; font-size: 11px; padding: 10px 8px; text-align: left; text-transform: uppercase; }}
+		table.items td {{ border-bottom: 1px solid #e5e7eb; padding: 11px 8px; vertical-align: top; }}
+		.totals {{ margin-left: auto; margin-top: 22px; width: 360px; }}
+		.totals td {{ padding: 7px 0; }}
+		.totals .final td {{ border-top: 2px solid #172033; font-size: 16px; font-weight: 800; padding-top: 12px; }}
+		.payment {{ background: #fff7ed; border: 1px solid #fed7aa; border-radius: 10px; margin-top: 26px; padding: 14px 16px; }}
+		.payment strong {{ display: block; font-size: 14px; margin-bottom: 4px; }}
+		.right {{ text-align: right; }}
+	</style>
+</head>
+<body>
+	<table class="header">
+		<tr>
+			<td>
+				<p class="brand">Queensland Art School</p>
+				<h1>Invoice</h1>
+				<div class="muted">{invoice}</div>
+			</td>
+			<td class="right">
+				<strong>Due date</strong><br>{due_date}<br><br>
+				<strong>Invoice date</strong><br>{posting_date}
+			</td>
+		</tr>
+	</table>
+
+	<table class="summary">
+		<tr>
+			<td><span>Invoice total</span><strong>AUD ${total:.2f}</strong></td>
+			<td><span>Store credit applied</span><strong>AUD ${credit:.2f}</strong></td>
+			<td><span>Amount payable</span><strong class="payable">AUD ${payable:.2f}</strong></td>
+		</tr>
+	</table>
+
+	{invoice_message}
+
+	<table class="items">
+		<thead>
+			<tr>
+				<th>Student</th>
+				<th>Course</th>
+				<th class="right">Sessions</th>
+				<th class="right">Unit price</th>
+				<th class="right">Amount</th>
+			</tr>
+		</thead>
+		<tbody>{rows}</tbody>
+	</table>
+
+	<table class="totals">
+		<tr><td>Invoice total</td><td class="right"><strong>AUD ${total:.2f}</strong></td></tr>
+		<tr><td>Store credit applied</td><td class="right"><strong>AUD ${credit:.2f}</strong></td></tr>
+		<tr class="final"><td>Amount payable</td><td class="right">AUD ${payable:.2f}</td></tr>
+	</table>
+
+	{payment_block}
+</body>
+</html>
+	""".format(
+		invoice=escape_html(context["invoice"]),
+		due_date=escape_html(context["due_date"] or "-"),
+		posting_date=escape_html(context["posting_date"] or "-"),
+		total=flt(context["total"]),
+		credit=flt(context["store_credit_applied"]),
+		payable=flt(context["payable_amount"]),
+		invoice_message=invoice_message,
+		rows=rows,
+		payment_block=payment_block,
+	)
+
+
+def _invoice_pdf_item_row(item):
+	return """
+		<tr>
+			<td><strong>{student}</strong></td>
+			<td>{description}</td>
+			<td class="right">{sessions:g}</td>
+			<td class="right">AUD ${rate:.2f}</td>
+			<td class="right"><strong>AUD ${amount:.2f}</strong></td>
+		</tr>
+	""".format(
+		student=escape_html(item.get("student") or ""),
+		description=escape_html(item.get("description") or ""),
+		sessions=flt(item.get("sessions")),
+		rate=flt(item.get("rate")),
+		amount=flt(item.get("amount")),
+	)
+
+
+def _invoice_pdf_message(value):
+	if not value:
+		return ""
+	return """<div class="note">{0}</div>""".format(escape_html(value).replace("\n", "<br>"))
+
+
+def _invoice_pdf_payment_block(context):
+	if flt(context["payable_amount"]) <= 0:
+		message = (
+			"This invoice is fully covered by store credit. No payment is required."
+			if flt(context["store_credit_applied"]) > 0
+			else "This invoice has no amount payable. No payment is required."
+		)
+		return """<div class="payment"><strong>Payment</strong>{0}</div>""".format(escape_html(message))
+
+	rows = []
+	for label, fieldname in [
+		("Account name", "bank_account_name"),
+		("BSB", "bank_bsb"),
+		("Account number", "bank_account_number"),
+	]:
+		value = context.get(fieldname)
+		if value:
+			rows.append(
+				"""<tr><td>{0}</td><td class="right"><strong>{1}</strong></td></tr>""".format(
+					escape_html(label),
+					escape_html(value),
+				)
+			)
+	reference_note = escape_html(context.get("bank_reference_note") or "")
+	return """
+		<div class="payment">
+			<strong>Payment</strong>
+			Please arrange payment by {methods}. If you have already paid, no further action is needed.
+			<table style="margin-top:12px;width:100%;">{rows}</table>
+			<div style="margin-top:10px;">{reference_note}</div>
+		</div>
+	""".format(
+		methods=escape_html(context.get("accepted_payment_methods") or "Bank transfer, cash, or POS"),
+		rows="".join(rows),
+		reference_note=reference_note,
+	)
 
 
 def _invoice_email_message(invoice_doc, event, store_credit_applied, payable_amount, payment_link):
