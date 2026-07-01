@@ -2147,8 +2147,12 @@ def _school_setup_payload(config, row):
 
 
 def _normalize_school_setup_record(doc, config):
-	if _has_field(doc.doctype, "status") and not doc.get("status"):
-		doc.set("status", "Active")
+	if _has_field(doc.doctype, "status"):
+		status = doc.get("status")
+		if not status:
+			doc.set("status", "Active")
+		elif status not in {"Active", "Inactive"}:
+			frappe.throw(_("Status must be Active or Inactive."))
 	if doc.doctype == "Classroom" and doc.get("campus") and not frappe.db.exists("Campus", doc.get("campus")):
 		frappe.throw(_("Campus does not exist: {0}").format(doc.get("campus")))
 
