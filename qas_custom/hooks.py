@@ -74,10 +74,11 @@ app_license = "mit"
 # ----------
 
 # add methods and filters to jinja environment
-# jinja = {
-# 	"methods": "qas_custom.utils.jinja_methods",
-# 	"filters": "qas_custom.utils.jinja_filters"
-# }
+jinja = {
+	"methods": [
+		"qas_custom.utils.jinja_methods.qas_invoice_print_amounts",
+	],
+}
 
 # Installation
 # ------------

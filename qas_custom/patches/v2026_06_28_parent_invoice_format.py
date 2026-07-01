@@ -94,15 +94,10 @@ def _looks_like_legacy_invoice_notification(text: str) -> bool:
 
 def _parent_invoice_print_html():
 	return """
-{% set invoice_total = doc.grand_total or doc.rounded_total or 0 %}
-{% set outstanding = doc.outstanding_amount if doc.outstanding_amount is not none else invoice_total %}
-{% set qas_credit = doc.get("qas_store_credit_applied") %}
-{% set qas_payable = doc.get("qas_amount_payable") %}
-{% set credit_applied = qas_credit if qas_credit is not none else (invoice_total - outstanding if invoice_total > outstanding else 0) %}
-{% set payable_amount = qas_payable if qas_payable is not none else (outstanding if outstanding > 0 else invoice_total - credit_applied) %}
-{% if credit_applied <= 0 and qas_payable is not none and payable_amount > 0 and invoice_total > payable_amount %}
-	{% set credit_applied = invoice_total - payable_amount %}
-{% endif %}
+{% set qas_amounts = qas_invoice_print_amounts(doc.name) %}
+{% set invoice_total = qas_amounts.total %}
+{% set credit_applied = qas_amounts.store_credit_applied %}
+{% set payable_amount = qas_amounts.payable_amount %}
 <style>
 	.qas-invoice {
 		color: #172033;
