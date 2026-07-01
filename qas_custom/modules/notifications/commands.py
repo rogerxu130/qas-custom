@@ -5,8 +5,8 @@ from frappe import _
 from frappe.utils import escape_html, flt, now_datetime
 from frappe.utils.pdf import get_pdf
 
+from qas_custom.modules.billing.invoice_amounts import resolve_invoice_print_amounts
 from qas_custom.modules.billing.presentation import build_parent_invoice_context, parent_portal_invoice_link
-from qas_custom.modules.billing.store_credit import get_invoice_payable_amount, get_invoice_store_credit_applied
 
 
 def send_parent_invoice_notification(
@@ -254,45 +254,11 @@ def _invoice_pdf_attachment(invoice: str, *, store_credit_applied=None, payable_
 
 
 def _invoice_notification_amounts(invoice_doc, *, store_credit_applied=None, payable_amount=None):
-	doc = frappe.get_doc("Sales Invoice", invoice_doc) if isinstance(invoice_doc, str) else invoice_doc
-	total = flt(doc.get("grand_total") or doc.get("rounded_total") or 0)
-	ledger_credit = flt(get_invoice_store_credit_applied(doc.name))
-	snapshot_credit = flt(doc.get("qas_store_credit_applied") or 0)
-	passed_credit = flt(store_credit_applied) if store_credit_applied is not None else 0
-	credit = max(ledger_credit, snapshot_credit, passed_credit)
-
-	if credit > 0:
-		payable = max(0, total - credit)
-		snapshot_payable = flt(doc.get("qas_amount_payable") or 0)
-		calculated_payable = flt(get_invoice_payable_amount(doc))
-		if payable_amount is not None and flt(payable_amount) > 0:
-			payable = min(payable, flt(payable_amount))
-		if calculated_payable > 0:
-			payable = min(payable, calculated_payable)
-		if snapshot_payable > 0:
-			payable = min(payable, snapshot_payable)
-	elif payable_amount is not None:
-		payable = flt(payable_amount)
-	else:
-		payable = flt(get_invoice_payable_amount(doc))
-
-	_sync_invoice_print_snapshot(doc.name, store_credit_applied=credit, payable_amount=payable)
-	return {"store_credit_applied": credit, "payable_amount": payable}
-
-
-def _sync_invoice_print_snapshot(invoice: str, *, store_credit_applied=None, payable_amount=None):
-	doc = frappe.get_doc("Sales Invoice", invoice)
-	if store_credit_applied is None:
-		store_credit_applied = max(flt(get_invoice_store_credit_applied(invoice)), flt(doc.get("qas_store_credit_applied") or 0))
-	if payable_amount is None:
-		payable_amount = max(0, flt(doc.get("grand_total") or doc.get("rounded_total") or 0) - flt(store_credit_applied))
-	updates = {}
-	if store_credit_applied is not None and frappe.db.has_column("Sales Invoice", "qas_store_credit_applied"):
-		updates["qas_store_credit_applied"] = flt(store_credit_applied)
-	if payable_amount is not None and frappe.db.has_column("Sales Invoice", "qas_amount_payable"):
-		updates["qas_amount_payable"] = flt(payable_amount)
-	if updates:
-		frappe.db.set_value("Sales Invoice", invoice, updates, update_modified=False)
+	return resolve_invoice_print_amounts(
+		invoice_doc,
+		store_credit_applied=store_credit_applied,
+		payable_amount=payable_amount,
+	)
 
 
 def _invoice_pdf_html(context):

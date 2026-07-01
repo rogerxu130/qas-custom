@@ -3,10 +3,7 @@ from __future__ import annotations
 import frappe
 from frappe.utils import flt, formatdate
 
-from qas_custom.modules.billing.store_credit import (
-	get_invoice_payable_amount,
-	get_invoice_store_credit_applied,
-)
+from qas_custom.modules.billing.invoice_amounts import resolve_invoice_print_amounts
 from qas_custom.modules.billing.invoice_settings import get_invoice_payment_context
 from qas_custom.services.display_labels import get_student_parent_name
 
@@ -24,18 +21,26 @@ def build_course_invoice_description(student_name: str, course: str, term: str, 
 
 def get_invoice_print_context(invoice_doc):
 	doc = frappe.get_doc("Sales Invoice", invoice_doc) if isinstance(invoice_doc, str) else invoice_doc
-	store_credit_applied = get_invoice_store_credit_applied(doc.name)
+	amounts = resolve_invoice_print_amounts(doc)
 	return build_parent_invoice_context(
 		doc,
-		store_credit_applied=store_credit_applied,
-		payable_amount=get_invoice_payable_amount(doc),
+		store_credit_applied=amounts["store_credit_applied"],
+		payable_amount=amounts["payable_amount"],
 		invoice_link=parent_portal_invoice_link(doc.name),
 	)
 
 
 def build_parent_invoice_context(invoice_doc, *, store_credit_applied=None, payable_amount=None, payment_link=None, invoice_link=None):
-	store_credit = flt(store_credit_applied if store_credit_applied is not None else get_invoice_store_credit_applied(invoice_doc.name))
-	payable = flt(payable_amount if payable_amount is not None else get_invoice_payable_amount(invoice_doc))
+	if store_credit_applied is None or payable_amount is None:
+		amounts = resolve_invoice_print_amounts(
+			invoice_doc,
+			store_credit_applied=store_credit_applied,
+			payable_amount=payable_amount,
+		)
+		store_credit_applied = amounts["store_credit_applied"]
+		payable_amount = amounts["payable_amount"]
+	store_credit = flt(store_credit_applied)
+	payable = flt(payable_amount)
 	portal_link = invoice_link or payment_link or parent_portal_invoice_link(invoice_doc.name)
 	payment_context = get_invoice_payment_context(invoice_doc)
 	return {
