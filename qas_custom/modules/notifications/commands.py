@@ -5,6 +5,7 @@ from frappe import _
 from frappe.utils import escape_html, flt, now_datetime
 
 from qas_custom.modules.billing.presentation import build_parent_invoice_context, parent_portal_invoice_link
+from qas_custom.modules.billing.store_credit import get_invoice_payable_amount, get_invoice_store_credit_applied
 
 PARENT_INVOICE_PRINT_FORMAT = "QAS Parent Invoice"
 
@@ -13,8 +14,8 @@ def send_parent_invoice_notification(
 	invoice_doc,
 	*,
 	event: str = "approved",
-	store_credit_applied: float = 0,
-	payable_amount: float = 0,
+	store_credit_applied: float | None = None,
+	payable_amount: float | None = None,
 	notification_log: str | None = None,
 ):
 	recipient = _invoice_recipient(invoice_doc)
@@ -86,8 +87,8 @@ def enqueue_parent_invoice_notification(
 	invoice_doc,
 	*,
 	event: str = "approved",
-	store_credit_applied: float = 0,
-	payable_amount: float = 0,
+	store_credit_applied: float | None = None,
+	payable_amount: float | None = None,
 ):
 	recipient = _invoice_recipient(invoice_doc)
 	event_key = _invoice_notification_event_key(invoice_doc, event)
@@ -144,8 +145,8 @@ def send_parent_invoice_notification_job(
 	invoice: str,
 	*,
 	event: str = "approved",
-	store_credit_applied: float = 0,
-	payable_amount: float = 0,
+	store_credit_applied: float | None = None,
+	payable_amount: float | None = None,
 	notification_log: str | None = None,
 ):
 	invoice_doc = frappe.get_doc("Sales Invoice", invoice)
@@ -235,6 +236,11 @@ def _invoice_pdf_attachment(invoice: str, *, store_credit_applied=None, payable_
 
 
 def _sync_invoice_print_snapshot(invoice: str, *, store_credit_applied=None, payable_amount=None):
+	doc = frappe.get_doc("Sales Invoice", invoice)
+	if store_credit_applied is None:
+		store_credit_applied = get_invoice_store_credit_applied(invoice)
+	if payable_amount is None:
+		payable_amount = get_invoice_payable_amount(doc)
 	updates = {}
 	if store_credit_applied is not None and frappe.db.has_column("Sales Invoice", "qas_store_credit_applied"):
 		updates["qas_store_credit_applied"] = flt(store_credit_applied)
