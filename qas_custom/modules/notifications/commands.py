@@ -183,7 +183,7 @@ def get_invoice_notification_summary(invoice: str):
 
 
 def _invoice_recipient(invoice_doc):
-	parent = invoice_doc.get("parent")
+	parent = invoice_doc.get("parent") or _parent_for_customer(invoice_doc.customer)
 	linked_user = None
 	email = None
 
@@ -211,10 +211,66 @@ def _invoice_recipient(invoice_doc):
 			customer_info = frappe.db.get_value("Customer", invoice_doc.customer, fields, as_dict=True) or {}
 			email = _first_value(customer_info, fields)
 
+	if not email and invoice_doc.customer:
+		email = _customer_contact_email(invoice_doc.customer)
+
 	if not email and linked_user:
 		email = frappe.db.get_value("User", linked_user, "email") or linked_user
 
 	return {"email": email, "for_user": linked_user, "parent": parent, "customer": invoice_doc.customer}
+
+
+def _parent_for_customer(customer):
+	if not customer:
+		return None
+	if frappe.db.exists("DocType", "Parent") and frappe.db.has_column("Parent", "customer"):
+		return frappe.db.get_value("Parent", {"customer": customer}, "name")
+	return None
+
+
+def _customer_contact_email(customer):
+	if not customer or not frappe.db.exists("DocType", "Dynamic Link") or not frappe.db.exists("DocType", "Contact"):
+		return None
+
+	contacts = frappe.get_all(
+		"Dynamic Link",
+		filters={"link_doctype": "Customer", "link_name": customer, "parenttype": "Contact"},
+		pluck="parent",
+		limit_page_length=20,
+	)
+	contacts = [contact for contact in contacts if contact]
+	if not contacts:
+		return None
+
+	fields = ["name"]
+	for fieldname in ["email_id", "email", "contact_email", "is_primary_contact"]:
+		if frappe.db.has_column("Contact", fieldname):
+			fields.append(fieldname)
+	filters = {"name": ["in", contacts]}
+	if frappe.db.has_column("Contact", "disabled"):
+		filters["disabled"] = 0
+	order_by = "is_primary_contact desc, modified desc" if frappe.db.has_column("Contact", "is_primary_contact") else "modified desc"
+	for row in frappe.get_all("Contact", filters=filters, fields=fields, order_by=order_by, limit_page_length=20):
+		email = _first_value(row, ["email_id", "email", "contact_email"])
+		if email:
+			return email
+
+	if not frappe.db.exists("DocType", "Contact Email") or not frappe.db.has_column("Contact Email", "email_id"):
+		return None
+	email_fields = ["parent", "email_id"]
+	if frappe.db.has_column("Contact Email", "is_primary"):
+		email_fields.append("is_primary")
+	order_by = "is_primary desc, idx asc" if frappe.db.has_column("Contact Email", "is_primary") else "idx asc"
+	for row in frappe.get_all(
+		"Contact Email",
+		filters={"parent": ["in", contacts]},
+		fields=email_fields,
+		order_by=order_by,
+		limit_page_length=20,
+	):
+		if row.get("email_id"):
+			return row.get("email_id")
+	return None
 
 
 def _invoice_notification_event_key(invoice_doc, event):
