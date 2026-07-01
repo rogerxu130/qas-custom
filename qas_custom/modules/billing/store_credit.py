@@ -4,7 +4,7 @@ import frappe
 from frappe import _
 from frappe.utils import cint, flt, nowdate
 
-from qas_custom.modules.billing.invoice_settings import SETTINGS_DOCTYPE
+from qas_custom.modules.billing.invoice_settings import SETTINGS_DOCTYPE, get_invoice_settings, settings_doctype_available
 
 
 LEDGER_DOCTYPE = "QAS Store Credit Ledger"
@@ -429,9 +429,9 @@ def _store_credit_journal_entries(invoice: str, docstatus: int | None = None):
 
 
 def _configured_store_credit_liability_account(company: str):
-	if not frappe.db.exists("DocType", SETTINGS_DOCTYPE) or not frappe.db.has_column(SETTINGS_DOCTYPE, "store_credit_liability_account"):
+	if not settings_doctype_available():
 		return None
-	account = frappe.db.get_single_value(SETTINGS_DOCTYPE, "store_credit_liability_account")
+	account = get_invoice_settings().get("store_credit_liability_account")
 	if not account:
 		return None
 	if frappe.db.get_value("Account", account, "company") != company:
@@ -440,11 +440,14 @@ def _configured_store_credit_liability_account(company: str):
 
 
 def _sync_settings_liability_account(account: str):
-	if not account or not frappe.db.exists("DocType", SETTINGS_DOCTYPE) or not frappe.db.has_column(SETTINGS_DOCTYPE, "store_credit_liability_account"):
+	if not account or not settings_doctype_available():
 		return
-	current = frappe.db.get_single_value(SETTINGS_DOCTYPE, "store_credit_liability_account")
+	current = get_invoice_settings().get("store_credit_liability_account")
 	if not current:
-		frappe.db.set_single_value(SETTINGS_DOCTYPE, "store_credit_liability_account", account)
+		try:
+			frappe.db.set_single_value(SETTINGS_DOCTYPE, "store_credit_liability_account", account)
+		except (KeyError, ImportError, frappe.DoesNotExistError):
+			return
 
 
 def _store_credit_liability_parent_account(company: str):

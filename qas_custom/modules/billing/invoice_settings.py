@@ -38,10 +38,13 @@ SNAPSHOT_FIELD_MAP = {
 
 def get_invoice_settings():
 	settings = dict(DEFAULT_INVOICE_SETTINGS)
-	if not frappe.db.exists("DocType", SETTINGS_DOCTYPE):
+	if not settings_doctype_available():
 		return settings
 
-	doc = frappe.get_single(SETTINGS_DOCTYPE)
+	try:
+		doc = frappe.get_single(SETTINGS_DOCTYPE)
+	except (KeyError, ImportError, frappe.DoesNotExistError):
+		return settings
 	for fieldname in settings:
 		value = doc.get(fieldname)
 		if fieldname == "payment_due_days":
@@ -52,7 +55,7 @@ def get_invoice_settings():
 
 
 def update_invoice_settings(payload):
-	if not frappe.db.exists("DocType", SETTINGS_DOCTYPE):
+	if not settings_doctype_available():
 		frappe.throw(f"{SETTINGS_DOCTYPE} is not installed yet.")
 
 	doc = frappe.get_single(SETTINGS_DOCTYPE)
@@ -64,6 +67,13 @@ def update_invoice_settings(payload):
 				doc.set(fieldname, (payload.get(fieldname) or "").strip())
 	doc.save(ignore_permissions=True)
 	return get_invoice_settings()
+
+
+def settings_doctype_available():
+	try:
+		return bool(frappe.db.exists("DocType", SETTINGS_DOCTYPE))
+	except (KeyError, ImportError, frappe.DoesNotExistError):
+		return False
 
 
 def apply_invoice_payment_snapshot(invoice_doc, *, force: bool = False):
