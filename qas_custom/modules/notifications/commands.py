@@ -54,7 +54,13 @@ def send_parent_invoice_notification(
 			message=message,
 			reference_doctype="Sales Invoice",
 			reference_name=invoice_doc.name,
-			attachments=[_invoice_pdf_attachment(invoice_doc.name)],
+			attachments=[
+				_invoice_pdf_attachment(
+					invoice_doc.name,
+					store_credit_applied=store_credit_applied,
+					payable_amount=payable_amount,
+				)
+			],
 		)
 		_mark_notification_sent(log_name)
 		return {
@@ -217,14 +223,25 @@ def _invoice_email_subject(invoice_doc, event):
 	return _("Queensland Art School - {0} {1}").format(action, invoice_doc.name)
 
 
-def _invoice_pdf_attachment(invoice: str):
+def _invoice_pdf_attachment(invoice: str, *, store_credit_applied=None, payable_amount=None):
 	print_format = PARENT_INVOICE_PRINT_FORMAT if frappe.db.exists("Print Format", PARENT_INVOICE_PRINT_FORMAT) else None
+	_sync_invoice_print_snapshot(invoice, store_credit_applied=store_credit_applied, payable_amount=payable_amount)
 	return frappe.attach_print(
 		"Sales Invoice",
 		invoice,
 		file_name=invoice,
 		print_format=print_format,
 	)
+
+
+def _sync_invoice_print_snapshot(invoice: str, *, store_credit_applied=None, payable_amount=None):
+	updates = {}
+	if store_credit_applied is not None and frappe.db.has_column("Sales Invoice", "qas_store_credit_applied"):
+		updates["qas_store_credit_applied"] = flt(store_credit_applied)
+	if payable_amount is not None and frappe.db.has_column("Sales Invoice", "qas_amount_payable"):
+		updates["qas_amount_payable"] = flt(payable_amount)
+	if updates:
+		frappe.db.set_value("Sales Invoice", invoice, updates, update_modified=False)
 
 
 def _invoice_email_message(invoice_doc, event, store_credit_applied, payable_amount, payment_link):

@@ -882,7 +882,7 @@ def submit_school_admin_invoice_data(invoice=None):
 		_add_comment("Sales Invoice", doc.name, _("Store credit applied: {0}.").format(flt(application.get("applied"))))
 	doc = frappe.get_doc("Sales Invoice", doc.name)
 	sync_invoice_store_credit_snapshot(doc)
-	notification = _send_invoice_notification(doc, event="approved")
+	notification = _send_invoice_notification(doc, event="approved", store_credit_applied=flt(application.get("applied")))
 	frappe.db.commit()
 	payload = _build_invoice_payload(doc)
 	payload["store_credit_application"] = application
@@ -3111,8 +3111,8 @@ def _reverse_invoice_store_credit_application(doc, reason):
 	)
 
 
-def _send_invoice_notification(doc, event="approved"):
-	store_credit_applied = get_invoice_store_credit_applied(doc.name)
+def _send_invoice_notification(doc, event="approved", store_credit_applied=None):
+	store_credit_applied = flt(store_credit_applied if store_credit_applied is not None else get_invoice_store_credit_applied(doc.name))
 	payable_amount = get_invoice_payable_amount(doc)
 	return enqueue_parent_invoice_notification(
 		doc,
