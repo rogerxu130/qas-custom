@@ -39,6 +39,7 @@ from qas_custom.modules.billing.commands import (
 from qas_custom.modules.billing.presentation import build_course_invoice_description
 from qas_custom.modules.notifications import (
 	get_invoice_notification_summary,
+	maybe_send_parent_invoice_paid_receipt,
 	parent_portal_invoice_link,
 	send_parent_invoice_notification,
 )
@@ -888,10 +889,12 @@ def submit_school_admin_invoice_data(invoice=None):
 	frappe.db.commit()
 	doc = frappe.get_doc("Sales Invoice", doc.name)
 	notification = _send_invoice_notification(doc, event="approved", store_credit_applied=applied_amount if applied_amount > 0 else None)
+	receipt_notification = _maybe_send_paid_receipt(doc, source="invoice_submit")
 	frappe.db.commit()
 	payload = _build_invoice_payload(frappe.get_doc("Sales Invoice", doc.name))
 	payload["store_credit_application"] = application
 	payload["notification"] = notification
+	payload["receipt_notification"] = receipt_notification
 	return payload
 
 
@@ -940,7 +943,13 @@ def mark_school_admin_invoice_paid_data(invoice=None, payload=None):
 	)
 	sync_invoice_store_credit_snapshot(doc.name)
 	frappe.db.commit()
-	return _build_invoice_payload(frappe.get_doc("Sales Invoice", invoice))
+	doc = frappe.get_doc("Sales Invoice", invoice)
+	receipt_notification = _maybe_send_paid_receipt(doc, payment_entry=payment_entry, source="mark_paid")
+	frappe.db.commit()
+	payload = _build_invoice_payload(frappe.get_doc("Sales Invoice", invoice))
+	payload["receipt_notification"] = receipt_notification
+	payload["payment_entry"] = payment_entry.name
+	return payload
 
 
 def cancel_school_admin_invoice_data(invoice=None, reason=None):
@@ -3223,6 +3232,14 @@ def _send_invoice_notification(doc, event="approved", store_credit_applied=None)
 		event=event,
 		store_credit_applied=store_credit_applied,
 		payable_amount=None,
+	)
+
+
+def _maybe_send_paid_receipt(doc, *, payment_entry=None, source=None):
+	return maybe_send_parent_invoice_paid_receipt(
+		doc,
+		payment_entry=payment_entry,
+		source=source,
 	)
 
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import frappe
 from frappe import _
-from frappe.utils import escape_html, flt, now_datetime
+from frappe.utils import escape_html, flt, formatdate, now_datetime
 from frappe.utils.file_manager import save_file
 from frappe.utils.pdf import get_pdf
 
@@ -164,6 +164,88 @@ def send_parent_invoice_notification_job(
 		payable_amount=payable_amount,
 		notification_log=notification_log,
 	)
+
+
+def maybe_send_parent_invoice_paid_receipt(invoice_doc, *, payment_entry=None, source: str | None = None):
+	doc = frappe.get_doc("Sales Invoice", invoice_doc) if isinstance(invoice_doc, str) else invoice_doc
+	if not doc or int(doc.get("docstatus") or 0) != 1:
+		return {"sent": False, "skipped": True, "reason": "Invoice is not submitted."}
+
+	amounts = _invoice_notification_amounts(doc)
+	outstanding = _invoice_outstanding_amount(doc)
+	payable_amount = flt(amounts.get("payable_amount"))
+	if outstanding > 0.005 and payable_amount > 0.005:
+		return {
+			"sent": False,
+			"skipped": True,
+			"reason": "Invoice is not fully paid.",
+			"outstanding_amount": outstanding,
+			"payable_amount": payable_amount,
+		}
+
+	if _paid_receipt_already_logged(doc.name):
+		return {"sent": False, "skipped": True, "duplicate": True, "reason": "Receipt already sent for this invoice."}
+
+	return send_parent_payment_receipt(doc, payment_entry=payment_entry, source=source, amounts=amounts)
+
+
+def send_parent_payment_receipt(invoice_doc, *, payment_entry=None, source: str | None = None, amounts=None, notification_log: str | None = None):
+	doc = frappe.get_doc("Sales Invoice", invoice_doc) if isinstance(invoice_doc, str) else invoice_doc
+	amounts = amounts or _invoice_notification_amounts(doc)
+	recipient = _invoice_recipient(doc)
+	payment_doc = _payment_entry_doc(payment_entry)
+	payment_context = _receipt_payment_context(doc, payment_doc, amounts, source=source)
+	event_key = _paid_receipt_event_key(doc.name)
+	subject = _receipt_email_subject(doc)
+	message = _receipt_email_message(doc, amounts, payment_context)
+
+	log_name = notification_log or _create_notification_log(
+		event_key=event_key,
+		recipient=recipient,
+		subject=subject,
+		message=message,
+		document_type="Sales Invoice",
+		document_name=doc.name,
+	)
+
+	if not recipient.get("email"):
+		_mark_notification_failed(log_name, "No parent email found.")
+		return {
+			"sent": False,
+			"reason": "No parent email found.",
+			"notification_log": log_name,
+			"receipt": True,
+		}
+
+	try:
+		frappe.sendmail(
+			recipients=[recipient["email"]],
+			subject=subject,
+			message=message,
+			reference_doctype="Sales Invoice",
+			reference_name=doc.name,
+			delayed=False,
+			attachments=[_receipt_pdf_attachment(doc.name, payment_entry=payment_doc, amounts=amounts, payment_context=payment_context)],
+		)
+		_mark_notification_sent(log_name)
+		_add_invoice_comment(doc.name, _("Payment receipt sent to {0}.").format(recipient["email"]))
+		return {
+			"sent": True,
+			"recipient": recipient["email"],
+			"notification_log": log_name,
+			"receipt": True,
+		}
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), f"QAS receipt notification failed: {doc.name}")
+		_mark_notification_failed(log_name, "Receipt email send failed.")
+		_add_invoice_comment(doc.name, _("Payment receipt notification failed for {0}.").format(recipient["email"]))
+		return {
+			"sent": False,
+			"recipient": recipient["email"],
+			"reason": "Receipt email send failed.",
+			"notification_log": log_name,
+			"receipt": True,
+		}
 
 
 def get_invoice_notification_summary(invoice: str):
@@ -637,6 +719,298 @@ def _invoice_email_item_row(item):
 		sessions=flt(item.get("sessions")),
 		amount=flt(item.get("amount")),
 	)
+
+
+def render_parent_receipt_pdf(invoice: str, *, payment_entry=None, amounts=None, payment_context=None):
+	doc = frappe.get_doc("Sales Invoice", invoice)
+	amounts = amounts or _invoice_notification_amounts(doc)
+	payment_doc = _payment_entry_doc(payment_entry)
+	payment_context = payment_context or _receipt_payment_context(doc, payment_doc, amounts)
+	context = build_parent_invoice_context(
+		doc,
+		store_credit_applied=amounts["store_credit_applied"],
+		payable_amount=0,
+		invoice_link=parent_portal_invoice_link(doc.name),
+	)
+	context["receipt"] = payment_context
+	html = _receipt_pdf_html(context)
+	return get_pdf(html)
+
+
+def _receipt_pdf_attachment(invoice: str, *, payment_entry=None, amounts=None, payment_context=None):
+	pdf_content = render_parent_receipt_pdf(
+		invoice,
+		payment_entry=payment_entry,
+		amounts=amounts,
+		payment_context=payment_context,
+	)
+	file_doc = save_file(
+		f"{invoice}-receipt.pdf",
+		pdf_content,
+		"Sales Invoice",
+		invoice,
+		is_private=1,
+	)
+	return {"fid": file_doc.name}
+
+
+def _receipt_email_subject(invoice_doc):
+	return _("Queensland Art School - Payment receipt {0}").format(invoice_doc.name)
+
+
+def _receipt_email_message(invoice_doc, amounts, payment_context):
+	context = build_parent_invoice_context(
+		invoice_doc,
+		store_credit_applied=amounts["store_credit_applied"],
+		payable_amount=0,
+		payment_link=parent_portal_invoice_link(invoice_doc.name),
+	)
+	greeting = _invoice_email_greeting(context)
+	rows = "\n".join(_invoice_email_item_row(item) for item in context["items"])
+	if not rows:
+		rows = """<tr><td colspan="4" style="padding:12px;color:#64748b;">Invoice details are available in the Parent Portal.</td></tr>"""
+
+	return """
+		<div style="margin:0;padding:0;background:#f8fafc;font-family:Arial,sans-serif;color:#172033;">
+			<div style="max-width:640px;margin:0 auto;padding:24px;">
+				<div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;">
+					<div style="padding:22px 24px;background:#172033;color:#ffffff;">
+						<p style="margin:0 0 6px;font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:#f7b6a4;">Queensland Art School</p>
+						<h1 style="margin:0;font-size:24px;line-height:1.3;">Payment receipt</h1>
+						<div style="margin-top:6px;color:#cbd5e1;">Invoice {invoice}</div>
+					</div>
+					<div style="padding:24px;">
+						<p style="margin:0 0 14px;font-size:16px;line-height:1.5;">{greeting}</p>
+						<p style="margin:0 0 18px;font-size:16px;line-height:1.5;">Thank you. This invoice is fully paid.</p>
+
+						<table style="width:100%;border-collapse:collapse;margin:0 0 18px;">
+							<tr><td style="padding:10px 0;color:#64748b;">Payment date</td><td style="padding:10px 0;text-align:right;font-weight:700;">{payment_date}</td></tr>
+							<tr><td style="padding:10px 0;color:#64748b;">Payment method</td><td style="padding:10px 0;text-align:right;font-weight:700;">{payment_method}</td></tr>
+							<tr><td style="padding:10px 0;color:#64748b;">Invoice total</td><td style="padding:10px 0;text-align:right;font-weight:700;">AUD ${total:.2f}</td></tr>
+							<tr><td style="padding:10px 0;color:#64748b;">Store credit applied</td><td style="padding:10px 0;text-align:right;font-weight:700;">AUD ${credit:.2f}</td></tr>
+							<tr><td style="padding:10px 0;color:#64748b;">Payment received</td><td style="padding:10px 0;text-align:right;font-weight:700;">AUD ${cash:.2f}</td></tr>
+							<tr><td style="padding:12px 0;border-top:1px solid #e5e7eb;font-size:17px;font-weight:700;">Amount remaining</td><td style="padding:12px 0;border-top:1px solid #e5e7eb;text-align:right;font-size:20px;font-weight:800;color:#166534;">AUD ${remaining:.2f}</td></tr>
+						</table>
+
+						<table style="width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin:0 0 22px;">
+							<thead>
+								<tr style="background:#f1f5f9;">
+									<th align="left" style="padding:10px;font-size:12px;color:#64748b;">Student</th>
+									<th align="left" style="padding:10px;font-size:12px;color:#64748b;">Course</th>
+									<th align="right" style="padding:10px;font-size:12px;color:#64748b;">Sessions</th>
+									<th align="right" style="padding:10px;font-size:12px;color:#64748b;">Amount</th>
+								</tr>
+							</thead>
+							<tbody>{rows}</tbody>
+						</table>
+
+						<p style="margin:0;font-size:13px;line-height:1.5;color:#64748b;">Receipt reference: {receipt_reference}</p>
+					</div>
+				</div>
+			</div>
+		</div>
+	""".format(
+		invoice=escape_html(context["invoice"]),
+		greeting=greeting,
+		payment_date=escape_html(payment_context.get("payment_date_display") or "-"),
+		payment_method=escape_html(payment_context.get("payment_method") or "Payment"),
+		total=flt(context["total"]),
+		credit=flt(context["store_credit_applied"]),
+		cash=flt(payment_context.get("payment_amount")),
+		remaining=flt(payment_context.get("remaining_amount")),
+		rows=rows,
+		receipt_reference=escape_html(payment_context.get("receipt_reference") or context["invoice"]),
+	)
+
+
+def _receipt_pdf_html(context):
+	receipt = context["receipt"]
+	rows = "\n".join(_invoice_pdf_item_row(item) for item in context["items"])
+	if not rows:
+		rows = """<tr><td colspan="5" class="muted">Invoice details are available in the Parent Portal.</td></tr>"""
+
+	return """
+<!doctype html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<style>
+		@page {{ size: A4; margin: 20mm 18mm; }}
+		body {{ color: #172033; font-family: Arial, sans-serif; font-size: 12px; line-height: 1.45; }}
+		* {{ box-sizing: border-box; }}
+		.header {{ border-bottom: 2px solid #172033; margin-bottom: 22px; padding-bottom: 18px; width: 100%; }}
+		.brand {{ color: #e85f47; font-size: 12px; font-weight: 700; letter-spacing: .04em; margin: 0 0 8px; text-transform: uppercase; }}
+		h1 {{ font-size: 28px; font-weight: 800; margin: 0; }}
+		.muted {{ color: #64748b; }}
+		.summary {{ background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 12px; margin: 22px 0; width: 100%; }}
+		.summary td {{ padding: 14px 12px; width: 25%; }}
+		.summary span {{ color: #64748b; display: block; font-size: 12px; margin-bottom: 4px; }}
+		.summary strong {{ display: block; font-size: 17px; }}
+		table.items {{ border-collapse: collapse; margin-top: 18px; width: 100%; }}
+		table.items th {{ background: #f1f5f9; color: #64748b; font-size: 11px; padding: 10px 8px; text-align: left; text-transform: uppercase; }}
+		table.items td {{ border-bottom: 1px solid #e5e7eb; padding: 11px 8px; vertical-align: top; }}
+		.totals {{ margin-left: auto; margin-top: 22px; width: 360px; }}
+		.totals td {{ padding: 7px 0; }}
+		.totals .final td {{ border-top: 2px solid #172033; font-size: 16px; font-weight: 800; padding-top: 12px; }}
+		.receipt-note {{ background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 10px; margin-top: 26px; padding: 14px 16px; }}
+		.right {{ text-align: right; }}
+	</style>
+</head>
+<body>
+	<table class="header">
+		<tr>
+			<td>
+				<p class="brand">Queensland Art School</p>
+				<h1>Payment receipt</h1>
+				<div class="muted">Invoice {invoice}</div>
+			</td>
+			<td class="right">
+				<strong>Payment date</strong><br>{payment_date}<br><br>
+				<strong>Payment method</strong><br>{payment_method}
+			</td>
+		</tr>
+	</table>
+
+	<table class="summary">
+		<tr>
+			<td><span>Invoice total</span><strong>AUD ${total:.2f}</strong></td>
+			<td><span>Store credit applied</span><strong>AUD ${credit:.2f}</strong></td>
+			<td><span>Payment received</span><strong>AUD ${cash:.2f}</strong></td>
+			<td><span>Amount remaining</span><strong>AUD ${remaining:.2f}</strong></td>
+		</tr>
+	</table>
+
+	<table class="items">
+		<thead>
+			<tr>
+				<th>Student</th>
+				<th>Course</th>
+				<th class="right">Sessions</th>
+				<th class="right">Unit price</th>
+				<th class="right">Amount</th>
+			</tr>
+		</thead>
+		<tbody>{rows}</tbody>
+	</table>
+
+	<table class="totals">
+		<tr><td>Invoice total</td><td class="right"><strong>AUD ${total:.2f}</strong></td></tr>
+		<tr><td>Store credit applied</td><td class="right"><strong>AUD ${credit:.2f}</strong></td></tr>
+		<tr><td>Payment received</td><td class="right"><strong>AUD ${cash:.2f}</strong></td></tr>
+		<tr class="final"><td>Amount remaining</td><td class="right">AUD ${remaining:.2f}</td></tr>
+	</table>
+
+	<div class="receipt-note">Receipt reference: {receipt_reference}</div>
+</body>
+</html>
+	""".format(
+		invoice=escape_html(context["invoice"]),
+		payment_date=escape_html(receipt.get("payment_date_display") or "-"),
+		payment_method=escape_html(receipt.get("payment_method") or "Payment"),
+		total=flt(context["total"]),
+		credit=flt(context["store_credit_applied"]),
+		cash=flt(receipt.get("payment_amount")),
+		remaining=flt(receipt.get("remaining_amount")),
+		rows=rows,
+		receipt_reference=escape_html(receipt.get("receipt_reference") or context["invoice"]),
+	)
+
+
+def _receipt_payment_context(invoice_doc, payment_doc, amounts, source=None):
+	store_credit = flt(amounts.get("store_credit_applied"))
+	payment_amount = _payment_entry_invoice_amount(payment_doc, invoice_doc.name) if payment_doc else _submitted_payment_amount(invoice_doc.name)
+	remaining = min(_invoice_outstanding_amount(invoice_doc), flt(amounts.get("payable_amount")))
+	if remaining < 0.005:
+		remaining = 0
+
+	method = None
+	if payment_doc and payment_doc.get("mode_of_payment"):
+		method = payment_doc.get("mode_of_payment")
+	elif store_credit > 0 and payment_amount <= 0:
+		method = "Store credit"
+	elif payment_amount > 0:
+		method = "Payment"
+	else:
+		method = "Fully paid"
+	if store_credit > 0 and payment_amount > 0:
+		method = _("Store credit + {0}").format(method)
+
+	payment_date = None
+	if payment_doc:
+		payment_date = payment_doc.get("reference_date") or payment_doc.get("posting_date")
+	payment_date = payment_date or invoice_doc.get("posting_date")
+
+	return {
+		"payment_entry": payment_doc.name if payment_doc else None,
+		"payment_amount": flt(payment_amount),
+		"payment_method": method,
+		"payment_date": payment_date,
+		"payment_date_display": formatdate(payment_date) if payment_date else "",
+		"reference_no": payment_doc.get("reference_no") if payment_doc else None,
+		"remaining_amount": flt(remaining),
+		"receipt_reference": payment_doc.name if payment_doc else _paid_receipt_event_key(invoice_doc.name),
+		"source": source,
+	}
+
+
+def _payment_entry_doc(payment_entry):
+	if not payment_entry:
+		return None
+	if hasattr(payment_entry, "doctype"):
+		return payment_entry
+	if frappe.db.exists("Payment Entry", payment_entry):
+		return frappe.get_doc("Payment Entry", payment_entry)
+	return None
+
+
+def _payment_entry_invoice_amount(payment_doc, invoice):
+	if not payment_doc:
+		return 0
+	amount = 0
+	for row in payment_doc.get("references", []):
+		if row.get("reference_doctype") == "Sales Invoice" and row.get("reference_name") == invoice:
+			amount += flt(row.get("allocated_amount"))
+	return amount or flt(payment_doc.get("paid_amount") or payment_doc.get("received_amount"))
+
+
+def _submitted_payment_amount(invoice):
+	if not invoice or not frappe.db.exists("DocType", "Payment Entry Reference") or not frappe.db.exists("DocType", "Payment Entry"):
+		return 0
+	rows = frappe.get_all(
+		"Payment Entry Reference",
+		filters={"reference_doctype": "Sales Invoice", "reference_name": invoice, "parenttype": "Payment Entry"},
+		fields=["parent", "allocated_amount"],
+		limit_page_length=0,
+	)
+	if not rows:
+		return 0
+	payment_entries = sorted({row.get("parent") for row in rows if row.get("parent")})
+	submitted = set(frappe.get_all("Payment Entry", filters={"name": ["in", payment_entries], "docstatus": 1}, pluck="name", limit_page_length=0))
+	return sum(flt(row.get("allocated_amount")) for row in rows if row.get("parent") in submitted)
+
+
+def _invoice_outstanding_amount(invoice_doc):
+	invoice = invoice_doc.get("name")
+	if invoice and frappe.db.has_column("Sales Invoice", "outstanding_amount"):
+		value = frappe.db.get_value("Sales Invoice", invoice, "outstanding_amount")
+		if value is not None:
+			return flt(value)
+	return flt(invoice_doc.get("outstanding_amount") or 0)
+
+
+def _paid_receipt_event_key(invoice):
+	return f"invoice_paid_receipt:{invoice}"
+
+
+def _paid_receipt_already_logged(invoice):
+	if not _notification_log_available() or not invoice:
+		return False
+	meta = frappe.get_meta("Notification Log")
+	if meta.has_field("event_key"):
+		if frappe.db.exists("Notification Log", {"event_key": _paid_receipt_event_key(invoice)}):
+			return True
+	subject = _("Queensland Art School - Payment receipt {0}").format(invoice)
+	return bool(frappe.db.exists("Notification Log", {"document_type": "Sales Invoice", "document_name": invoice, "subject": subject}))
 
 
 def _create_notification_log(event_key, recipient, subject, message, document_type, document_name):
