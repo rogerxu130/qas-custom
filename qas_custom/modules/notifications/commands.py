@@ -3,6 +3,7 @@ from __future__ import annotations
 import frappe
 from frappe import _
 from frappe.utils import escape_html, flt, now_datetime
+from frappe.utils.file_manager import save_file
 from frappe.utils.pdf import get_pdf
 
 from qas_custom.modules.billing.invoice_amounts import resolve_invoice_print_amounts
@@ -299,13 +300,20 @@ def render_parent_invoice_pdf(invoice: str, *, store_credit_applied=None, payabl
 
 
 def _invoice_pdf_attachment(invoice: str, *, store_credit_applied=None, payable_amount=None):
+	pdf_content = render_parent_invoice_pdf(
+		invoice,
+		store_credit_applied=store_credit_applied,
+		payable_amount=payable_amount,
+	)
+	file_doc = save_file(
+		f"{invoice}.pdf",
+		pdf_content,
+		"Sales Invoice",
+		invoice,
+		is_private=1,
+	)
 	return {
-		"fname": f"{invoice}.pdf",
-		"fcontent": render_parent_invoice_pdf(
-			invoice,
-			store_credit_applied=store_credit_applied,
-			payable_amount=payable_amount,
-		),
+		"fid": file_doc.name,
 	}
 
 

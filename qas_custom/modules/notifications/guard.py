@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import quopri
+
 import frappe
 
 
@@ -76,6 +78,19 @@ def purge_legacy_invoice_email_queue(doc=None, method=None, invoice: str | None 
 	return deleted
 
 
+def suppress_legacy_invoice_email_queue(doc=None, method=None):
+	if not doc or getattr(doc, "reference_doctype", None) != "Sales Invoice":
+		return
+
+	if not _is_legacy_invoice_email_message(doc.get("message"), doc.get("reference_name")):
+		return
+
+	doc.status = "Sent"
+	doc.error = "Suppressed by QAS Custom: legacy Sales Invoice notification replaced by School Admin invoice email."
+	for recipient in doc.get("recipients") or []:
+		recipient.status = "Sent"
+
+
 def _is_sales_invoice_or_legacy_invoice_notification(row) -> bool:
 	if row.get("document_type") == "Sales Invoice":
 		return True
@@ -88,14 +103,15 @@ def _is_sales_invoice_or_legacy_invoice_notification(row) -> bool:
 
 
 def _is_legacy_invoice_email_message(message, invoice_name: str | None = None) -> bool:
-	text = _as_text(message)
+	text = _decoded_text(message)
 	if not text:
 		return False
-	if invoice_name and f"New Invoice {invoice_name}" in text:
+	normalized_text = text.lower()
+	if invoice_name and f"New Invoice {invoice_name}".lower() in normalized_text:
 		return True
-	if "Queensland Art School - New Invoice" in text:
+	if "Queensland Art School - New Invoice".lower() in normalized_text:
 		return True
-	return any(marker in text for marker in LEGACY_INVOICE_MESSAGE_MARKERS)
+	return any(marker.lower() in normalized_text for marker in LEGACY_INVOICE_MESSAGE_MARKERS)
 
 
 def _clear_sales_invoice_notification_cache():
@@ -106,3 +122,14 @@ def _as_text(value) -> str:
 	if value is None:
 		return ""
 	return str(value)
+
+
+def _decoded_text(value) -> str:
+	text = _as_text(value)
+	if not text:
+		return ""
+	try:
+		decoded = quopri.decodestring(text.encode("utf-8", errors="ignore")).decode("utf-8", errors="ignore")
+	except Exception:
+		decoded = ""
+	return f"{text}\n{decoded}"
