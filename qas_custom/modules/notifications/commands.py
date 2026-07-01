@@ -58,6 +58,7 @@ def send_parent_invoice_notification(
 			message=message,
 			reference_doctype="Sales Invoice",
 			reference_name=invoice_doc.name,
+			delayed=False,
 			attachments=[
 				_invoice_pdf_attachment(
 					invoice_doc.name,

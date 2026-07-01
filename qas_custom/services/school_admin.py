@@ -38,9 +38,9 @@ from qas_custom.modules.billing.commands import (
 )
 from qas_custom.modules.billing.presentation import build_course_invoice_description
 from qas_custom.modules.notifications import (
-	enqueue_parent_invoice_notification,
 	get_invoice_notification_summary,
 	parent_portal_invoice_link,
+	send_parent_invoice_notification,
 )
 from qas_custom.modules.notifications.guard import disable_sales_invoice_auto_notifications
 from qas_custom.services.class_attendance import get_attendance_entries
@@ -885,9 +885,11 @@ def submit_school_admin_invoice_data(invoice=None):
 	doc = frappe.get_doc("Sales Invoice", doc.name)
 	sync_invoice_store_credit_snapshot(doc)
 	applied_amount = flt(application.get("applied"))
+	frappe.db.commit()
+	doc = frappe.get_doc("Sales Invoice", doc.name)
 	notification = _send_invoice_notification(doc, event="approved", store_credit_applied=applied_amount if applied_amount > 0 else None)
 	frappe.db.commit()
-	payload = _build_invoice_payload(doc)
+	payload = _build_invoice_payload(frappe.get_doc("Sales Invoice", doc.name))
 	payload["store_credit_application"] = application
 	payload["notification"] = notification
 	return payload
@@ -902,10 +904,11 @@ def resend_school_admin_invoice_data(invoice=None):
 		doc.save(ignore_permissions=True)
 	sync_invoice_store_credit_snapshot(doc)
 	doc = frappe.get_doc("Sales Invoice", invoice)
+	frappe.db.commit()
 	notification = _send_invoice_notification(doc, event="resent")
 	_add_comment("Sales Invoice", doc.name, "Invoice resent to parent by School Admin.")
 	frappe.db.commit()
-	payload = _build_invoice_payload(doc)
+	payload = _build_invoice_payload(frappe.get_doc("Sales Invoice", invoice))
 	payload["notification"] = notification
 	return payload
 
@@ -1346,7 +1349,7 @@ def _populate_planned_enrollments_for_term(term):
 			doc = frappe.get_doc("Enrollment", row.name)
 			result = _activate_planned_enrollment(doc, term_doc)
 			activated_enrollments += 1
-			if result.get("invoice"):
+			if result.get("invoice_created"):
 				created_invoices += 1
 		except Exception as exc:
 			frappe.db.rollback(save_point=savepoint)
@@ -1409,7 +1412,11 @@ def _activate_planned_enrollment(enrollment, term_doc, start_session=None):
 		_set_if_field(enrollment, "invoice_amount", invoice.get("grand_total"))
 		enrollment.save(ignore_permissions=True)
 	_add_comment("Enrollment", enrollment.name, _("Planned enrollment activated for term {0}.").format(term_doc.name))
-	return {"enrollment": enrollment.name, "invoice": invoice.name if invoice else None}
+	return {
+		"enrollment": enrollment.name,
+		"invoice": invoice.name if invoice else None,
+		"invoice_created": bool(invoice and getattr(invoice.flags, "qas_was_created", False)),
+	}
 
 
 def _validate_enrollment_start_session(start_session, weekly_timeslot, term_doc):
@@ -1500,16 +1507,104 @@ def _create_term_enrollment_invoice(enrollment, start_session):
 	unit_rate = flt(full_term_fee) / flt(total_sessions)
 
 	disable_sales_invoice_auto_notifications()
-	invoice = frappe.new_doc("Sales Invoice")
-	invoice.customer = customer
-	apply_default_invoice_dates(invoice)
-	_set_if_field(invoice, "parent", parent)
-	_set_if_field(invoice, "qas_invoice_type", "Course")
-	_set_if_field(invoice, "source_doctype", "Enrollment")
-	_set_if_field(invoice, "source_document", enrollment.name)
-	_set_if_field(invoice, "enrollment", enrollment.name)
-	_set_if_field(invoice, "billing_note", _("Draft course invoice generated from planned term enrollment."))
+	invoice_name = _find_draft_family_invoice(parent=parent, customer=customer, term=enrollment.term)
+	created = not bool(invoice_name)
+	invoice = frappe.get_doc("Sales Invoice", invoice_name) if invoice_name else frappe.new_doc("Sales Invoice")
 
+	if created:
+		invoice.customer = customer
+		apply_default_invoice_dates(invoice)
+		_set_if_field(invoice, "parent", parent)
+		_set_if_field(invoice, "qas_invoice_type", "Course")
+		_set_if_field(invoice, "source_doctype", "Enrollment")
+		_set_if_field(invoice, "source_document", enrollment.name)
+		_set_if_field(invoice, "enrollment", enrollment.name)
+		_set_if_field(invoice, "term", enrollment.term)
+		_set_if_field(invoice, "billing_note", _("Draft course invoice generated from term enrollments."))
+	else:
+		_set_if_field(invoice, "parent", invoice.get("parent") or parent)
+		_set_if_field(invoice, "qas_invoice_type", invoice.get("qas_invoice_type") or "Course")
+		_set_if_field(invoice, "source_doctype", invoice.get("source_doctype") or "Enrollment")
+		_set_if_field(invoice, "source_document", invoice.get("source_document") or enrollment.name)
+		_set_if_field(invoice, "enrollment", invoice.get("enrollment") or enrollment.name)
+		_set_if_field(invoice, "term", invoice.get("term") or enrollment.term)
+
+	if _invoice_has_enrollment_item(invoice, enrollment.name):
+		invoice.flags.qas_was_created = False
+		return invoice
+
+	_append_enrollment_invoice_item(
+		invoice,
+		enrollment=enrollment,
+		start_session=start_session,
+		item_code=item_code,
+		course=course,
+		session_count=session_count,
+		unit_rate=unit_rate,
+	)
+	_sync_invoice_student_summary(invoice)
+	apply_invoice_payment_snapshot(invoice)
+	if created:
+		invoice.insert(ignore_permissions=True)
+	else:
+		invoice.save(ignore_permissions=True)
+	invoice.flags.qas_was_created = created
+	return invoice
+
+
+def _find_draft_family_invoice(parent, customer, term):
+	if not customer or not term or not _doctype_available("Sales Invoice"):
+		return None
+
+	filters = {"customer": customer, "docstatus": 0}
+	if parent and _has_field("Sales Invoice", "parent"):
+		filters["parent"] = parent
+	if _has_field("Sales Invoice", "qas_invoice_type"):
+		filters["qas_invoice_type"] = "Course"
+
+	if _has_field("Sales Invoice", "term"):
+		header_filters = dict(filters)
+		header_filters["term"] = term
+		rows = frappe.get_all(
+			"Sales Invoice",
+			filters=header_filters,
+			pluck="name",
+			order_by="creation asc",
+			limit=1,
+		)
+		if rows:
+			return rows[0]
+
+	invoice_names = frappe.get_all(
+		"Sales Invoice",
+		filters=filters,
+		pluck="name",
+		order_by="creation asc",
+		limit_page_length=0,
+	)
+	if not invoice_names or not _doctype_available("Sales Invoice Item") or not _has_field("Sales Invoice Item", "term"):
+		return None
+
+	item_filters = {"parent": ["in", invoice_names], "term": term}
+	if frappe.db.has_column("Sales Invoice Item", "parenttype"):
+		item_filters["parenttype"] = "Sales Invoice"
+	rows = frappe.get_all(
+		"Sales Invoice Item",
+		filters=item_filters,
+		fields=["parent"],
+		order_by="creation asc",
+		limit=1,
+	)
+	return rows[0].parent if rows else None
+
+
+def _invoice_has_enrollment_item(invoice, enrollment_name):
+	if not enrollment_name:
+		return False
+	return any(item.get("enrollment") == enrollment_name for item in invoice.get("items", []))
+
+
+def _append_enrollment_invoice_item(invoice, *, enrollment, start_session, item_code, course, session_count, unit_rate):
 	student_name = get_student_parent_name(enrollment.student) or enrollment.student
 	student_code = get_student_display_code(enrollment.student) or enrollment.student
 	description = build_course_invoice_description(student_name, course, enrollment.term, session_count)
@@ -1532,10 +1627,7 @@ def _create_term_enrollment_invoice(enrollment, start_session):
 	_set_if_field(item, "term", enrollment.term)
 	_set_if_field(item, "course_session", get_course_session_snapshot_label(start_session))
 	_set_if_field(item, "session_count", session_count)
-	_sync_invoice_student_summary(invoice)
-	apply_invoice_payment_snapshot(invoice)
-	invoice.insert(ignore_permissions=True)
-	return invoice
+	return item
 
 
 def _course_session_count_for_enrollment(enrollment, start_session):
@@ -2269,10 +2361,14 @@ def _linked_record_exists(doctype, filters):
 
 
 def _active_sales_invoice_item_exists_for_enrollment(enrollment):
+	return bool(_active_sales_invoice_for_enrollment_item(enrollment))
+
+
+def _active_sales_invoice_for_enrollment_item(enrollment):
 	if not enrollment or not _doctype_available("Sales Invoice Item") or not _has_field("Sales Invoice Item", "enrollment"):
-		return False
+		return None
 	if not _doctype_available("Sales Invoice"):
-		return _linked_record_exists("Sales Invoice Item", {"enrollment": enrollment})
+		return None
 
 	filters = {"enrollment": enrollment}
 	if frappe.db.has_column("Sales Invoice Item", "parenttype"):
@@ -2285,16 +2381,15 @@ def _active_sales_invoice_item_exists_for_enrollment(enrollment):
 	)
 	invoice_names = [row.get("parent") for row in rows if row.get("parent")]
 	if not invoice_names:
-		return False
+		return None
 
-	return bool(
-		frappe.get_all(
-			"Sales Invoice",
-			filters={"name": ["in", invoice_names], "docstatus": ["!=", 2]},
-			pluck="name",
-			limit=1,
-		)
+	rows = frappe.get_all(
+		"Sales Invoice",
+		filters={"name": ["in", invoice_names], "docstatus": ["!=", 2]},
+		pluck="name",
+		limit=1,
 	)
+	return rows[0] if rows else None
 
 
 def _existing_invoice_for_enrollment(enrollment_doc):
@@ -2321,6 +2416,9 @@ def _existing_invoice_for_enrollment(enrollment_doc):
 		)
 		if rows:
 			return rows[0]
+	item_invoice = _active_sales_invoice_for_enrollment_item(enrollment_doc.name)
+	if item_invoice:
+		return item_invoice
 	return None
 
 
@@ -3120,7 +3218,7 @@ def _reverse_invoice_store_credit_application(doc, reason):
 
 
 def _send_invoice_notification(doc, event="approved", store_credit_applied=None):
-	return enqueue_parent_invoice_notification(
+	return send_parent_invoice_notification(
 		doc,
 		event=event,
 		store_credit_applied=store_credit_applied,
