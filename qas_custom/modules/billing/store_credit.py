@@ -360,8 +360,8 @@ def sync_cached_balance(parent: str | None, customer: str | None, balance: float
 
 def _invoice_store_credit_applied(invoice: str) -> float:
 	if not _ledger_available() or not invoice:
-		return 0
-	return flt(
+		return _invoice_store_credit_journal_amount(invoice)
+	ledger_amount = flt(
 		frappe.db.get_value(
 			LEDGER_DOCTYPE,
 			{"invoice": invoice, "transaction_type": "Invoice Application"},
@@ -369,6 +369,41 @@ def _invoice_store_credit_applied(invoice: str) -> float:
 		)
 		or 0
 	)
+	return ledger_amount or _invoice_store_credit_journal_amount(invoice)
+
+
+def _invoice_store_credit_journal_amount(invoice: str) -> float:
+	if not invoice or not _doctype_available("Journal Entry"):
+		return 0
+	journal_entries = _store_credit_journal_entries(invoice=invoice, docstatus=1)
+	if not journal_entries:
+		return 0
+	amount = 0
+	if frappe.db.has_column("Journal Entry", "qas_store_credit_amount"):
+		amount = flt(
+			frappe.db.get_value(
+				"Journal Entry",
+				{"name": ["in", journal_entries]},
+				"sum(qas_store_credit_amount)",
+			)
+			or 0
+		)
+	if amount > 0:
+		return amount
+	if not _doctype_available("Journal Entry Account"):
+		return 0
+	rows = frappe.get_all(
+		"Journal Entry Account",
+		filters={
+			"parent": ["in", journal_entries],
+			"parenttype": "Journal Entry",
+			"reference_type": "Sales Invoice",
+			"reference_name": invoice,
+		},
+		fields=["credit_in_account_currency", "credit"],
+		limit_page_length=0,
+	)
+	return sum(flt(row.get("credit_in_account_currency") or row.get("credit") or 0) for row in rows)
 
 
 def _invoice_outstanding_amount(invoice_doc) -> float:

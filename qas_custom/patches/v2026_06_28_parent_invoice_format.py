@@ -100,6 +100,9 @@ def _parent_invoice_print_html():
 {% set qas_payable = doc.get("qas_amount_payable") %}
 {% set credit_applied = qas_credit if qas_credit is not none else (invoice_total - outstanding if invoice_total > outstanding else 0) %}
 {% set payable_amount = qas_payable if qas_payable is not none else (outstanding if outstanding > 0 else invoice_total - credit_applied) %}
+{% if credit_applied <= 0 and qas_payable is not none and payable_amount > 0 and invoice_total > payable_amount %}
+	{% set credit_applied = invoice_total - payable_amount %}
+{% endif %}
 <style>
 	.qas-invoice {
 		color: #172033;
@@ -282,8 +285,10 @@ def _parent_invoice_print_html():
 		</table>
 		{% endif %}
 		{% if doc.qas_bank_reference_note %}<p style="margin:8px 0 0;">{{ doc.qas_bank_reference_note }}</p>{% endif %}
-		{% else %}
+		{% elif credit_applied > 0 %}
 		This invoice is fully covered by store credit. No payment is required.
+		{% else %}
+		This invoice has no amount payable. No payment is required.
 		{% endif %}
 	</div>
 </div>

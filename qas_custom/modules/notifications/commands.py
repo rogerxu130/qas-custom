@@ -240,11 +240,12 @@ def _invoice_email_message(invoice_doc, event, store_credit_applied, payable_amo
 		if event == "approved"
 		else _("We have resent this invoice for your reference.")
 	)
-	payment_line = (
-		_("No payment is required because this invoice is fully covered by store credit.")
-		if flt(context["payable_amount"]) <= 0
-		else _("Please arrange payment by {0}.").format(context["accepted_payment_methods"] or _("bank transfer, cash, or POS"))
-	)
+	if flt(context["payable_amount"]) > 0:
+		payment_line = _("Please arrange payment by {0}.").format(context["accepted_payment_methods"] or _("bank transfer, cash, or POS"))
+	elif flt(context["store_credit_applied"]) > 0:
+		payment_line = _("No payment is required because this invoice is fully covered by store credit.")
+	else:
+		payment_line = _("No payment is required for this invoice.")
 	invoice_message = _html_multiline(context.get("invoice_message"))
 	bank_details = _invoice_email_bank_details(context) if flt(context["payable_amount"]) > 0 else ""
 	rows = "\n".join(_invoice_email_item_row(item) for item in context["items"])
