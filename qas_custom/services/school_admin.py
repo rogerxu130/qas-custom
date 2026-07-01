@@ -3113,13 +3113,11 @@ def _reverse_invoice_store_credit_application(doc, reason):
 
 
 def _send_invoice_notification(doc, event="approved", store_credit_applied=None):
-	store_credit_applied = flt(store_credit_applied if store_credit_applied is not None else get_invoice_store_credit_applied(doc.name))
-	payable_amount = get_invoice_payable_amount(doc)
 	return enqueue_parent_invoice_notification(
 		doc,
 		event=event,
 		store_credit_applied=store_credit_applied,
-		payable_amount=payable_amount,
+		payable_amount=None,
 	)
 
 
