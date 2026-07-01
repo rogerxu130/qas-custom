@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import quopri
 
 import frappe
@@ -65,12 +66,15 @@ def purge_legacy_invoice_email_queue(doc=None, method=None, invoice: str | None 
 	rows = frappe.get_all(
 		"Email Queue",
 		filters=filters,
-		fields=["name", "message", "reference_name", "status"],
+		fields=["name", "message", "reference_name", "status", "attachments"],
 		limit_page_length=0,
 	)
 	deleted = 0
 	for row in rows:
-		if not _is_legacy_invoice_email_message(row.get("message"), row.get("reference_name")):
+		if not (
+			_is_legacy_invoice_email_message(row.get("message"), row.get("reference_name"))
+			or _has_sales_invoice_print_attachment(row.get("attachments"))
+		):
 			continue
 		frappe.db.delete("Email Queue Recipient", {"parent": row.name})
 		frappe.db.delete("Email Queue", {"name": row.name})
@@ -82,7 +86,10 @@ def suppress_legacy_invoice_email_queue(doc=None, method=None):
 	if not doc or getattr(doc, "reference_doctype", None) != "Sales Invoice":
 		return
 
-	if not _is_legacy_invoice_email_message(doc.get("message"), doc.get("reference_name")):
+	if not (
+		_is_legacy_invoice_email_message(doc.get("message"), doc.get("reference_name"))
+		or _has_sales_invoice_print_attachment(doc.get("attachments"))
+	):
 		return
 
 	doc.status = "Sent"
@@ -133,3 +140,19 @@ def _decoded_text(value) -> str:
 	except Exception:
 		decoded = ""
 	return f"{text}\n{decoded}"
+
+
+def _has_sales_invoice_print_attachment(attachments) -> bool:
+	if not attachments:
+		return False
+	if isinstance(attachments, str):
+		try:
+			attachments = json.loads(attachments)
+		except Exception:
+			return "print_format_attachment" in attachments and "Sales Invoice" in attachments
+	for attachment in attachments or []:
+		if not isinstance(attachment, dict):
+			continue
+		if attachment.get("print_format_attachment") == 1 and attachment.get("doctype") == "Sales Invoice":
+			return True
+	return False
