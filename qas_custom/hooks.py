@@ -139,6 +139,9 @@ jinja = {
 # Hook on document methods and events
 
 doc_events = {
+	"Sales Invoice": {
+		"before_submit": "qas_custom.modules.notifications.guard.disable_sales_invoice_auto_notifications",
+	},
 	"Student": {
 		"validate": "qas_custom.services.display_labels.sync_student_code",
 	},
