@@ -140,6 +140,7 @@ jinja = {
 
 doc_events = {
 	"Sales Invoice": {
+		"before_insert": "qas_custom.modules.notifications.guard.disable_sales_invoice_auto_notifications",
 		"before_submit": "qas_custom.modules.notifications.guard.disable_sales_invoice_auto_notifications",
 	},
 	"Student": {

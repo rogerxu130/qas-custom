@@ -7,6 +7,7 @@ from frappe.utils import flt
 from qas_custom.modules.common import has_field, is_new_doc, set_if_field
 from qas_custom.modules.billing.presentation import build_course_invoice_description
 from qas_custom.modules.billing.invoice_settings import apply_default_invoice_dates, apply_invoice_payment_snapshot
+from qas_custom.modules.notifications.guard import disable_sales_invoice_auto_notifications
 from qas_custom.services.display_labels import (
 	get_course_session_snapshot_label,
 	get_student_display_code,
@@ -111,6 +112,7 @@ def get_or_create_course_invoice(customer: str, parent: str | None = None):
 	if rows:
 		return frappe.get_doc("Sales Invoice", rows[0].name)
 
+	disable_sales_invoice_auto_notifications()
 	invoice = frappe.new_doc("Sales Invoice")
 	invoice.customer = customer
 	apply_default_invoice_dates(invoice)

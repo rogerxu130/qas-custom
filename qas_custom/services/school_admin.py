@@ -42,6 +42,7 @@ from qas_custom.modules.notifications import (
 	get_invoice_notification_summary,
 	parent_portal_invoice_link,
 )
+from qas_custom.modules.notifications.guard import disable_sales_invoice_auto_notifications
 from qas_custom.services.class_attendance import get_attendance_entries
 from qas_custom.services.display_labels import get_course_session_snapshot_label, get_student_display_code, get_student_display_name, get_student_parent_name
 from qas_custom.services.inquiry import (
@@ -786,6 +787,7 @@ def create_school_admin_manual_invoice_data(payload=None):
 	if not items:
 		frappe.throw(_("At least one invoice item is required."))
 
+	disable_sales_invoice_auto_notifications()
 	invoice = frappe.new_doc("Sales Invoice")
 	invoice.customer = customer
 	apply_default_invoice_dates(invoice)
@@ -1497,6 +1499,7 @@ def _create_term_enrollment_invoice(enrollment, start_session):
 	total_sessions = get_course_number(course, ("total_session_per_term", "total_sessions_per_term", "sessions_per_term")) or session_count
 	unit_rate = flt(full_term_fee) / flt(total_sessions)
 
+	disable_sales_invoice_auto_notifications()
 	invoice = frappe.new_doc("Sales Invoice")
 	invoice.customer = customer
 	apply_default_invoice_dates(invoice)
