@@ -297,6 +297,8 @@ def _get_or_create_school_admin_parent_user(email: str | None, parent_name: str 
 	user_doc.enabled = 1
 	user_doc.user_type = "Website User"
 	user_doc.send_welcome_email = 0
+	if frappe.db.exists("Role", "Parent"):
+		user_doc.append("roles", {"role": "Parent"})
 	user_doc.flags.ignore_permissions = True
 	user_doc.insert(ignore_permissions=True)
 	return user_doc.name
