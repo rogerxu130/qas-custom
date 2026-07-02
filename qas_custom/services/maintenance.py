@@ -7,6 +7,8 @@ import frappe
 from frappe import _
 from frappe.utils import getdate, now_datetime, today
 
+from qas_custom.utils.environment import sendmail_or_skip
+
 
 ACTIVE_INQUIRY_STATUSES = ("New", "Needs Review", "Booked", "Rescheduled", "Completed", "No-show", "Follow-up")
 ACTIVE_ADHOC_BOOKING_STATUSES = ("Reserved", "Locked")
@@ -404,7 +406,8 @@ def _notify_school_admins_of_new_issues(issue_names):
 		_("Please review QAS Data Issue in the backend."),
 	]
 	try:
-		frappe.sendmail(
+		sendmail_or_skip(
+			action="nightly_data_issue_alert",
 			recipients=recipients,
 			subject=_("QAS nightly data issues detected"),
 			message="<br>".join(message_lines),

@@ -8,6 +8,7 @@ from frappe.utils.pdf import get_pdf
 
 from qas_custom.modules.billing.invoice_amounts import resolve_invoice_print_amounts
 from qas_custom.modules.billing.presentation import build_parent_invoice_context, parent_portal_invoice_link
+from qas_custom.utils.environment import email_block_reason, outbound_email_enabled, sendmail_or_skip
 
 
 def send_parent_invoice_notification(
@@ -52,7 +53,8 @@ def send_parent_invoice_notification(
 		}
 
 	try:
-		frappe.sendmail(
+		mail_result = sendmail_or_skip(
+			action="parent_invoice_notification",
 			recipients=[recipient["email"]],
 			subject=subject,
 			message=message,
@@ -67,6 +69,16 @@ def send_parent_invoice_notification(
 				)
 			],
 		)
+		if mail_result and mail_result.get("skipped"):
+			_mark_notification_failed(log_name, mail_result.get("reason") or email_block_reason())
+			return {
+				"sent": False,
+				"skipped": True,
+				"recipient": recipient["email"],
+				"reason": mail_result.get("reason") or email_block_reason(),
+				"notification_log": log_name,
+				"payment_link": payment_link,
+			}
 		_mark_notification_sent(log_name)
 		return {
 			"sent": True,
@@ -128,6 +140,18 @@ def enqueue_parent_invoice_notification(
 		}
 
 	_mark_notification_queued(log_name)
+	if not outbound_email_enabled():
+		_mark_notification_failed(log_name, email_block_reason())
+		return {
+			"sent": False,
+			"queued": False,
+			"skipped": True,
+			"recipient": recipient["email"],
+			"reason": email_block_reason(),
+			"notification_log": log_name,
+			"payment_link": payment_link,
+		}
+
 	frappe.enqueue(
 		"qas_custom.modules.notifications.commands.send_parent_invoice_notification_job",
 		queue="short",
@@ -218,7 +242,8 @@ def send_parent_payment_receipt(invoice_doc, *, payment_entry=None, source: str 
 		}
 
 	try:
-		frappe.sendmail(
+		mail_result = sendmail_or_skip(
+			action="parent_payment_receipt",
 			recipients=[recipient["email"]],
 			subject=subject,
 			message=message,
@@ -227,6 +252,16 @@ def send_parent_payment_receipt(invoice_doc, *, payment_entry=None, source: str 
 			delayed=False,
 			attachments=[_receipt_pdf_attachment(doc.name, payment_entry=payment_doc, amounts=amounts, payment_context=payment_context)],
 		)
+		if mail_result and mail_result.get("skipped"):
+			_mark_notification_failed(log_name, mail_result.get("reason") or email_block_reason())
+			return {
+				"sent": False,
+				"skipped": True,
+				"recipient": recipient["email"],
+				"reason": mail_result.get("reason") or email_block_reason(),
+				"notification_log": log_name,
+				"receipt": True,
+			}
 		_mark_notification_sent(log_name)
 		_add_invoice_comment(doc.name, _("Payment receipt sent to {0}.").format(recipient["email"]))
 		return {

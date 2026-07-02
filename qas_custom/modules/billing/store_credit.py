@@ -5,6 +5,7 @@ from frappe import _
 from frappe.utils import cint, flt, nowdate
 
 from qas_custom.modules.billing.invoice_settings import SETTINGS_DOCTYPE, get_invoice_settings, settings_doctype_available
+from qas_custom.utils.environment import payment_block_reason, payment_mutations_enabled
 
 
 LEDGER_DOCTYPE = "QAS Store Credit Ledger"
@@ -223,6 +224,8 @@ def sync_invoice_store_credit_snapshot(invoice_doc):
 def ensure_store_credit_journal_entry(invoice_doc, amount: float | None = None, ledger: str | None = None):
 	if not _doctype_available("Journal Entry"):
 		frappe.throw(_("Journal Entry is required to apply store credit to an invoice."))
+	if not payment_mutations_enabled():
+		frappe.throw(_(payment_block_reason()))
 	doc = frappe.get_doc("Sales Invoice", invoice_doc) if isinstance(invoice_doc, str) else invoice_doc
 	amount = flt(amount if amount is not None else get_invoice_store_credit_applied(doc.name))
 	if amount <= 0:
@@ -282,6 +285,8 @@ def ensure_store_credit_journal_entry(invoice_doc, amount: float | None = None, 
 def cancel_store_credit_journal_entries(invoice: str):
 	if not invoice or not _doctype_available("Journal Entry"):
 		return []
+	if not payment_mutations_enabled():
+		frappe.throw(_(payment_block_reason()))
 	names = _store_credit_journal_entries(invoice=invoice, docstatus=1)
 	cancelled = []
 	original_user = frappe.session.user

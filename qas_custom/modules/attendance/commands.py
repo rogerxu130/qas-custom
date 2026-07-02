@@ -11,6 +11,7 @@ from qas_custom.services.class_attendance import cancel_attendance_entries_by_so
 from qas_custom.services.class_attendance import create_attendance_entry, get_attendance_entry_by_source
 from qas_custom.services.class_attendance import ATTENDANCE_DOCTYPE
 from qas_custom.services.class_attendance import remove_attendance_entries_by_source
+from qas_custom.utils.environment import sendmail_or_skip
 
 
 DEFAULT_ATTENDANCE_STATUS = "To be started"
@@ -164,7 +165,13 @@ def notify_parent_if_present(row, previous_status, status, actor):
 	)
 
 	try:
-		frappe.sendmail(recipients=[recipient], subject=subject, message=message, delayed=False)
+		sendmail_or_skip(
+			action="attendance_present_notification",
+			recipients=[recipient],
+			subject=subject,
+			message=message,
+			delayed=False,
+		)
 	except Exception:
 		frappe.log_error(
 			title="QAS Attendance Present Notification Failed",

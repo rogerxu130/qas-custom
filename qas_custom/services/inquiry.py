@@ -17,6 +17,7 @@ from qas_custom.modules.attendance.commands import (
 	ensure_trial_inquiry_attendance_entry,
 	remove_trial_inquiry_attendance_entries,
 )
+from qas_custom.utils.environment import sendmail_or_skip
 
 
 INQUIRY_TYPES = {"Trial Lesson", "School Visit"}
@@ -999,7 +1000,8 @@ def _send_needs_review_alert(inquiry_doc, reason: str):
 		return
 
 	try:
-		frappe.sendmail(
+		sendmail_or_skip(
+			action="inquiry_needs_review_alert",
 			recipients=recipients,
 			subject=_("Inquiry Needs Review: {0}").format(inquiry_doc.name),
 			message=_build_needs_review_email(inquiry_doc, reason),

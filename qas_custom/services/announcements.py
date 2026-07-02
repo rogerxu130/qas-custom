@@ -6,6 +6,8 @@ import frappe
 from frappe import _
 from frappe.utils import cint, escape_html, get_datetime, now_datetime
 
+from qas_custom.utils.environment import email_block_reason, outbound_email_enabled, sendmail_or_skip
+
 
 ADMIN_ROLES = {"School Admin", "System Manager"}
 ANNOUNCEMENT_DOCTYPE = "School Announcement"
@@ -97,6 +99,7 @@ def publish_school_admin_announcement_data(announcement=None):
 
 	_delete_existing_recipients(doc.name)
 	email_requested = bool(cint(doc.send_email_on_publish))
+	email_enabled = outbound_email_enabled()
 	created = []
 	for recipient in recipients:
 		row = frappe.new_doc(RECIPIENT_DOCTYPE)
@@ -108,7 +111,10 @@ def publish_school_admin_announcement_data(announcement=None):
 		row.email = recipient.get("email")
 		row.audience_source = recipient.get("audience_source")
 		row.source_document = recipient.get("source_document")
-		row.email_status = "Queued" if email_requested and recipient.get("email") else "Not Requested"
+		row.email_status = "Queued" if email_requested and email_enabled and recipient.get("email") else "Not Requested"
+		if email_requested and not email_enabled and recipient.get("email"):
+			row.email_status = "Skipped"
+			row.email_error = email_block_reason()
 		if email_requested and not recipient.get("email"):
 			row.email_status = "Failed"
 			row.email_error = "No parent email found."
@@ -123,7 +129,7 @@ def publish_school_admin_announcement_data(announcement=None):
 	doc.email_queued_count = len([name for name in created if frappe.db.get_value(RECIPIENT_DOCTYPE, name, "email_status") == "Queued"])
 	doc.save(ignore_permissions=True)
 
-	if email_requested and doc.email_queued_count:
+	if email_requested and email_enabled and doc.email_queued_count:
 		frappe.enqueue(
 			"qas_custom.services.announcements.send_school_announcement_email_job",
 			queue="short",
@@ -202,13 +208,22 @@ def send_school_announcement_email_job(announcement: str):
 	failed = 0
 	for row in rows:
 		try:
-			frappe.sendmail(
+			result = sendmail_or_skip(
+				action="school_announcement_email",
 				recipients=[row.email],
 				subject=doc.email_subject or doc.title,
 				message=_announcement_email_message(doc),
 				reference_doctype=ANNOUNCEMENT_DOCTYPE,
 				reference_name=doc.name,
 			)
+			if result and result.get("skipped"):
+				frappe.db.set_value(
+					RECIPIENT_DOCTYPE,
+					row.name,
+					{"email_status": "Skipped", "email_error": result.get("reason") or email_block_reason()},
+					update_modified=True,
+				)
+				continue
 			frappe.db.set_value(
 				RECIPIENT_DOCTYPE,
 				row.name,

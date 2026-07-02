@@ -46,6 +46,7 @@ from qas_custom.modules.notifications import (
 from qas_custom.modules.notifications.guard import disable_sales_invoice_auto_notifications
 from qas_custom.services.class_attendance import get_attendance_entries
 from qas_custom.services.display_labels import get_course_session_snapshot_label, get_student_display_code, get_student_display_name, get_student_parent_name
+from qas_custom.utils.environment import payment_block_reason, payment_mutations_enabled
 from qas_custom.services.inquiry import (
 	add_inquiry_note_core,
 	build_inquiry_detail,
@@ -964,6 +965,8 @@ def resend_school_admin_invoice_data(invoice=None):
 
 def mark_school_admin_invoice_paid_data(invoice=None, payload=None):
 	_require_school_admin()
+	if not payment_mutations_enabled():
+		frappe.throw(_(payment_block_reason()))
 	if not invoice:
 		frappe.throw(_("Invoice is required."))
 	payload = _get_payload(payload)
@@ -1010,6 +1013,8 @@ def cancel_school_admin_invoice_data(invoice=None, reason=None):
 	if cint(doc.docstatus) == 2:
 		return _build_invoice_payload(doc)
 	if cint(doc.docstatus) == 1:
+		if not payment_mutations_enabled():
+			frappe.throw(_(payment_block_reason()))
 		paid_credit_amount = _invoice_payment_amount(doc.name)
 		_cancel_invoice_payment_entries(doc.name)
 		cancel_store_credit_journal_entries(doc.name)
@@ -3156,6 +3161,9 @@ def _mark_draft_invoice_cancelled(doc, reason):
 
 
 def _cancel_submitted_invoice_as_admin(invoice):
+	if not payment_mutations_enabled():
+		frappe.throw(_(payment_block_reason()))
+
 	original_user = frappe.session.user
 	try:
 		frappe.set_user("Administrator")
@@ -3169,6 +3177,8 @@ def _cancel_submitted_invoice_as_admin(invoice):
 def _cancel_invoice_payment_entries(invoice):
 	if not _doctype_available("Payment Entry Reference") or not _doctype_available("Payment Entry"):
 		return []
+	if not payment_mutations_enabled():
+		frappe.throw(_(payment_block_reason()))
 	rows = frappe.get_all(
 		"Payment Entry Reference",
 		filters={
@@ -3319,6 +3329,9 @@ def _maybe_send_paid_receipt(doc, *, payment_entry=None, source=None):
 
 def _create_payment_entry_for_invoice(doc, amount, mode_of_payment=None, reference_no=None, notes=None):
 	from erpnext.accounts.doctype.payment_entry.payment_entry import get_payment_entry
+
+	if not payment_mutations_enabled():
+		frappe.throw(_(payment_block_reason()))
 
 	original_user = frappe.session.user
 	try:

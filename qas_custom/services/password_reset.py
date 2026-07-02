@@ -4,6 +4,8 @@ import secrets
 import frappe
 from frappe.utils import add_to_date, get_url, now_datetime
 
+from qas_custom.utils.environment import sendmail_or_skip
+
 
 PASSWORD_RESET_TOKEN_DOCTYPE = "Portal Password Reset Token"
 PASSWORD_RESET_EXPIRY_MINUTES = 30
@@ -185,7 +187,8 @@ def _send_password_reset_email(email: str, reset_link: str, expires_at, token_re
     """
 
     try:
-        frappe.sendmail(
+        sendmail_or_skip(
+            action="password_reset",
             recipients=[email],
             subject=subject,
             message=message,

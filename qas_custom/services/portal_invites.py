@@ -13,6 +13,7 @@ from qas_custom.services.password_reset import (
 	_build_password_reset_link,
 )
 from qas_custom.services.school_admin import _require_school_admin
+from qas_custom.utils.environment import sendmail_or_skip
 
 PORTAL_INVITE_EXPIRY_DAYS = 7
 PARENT_PORTAL_ROLE = "Parent"
@@ -326,7 +327,15 @@ def _send_parent_portal_invite_email(parent_name, email, reset_link, expires_at,
 		</div>
 	"""
 	try:
-		frappe.sendmail(recipients=[email], subject=subject, message=message, delayed=False)
+		result = sendmail_or_skip(
+			action="parent_portal_invite",
+			recipients=[email],
+			subject=subject,
+			message=message,
+			delayed=False,
+		)
+		if result and result.get("skipped"):
+			return result
 	except Exception:
 		frappe.log_error(
 			title="Parent Portal Invite Email Delivery Failed",
