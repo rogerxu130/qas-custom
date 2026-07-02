@@ -226,14 +226,14 @@ def get_school_admin_family_data(parent=None, student=None, customer=None, email
 
 
 
-def get_school_admin_parents_data(query=None, status=None, limit=120):
+def get_school_admin_parents_data(query=None, status=None, invite_status=None, limit=120):
 	_require_school_admin()
 	if not _doctype_available("Parent"):
 		return {"items": []}
 	filters = {}
 	if status and _has_field("Parent", "status"):
 		filters["status"] = status
-	fields = _safe_fields("Parent", ["name", *PARENT_EDIT_FIELDS, "modified"])
+	fields = _safe_fields("Parent", ["name", *PARENT_EDIT_FIELDS, "linked_user", "modified"])
 	or_filters = _text_search_filters("Parent", query, ["name", "parent_name", "mobile_number", "phone", "email", "email_id"])
 	student_parent_ids = _matching_student_parent_ids(query)
 	if student_parent_ids:
@@ -247,7 +247,10 @@ def get_school_admin_parents_data(query=None, status=None, limit=120):
 		order_by="modified desc",
 		limit=_limit(limit, default=120, max_value=300),
 	)
-	return {"items": [_normalize_row_payload("Parent", row) for row in rows]}
+	items = _attach_parent_portal_invite_statuses([_normalize_row_payload("Parent", row) for row in rows])
+	if invite_status:
+		items = [row for row in items if (row.get("portal_invite_status") or {}).get("status") == invite_status]
+	return {"items": items[: _limit(limit, default=120, max_value=300)]}
 
 
 def create_school_admin_parent_data(payload=None):
@@ -2820,9 +2823,26 @@ def _find_customer_by_email(email):
 
 
 def _get_parent_payload(parent):
-	fields = _safe_fields("Parent", ["name", *PARENT_EDIT_FIELDS, "modified"])
+	fields = _safe_fields("Parent", ["name", *PARENT_EDIT_FIELDS, "linked_user", "modified"])
 	rows = frappe.get_all("Parent", filters={"name": parent}, fields=fields, limit=1)
-	return _normalize_row_payload("Parent", rows[0]) if rows else {"doctype": "Parent", "name": parent}
+	if not rows:
+		return {"doctype": "Parent", "name": parent}
+	return _attach_parent_portal_invite_statuses([_normalize_row_payload("Parent", rows[0])])[0]
+
+
+def _attach_parent_portal_invite_statuses(parents):
+	if not parents:
+		return []
+	try:
+		from qas_custom.services.portal_invites import get_parent_portal_invite_status
+	except Exception:
+		return parents
+	for row in parents:
+		try:
+			row["portal_invite_status"] = get_parent_portal_invite_status(row)
+		except Exception:
+			row["portal_invite_status"] = {"status": "unknown", "label": _("Unknown"), "bulk_eligible": False}
+	return parents
 
 
 def _get_customer_payload(customer):

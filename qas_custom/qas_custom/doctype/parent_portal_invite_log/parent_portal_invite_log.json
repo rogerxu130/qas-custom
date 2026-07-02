@@ -1,0 +1,134 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "PPIL-.YYYY.-.#####",
+ "creation": "2026-07-02 00:00:00.000000",
+ "doctype": "DocType",
+ "document_type": "Document",
+ "engine": "InnoDB",
+ "field_order": [
+  "parent",
+  "parent_name",
+  "user",
+  "email",
+  "sent_at",
+  "source",
+  "status",
+  "token_record",
+  "expires_at",
+  "sent_by"
+ ],
+ "fields": [
+  {
+   "fieldname": "parent",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Parent",
+   "options": "Parent",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "parent_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Parent Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "user",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "User",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "email",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Email",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "sent_at",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Sent At",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "source",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Source",
+   "options": "Manual\nBulk Never Invited",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "default": "Sent",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Sent\nFailed",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "token_record",
+   "fieldtype": "Link",
+   "label": "Token Record",
+   "options": "Portal Password Reset Token",
+   "read_only": 1
+  },
+  {
+   "fieldname": "expires_at",
+   "fieldtype": "Datetime",
+   "label": "Expires At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sent_by",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Sent By",
+   "options": "User",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-07-02 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "QAS Custom",
+ "name": "Parent Portal Invite Log",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 0,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "select": 1,
+   "share": 0,
+   "write": 1
+  }
+ ],
+ "sort_field": "sent_at",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
