@@ -61,7 +61,7 @@ def build_parent_invoice_context(invoice_doc, *, store_credit_applied=None, paya
 
 
 def _invoice_recipient_name(invoice_doc):
-	parent = invoice_doc.get("parent")
+	parent = invoice_doc.get("parent") or _parent_for_invoice_customer(invoice_doc.get("customer"))
 	if parent and frappe.db.has_column("Parent", "parent_name"):
 		parent_name = frappe.db.get_value("Parent", parent, "parent_name")
 		if parent_name:
@@ -76,6 +76,12 @@ def _invoice_recipient_name(invoice_doc):
 		return frappe.db.get_value("Customer", customer, "customer_name") or customer
 
 	return ""
+
+
+def _parent_for_invoice_customer(customer):
+	if not customer or not frappe.db.exists("DocType", "Parent") or not frappe.db.has_column("Parent", "customer"):
+		return None
+	return frappe.db.get_value("Parent", {"customer": customer}, "name")
 
 
 def parent_portal_invoice_link(invoice: str):
