@@ -253,8 +253,18 @@ def get_school_admin_parents_data(query=None, status=None, limit=120):
 def create_school_admin_parent_data(payload=None):
 	_require_school_admin()
 	payload = _get_payload(payload)
+	email = _parent_payload_email(payload)
+	linked_user = _get_or_create_school_admin_parent_user(email, payload.get("parent_name") or payload.get("name")) if email else None
+	if linked_user and _has_field("Parent", "linked_user"):
+		existing_parent = frappe.db.get_value("Parent", {"linked_user": linked_user}, "name")
+		if existing_parent:
+			return _get_parent_payload(existing_parent)
+
 	doc = frappe.new_doc("Parent")
 	_apply_master_payload(doc, payload, PARENT_EDIT_FIELDS)
+	if linked_user:
+		_set_if_field(doc, "linked_user", linked_user)
+		_set_parent_email_fields(doc, email)
 	if not doc.get("parent_name") and payload.get("name"):
 		_set_if_field(doc, "parent_name", payload.get("name"))
 	if _has_field("Parent", "status") and not doc.get("status"):
@@ -264,6 +274,37 @@ def create_school_admin_parent_data(payload=None):
 	_add_comment("Parent", doc.name, _("Parent created by School Admin."))
 	frappe.db.commit()
 	return _get_parent_payload(doc.name)
+
+
+def _parent_payload_email(payload):
+	for fieldname in ["email", "email_id", "contact_email", "linked_user"]:
+		value = (payload.get(fieldname) or "").strip().lower()
+		if value:
+			return value
+	return ""
+
+
+def _get_or_create_school_admin_parent_user(email: str | None, parent_name: str | None):
+	if not email:
+		return None
+	user = frappe.db.exists("User", email) or frappe.db.get_value("User", {"email": email}, "name")
+	if user:
+		return user
+
+	user_doc = frappe.new_doc("User")
+	user_doc.email = email
+	user_doc.first_name = parent_name or email
+	user_doc.enabled = 1
+	user_doc.user_type = "Website User"
+	user_doc.send_welcome_email = 0
+	user_doc.flags.ignore_permissions = True
+	user_doc.insert(ignore_permissions=True)
+	return user_doc.name
+
+
+def _set_parent_email_fields(doc, email):
+	for fieldname in ["email", "email_id", "contact_email"]:
+		_set_if_field(doc, fieldname, email)
 
 
 def update_school_admin_parent_data(parent=None, payload=None):
