@@ -59,10 +59,14 @@ def get_parent_schedule_data(student=None):
 
     attendance_rows = frappe.get_all(
         "Class Attendance Entry",
-        filters={"student": ["in", student_names]},
-        fields=["course_session", "student", "status"],
+        filters={"student": ["in", student_names], "status": ["!=", "Cancelled"]},
+        fields=["course_session", "student", "enrollment_type", "status", "source_doctype", "source_document"],
     )
 
+    if not attendance_rows:
+        return {"sessions": []}
+
+    attendance_rows = _filter_parent_visible_attendance_rows(attendance_rows)
     if not attendance_rows:
         return {"sessions": []}
 
@@ -73,13 +77,17 @@ def get_parent_schedule_data(student=None):
 
     session_rows = frappe.get_all(
         "Course Sessions",
-        filters={"name": ["in", session_ids], "session_date": [">=", today()]},
+        filters={"name": ["in", session_ids], "session_date": [">=", today()], "status": ["!=", "Cancelled"]},
         fields=["name", "weekly_timeslot", "session_date", "status"],
         order_by="session_date asc, modified asc",
     )
 
     timeslot_map = _get_weekly_timeslot_map(
         [row["weekly_timeslot"] for row in session_rows if row.get("weekly_timeslot")]
+    )
+    active_enrollment_pairs = _active_enrollment_pairs(
+        student_names,
+        [row["weekly_timeslot"] for row in session_rows if row.get("weekly_timeslot")],
     )
     teacher_map = _get_teacher_name_map(
         [row["teacher"] for row in timeslot_map.values() if row.get("teacher")]
@@ -91,11 +99,14 @@ def get_parent_schedule_data(student=None):
         if not timeslot:
             continue
 
-        matching_students = [
-            row["student"] for row in attendance_rows if row["course_session"] == session_row["name"]
+        matching_rows = [
+            row for row in attendance_rows if row["course_session"] == session_row["name"]
         ]
-        for student_name in matching_students:
+        for attendance_row in matching_rows:
+            student_name = attendance_row["student"]
             if selected_student and student_name != selected_student:
+                continue
+            if _is_full_term_attendance(attendance_row) and (student_name, session_row.get("weekly_timeslot")) not in active_enrollment_pairs:
                 continue
 
             sessions.append(
@@ -123,6 +134,52 @@ def get_parent_schedule_data(student=None):
         )
     )
     return {"sessions": sessions}
+
+
+def _filter_parent_visible_attendance_rows(attendance_rows):
+    enrollment_names = sorted({
+        row.get("source_document")
+        for row in attendance_rows
+        if row.get("source_doctype") == "Enrollment" and row.get("source_document")
+    })
+    active_enrollments = set()
+    if enrollment_names:
+        active_enrollments = set(frappe.get_all(
+            "Enrollment",
+            filters={"name": ["in", enrollment_names], "status": "Active"},
+            pluck="name",
+            limit_page_length=0,
+        ))
+
+    visible = []
+    for row in attendance_rows:
+        if row.get("status") == "Cancelled":
+            continue
+        if row.get("source_doctype") == "Enrollment" and row.get("source_document") not in active_enrollments:
+            continue
+        visible.append(row)
+    return visible
+
+
+def _active_enrollment_pairs(student_names, weekly_timeslots):
+    weekly_timeslots = sorted({value for value in weekly_timeslots if value})
+    if not student_names or not weekly_timeslots:
+        return set()
+    rows = frappe.get_all(
+        "Enrollment",
+        filters={
+            "student": ["in", student_names],
+            "weekly_timeslot": ["in", weekly_timeslots],
+            "status": "Active",
+        },
+        fields=["student", "weekly_timeslot"],
+        limit_page_length=0,
+    )
+    return {(row.get("student"), row.get("weekly_timeslot")) for row in rows}
+
+
+def _is_full_term_attendance(row):
+    return (row.get("enrollment_type") or "Full-Term") == "Full-Term"
 
 
 def get_parent_vouchers_data(student=None):

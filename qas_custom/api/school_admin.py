@@ -1,5 +1,12 @@
 import frappe
 
+from qas_custom.services.announcements import (
+	archive_school_admin_announcement_data,
+	get_school_admin_announcement_data,
+	get_school_admin_announcements_data,
+	publish_school_admin_announcement_data,
+	save_school_admin_announcement_data,
+)
 from qas_custom.services.school_admin import (
 	update_school_admin_student_data,
 	update_school_admin_parent_data,
@@ -92,6 +99,31 @@ def school_admin_get_csrf_token():
 @frappe.whitelist()
 def school_admin_get_dashboard():
 	return get_school_admin_dashboard_data()
+
+
+@frappe.whitelist()
+def school_admin_get_announcements(status=None, limit=80):
+	return get_school_admin_announcements_data(status=status, limit=limit)
+
+
+@frappe.whitelist()
+def school_admin_get_announcement(announcement=None):
+	return get_school_admin_announcement_data(announcement=announcement)
+
+
+@frappe.whitelist()
+def school_admin_save_announcement(announcement=None, payload=None):
+	return save_school_admin_announcement_data(announcement=announcement, payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_publish_announcement(announcement=None):
+	return publish_school_admin_announcement_data(announcement=announcement)
+
+
+@frappe.whitelist()
+def school_admin_archive_announcement(announcement=None):
+	return archive_school_admin_announcement_data(announcement=announcement)
 
 
 @frappe.whitelist()

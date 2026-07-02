@@ -1,0 +1,139 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "ANR-.YYYY.-.#####",
+ "creation": "2026-06-30 00:00:00.000000",
+ "doctype": "DocType",
+ "document_type": "Document",
+ "engine": "InnoDB",
+ "field_order": [
+  "announcement",
+  "parent",
+  "customer",
+  "student",
+  "linked_user",
+  "email",
+  "audience_source",
+  "source_document",
+  "email_section",
+  "email_status",
+  "email_sent_at",
+  "email_error"
+ ],
+ "fields": [
+  {
+   "fieldname": "announcement",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Announcement",
+   "options": "School Announcement",
+   "reqd": 1
+  },
+  {
+   "fieldname": "parent",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Parent",
+   "options": "Parent"
+  },
+  {
+   "fieldname": "customer",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Customer",
+   "options": "Customer"
+  },
+  {
+   "fieldname": "student",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Student",
+   "options": "Student"
+  },
+  {
+   "fieldname": "linked_user",
+   "fieldtype": "Link",
+   "label": "Linked User",
+   "options": "User"
+  },
+  {
+   "fieldname": "email",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Email"
+  },
+  {
+   "fieldname": "audience_source",
+   "fieldtype": "Data",
+   "label": "Audience Source"
+  },
+  {
+   "fieldname": "source_document",
+   "fieldtype": "Data",
+   "label": "Source Document"
+  },
+  {
+   "fieldname": "email_section",
+   "fieldtype": "Section Break",
+   "label": "Email"
+  },
+  {
+   "default": "Not Requested",
+   "fieldname": "email_status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Email Status",
+   "options": "Not Requested\nQueued\nSent\nFailed"
+  },
+  {
+   "fieldname": "email_sent_at",
+   "fieldtype": "Datetime",
+   "label": "Email Sent At"
+  },
+  {
+   "fieldname": "email_error",
+   "fieldtype": "Small Text",
+   "label": "Email Error"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-06-30 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "QAS Custom",
+ "name": "School Announcement Recipient",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "School Admin",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

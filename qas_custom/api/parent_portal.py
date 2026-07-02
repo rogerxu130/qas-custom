@@ -1,5 +1,6 @@
 import frappe
 
+from qas_custom.services.announcements import get_parent_announcements_data
 from qas_custom.services.parent_feed import (
     get_parent_feed_data,
     get_parent_feed_photo_content,
@@ -110,6 +111,11 @@ def parent_portal_redeem_voucher(voucher_id=None, session_id=None, student=None)
 @frappe.whitelist()
 def parent_portal_get_invoices():
     return get_parent_invoices_data()
+
+
+@frappe.whitelist()
+def parent_portal_get_announcements(limit=30):
+    return get_parent_announcements_data(limit=limit)
 
 
 @frappe.whitelist()

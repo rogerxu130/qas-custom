@@ -1986,10 +1986,21 @@ def update_school_admin_weekly_timeslot_data(weekly_timeslot=None, payload=None)
 		frappe.throw(_("Weekly timeslot is required."))
 	payload = _get_payload(payload)
 	doc = frappe.get_doc("Weekly Timeslot", weekly_timeslot)
+	previous_day_of_week = doc.get("day_of_week")
 	_apply_weekly_timeslot_payload(doc, payload)
 	doc.save(ignore_permissions=True)
+	session_sync = None
+	if cint(payload.get("apply_future_sessions")):
+		session_sync = _sync_future_course_sessions_for_timeslot(
+			doc,
+			effective_date=payload.get("effective_date"),
+			previous_day_of_week=previous_day_of_week,
+		)
 	frappe.db.commit()
-	return get_school_admin_weekly_timeslot_data(doc.name)
+	result = get_school_admin_weekly_timeslot_data(doc.name)
+	if session_sync:
+		result["session_sync"] = session_sync
+	return result
 
 
 def generate_school_admin_course_sessions_data(weekly_timeslot=None, from_date=None, to_date=None):
@@ -3665,6 +3676,86 @@ def _ensure_course_session(weekly_timeslot, session_date):
 	session.insert(ignore_permissions=True)
 	_create_session_attendance_for_active_enrollments(session)
 	return {"name": session.name, "created": True}
+
+
+def _sync_future_course_sessions_for_timeslot(doc, effective_date=None, previous_day_of_week=None):
+	if not _doctype_available("Course Sessions"):
+		return {"updated": 0, "skipped": 0, "checked": 0, "reason": "Course Sessions is not installed."}
+	start_date = getdate(effective_date or today())
+	filters = {
+		"weekly_timeslot": doc.name,
+		"session_date": [">=", start_date],
+		"status": ["not in", ["Completed", "Cancelled"]],
+	}
+	sessions = frappe.get_all(
+		"Course Sessions",
+		filters=filters,
+		fields=["name", "session_date", "status"],
+		order_by="session_date asc, modified asc",
+		limit_page_length=0,
+	)
+	if not sessions:
+		return {"updated": 0, "skipped": 0, "checked": 0}
+
+	if not doc.get("day_of_week") or previous_day_of_week == doc.get("day_of_week"):
+		return {"updated": 0, "skipped": 0, "checked": len(sessions), "reason": "Session dates already match this weekday."}
+
+	target_dates = _future_weekday_dates(start_date, doc.get("day_of_week"), len(sessions))
+	updated = 0
+	skipped = 0
+	skipped_sessions = []
+	for session, target_date in zip(sessions, target_dates):
+		current_date = getdate(session.get("session_date"))
+		if current_date == target_date:
+			continue
+		if _course_session_date_exists(doc.name, target_date, exclude=session.name):
+			skipped += 1
+			skipped_sessions.append({"session": session.name, "reason": _("Target date already has a session."), "target_date": str(target_date)})
+			continue
+		if _course_session_has_locked_attendance(session.name):
+			skipped += 1
+			skipped_sessions.append({"session": session.name, "reason": _("Attendance has already been marked."), "target_date": str(target_date)})
+			continue
+		frappe.db.set_value("Course Sessions", session.name, "session_date", target_date, update_modified=True)
+		updated += 1
+	return {
+		"updated": updated,
+		"skipped": skipped,
+		"checked": len(sessions),
+		"effective_date": str(start_date),
+		"day_of_week": doc.get("day_of_week"),
+		"skipped_sessions": skipped_sessions,
+	}
+
+
+def _future_weekday_dates(start_date, day_of_week, count):
+	target_weekday = _weekday_number(day_of_week)
+	current = getdate(start_date)
+	while current.weekday() != target_weekday:
+		current = current + timedelta(days=1)
+	dates = []
+	while len(dates) < count:
+		dates.append(current)
+		current = current + timedelta(days=7)
+	return dates
+
+
+def _course_session_date_exists(weekly_timeslot, session_date, exclude=None):
+	filters = {"weekly_timeslot": weekly_timeslot, "session_date": getdate(session_date)}
+	existing = frappe.db.exists("Course Sessions", filters)
+	return bool(existing and existing != exclude)
+
+
+def _course_session_has_locked_attendance(course_session):
+	if not _doctype_available("Class Attendance Entry"):
+		return False
+	return bool(frappe.db.exists(
+		"Class Attendance Entry",
+		{
+			"course_session": course_session,
+			"status": ["not in", ["To be started", "Cancelled"]],
+		},
+	))
 
 
 def _create_session_attendance_for_active_enrollments(session):
