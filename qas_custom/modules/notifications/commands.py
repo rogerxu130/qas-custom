@@ -449,9 +449,10 @@ def _invoice_pdf_html(context):
 	<table class="header">
 		<tr>
 			<td>
-				<p class="brand">Queensland Art School</p>
+				<p class="brand">{school_name}</p>
 				<h1>Invoice</h1>
 				<div class="muted">{invoice}</div>
+				{school_identity}
 			</td>
 			<td class="right">
 				<strong>Due date</strong><br>{due_date}<br><br>
@@ -494,6 +495,8 @@ def _invoice_pdf_html(context):
 </html>
 	""".format(
 		invoice=escape_html(context["invoice"]),
+		school_name=escape_html(context.get("school_name") or "Queensland Art School"),
+		school_identity=_school_identity_pdf_html(context),
 		due_date=escape_html(context["due_date"] or "-"),
 		posting_date=escape_html(context["posting_date"] or "-"),
 		total=flt(context["total"]),
@@ -597,8 +600,9 @@ def _invoice_email_message(invoice_doc, event, store_credit_applied, payable_amo
 			<div style="max-width:640px;margin:0 auto;padding:24px;">
 				<div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;">
 					<div style="padding:22px 24px;background:#172033;color:#ffffff;">
-						<p style="margin:0 0 6px;font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:#f7b6a4;">Queensland Art School</p>
+						<p style="margin:0 0 6px;font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:#f7b6a4;">{school_name}</p>
 						<h1 style="margin:0;font-size:24px;line-height:1.3;">Invoice {invoice}</h1>
+						{school_identity}
 					</div>
 					<div style="padding:24px;">
 						<p style="margin:0 0 14px;font-size:16px;line-height:1.5;">{greeting}</p>
@@ -648,6 +652,8 @@ def _invoice_email_message(invoice_doc, event, store_credit_applied, payable_amo
 		</div>
 	""".format(
 		invoice=context["invoice"],
+		school_name=escape_html(context.get("school_name") or "Queensland Art School"),
+		school_identity=_school_identity_email_html(context),
 		greeting=greeting,
 		intro=intro,
 		invoice_message=invoice_message,
@@ -660,6 +666,35 @@ def _invoice_email_message(invoice_doc, event, store_credit_applied, payable_amo
 		bank_details=bank_details,
 		invoice_link=context["invoice_link"],
 	)
+
+
+def _school_identity_email_html(context):
+	parts = _school_identity_parts(context)
+	if not parts:
+		return ""
+	return """<div style="margin-top:6px;color:#cbd5e1;font-size:13px;line-height:1.45;">{0}</div>""".format("<br>".join(parts))
+
+
+def _school_identity_pdf_html(context):
+	parts = _school_identity_parts(context)
+	if not parts:
+		return ""
+	return """<div class="muted" style="margin-top:6px;">{0}</div>""".format("<br>".join(parts))
+
+
+def _school_identity_parts(context):
+	parts = []
+	legal_name = context.get("legal_name")
+	abn = context.get("abn")
+	if legal_name:
+		parts.append(escape_html(legal_name))
+	if abn:
+		abn_text = str(abn).strip()
+		if abn_text.upper().startswith("ABN"):
+			parts.append(escape_html(abn_text))
+		else:
+			parts.append(escape_html(_("ABN {0}").format(abn_text)))
+	return parts
 
 
 def _invoice_email_greeting(context):
@@ -775,9 +810,10 @@ def _receipt_email_message(invoice_doc, amounts, payment_context):
 			<div style="max-width:640px;margin:0 auto;padding:24px;">
 				<div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;">
 					<div style="padding:22px 24px;background:#172033;color:#ffffff;">
-						<p style="margin:0 0 6px;font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:#f7b6a4;">Queensland Art School</p>
+						<p style="margin:0 0 6px;font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:#f7b6a4;">{school_name}</p>
 						<h1 style="margin:0;font-size:24px;line-height:1.3;">Payment receipt</h1>
 						<div style="margin-top:6px;color:#cbd5e1;">Invoice {invoice}</div>
+						{school_identity}
 					</div>
 					<div style="padding:24px;">
 						<p style="margin:0 0 14px;font-size:16px;line-height:1.5;">{greeting}</p>
@@ -811,6 +847,8 @@ def _receipt_email_message(invoice_doc, amounts, payment_context):
 		</div>
 	""".format(
 		invoice=escape_html(context["invoice"]),
+		school_name=escape_html(context.get("school_name") or "Queensland Art School"),
+		school_identity=_school_identity_email_html(context),
 		greeting=greeting,
 		payment_date=escape_html(payment_context.get("payment_date_display") or "-"),
 		payment_method=escape_html(payment_context.get("payment_method") or "Payment"),
@@ -860,9 +898,10 @@ def _receipt_pdf_html(context):
 	<table class="header">
 		<tr>
 			<td>
-				<p class="brand">Queensland Art School</p>
+				<p class="brand">{school_name}</p>
 				<h1>Payment receipt</h1>
 				<div class="muted">Invoice {invoice}</div>
+				{school_identity}
 			</td>
 			<td class="right">
 				<strong>Payment date</strong><br>{payment_date}<br><br>
@@ -905,6 +944,8 @@ def _receipt_pdf_html(context):
 </html>
 	""".format(
 		invoice=escape_html(context["invoice"]),
+		school_name=escape_html(context.get("school_name") or "Queensland Art School"),
+		school_identity=_school_identity_pdf_html(context),
 		payment_date=escape_html(receipt.get("payment_date_display") or "-"),
 		payment_method=escape_html(receipt.get("payment_method") or "Payment"),
 		total=flt(context["total"]),

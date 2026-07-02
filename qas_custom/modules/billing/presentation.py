@@ -4,7 +4,7 @@ import frappe
 from frappe.utils import flt, formatdate
 
 from qas_custom.modules.billing.invoice_amounts import resolve_invoice_print_amounts
-from qas_custom.modules.billing.invoice_settings import get_invoice_payment_context
+from qas_custom.modules.billing.invoice_settings import get_invoice_payment_context, get_invoice_settings
 from qas_custom.services.display_labels import get_student_parent_name
 
 DEFAULT_PARENT_PORTAL_URL = "https://portal.queenslandartschool.com"
@@ -43,8 +43,12 @@ def build_parent_invoice_context(invoice_doc, *, store_credit_applied=None, paya
 	payable = flt(payable_amount)
 	portal_link = invoice_link or payment_link or parent_portal_invoice_link(invoice_doc.name)
 	payment_context = get_invoice_payment_context(invoice_doc)
+	settings = get_invoice_settings()
 	return {
 		"invoice": invoice_doc.name,
+		"school_name": settings.get("school_name") or "Queensland Art School",
+		"legal_name": settings.get("legal_name") or "",
+		"abn": settings.get("abn") or "",
 		"customer": invoice_doc.get("customer_name") or invoice_doc.get("customer") or "",
 		"parent": invoice_doc.get("parent") or "",
 		"recipient_name": _invoice_recipient_name(invoice_doc),
