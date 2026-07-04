@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 import json
+import re
 
 import frappe
 from frappe import _
@@ -2366,6 +2367,8 @@ def _get_link_options(doctype, label_fields=None, filters=None, limit=500):
 	field_candidates = ["name", *label_fields, "status"]
 	if doctype == "Course":
 		field_candidates = [*field_candidates, *COURSE_LABEL_FIELDS, "duration_mins"]
+	if doctype == "Classroom":
+		field_candidates = [*field_candidates, "campus"]
 	fields = _safe_fields(doctype, field_candidates)
 	active_filters = {}
 	if filters:
@@ -2382,6 +2385,8 @@ def _get_link_options(doctype, label_fields=None, filters=None, limit=500):
 	items = []
 	for row in rows:
 		label = next((row.get(fieldname) for fieldname in label_fields if row.get(fieldname)), None) or row.get("name")
+		if doctype == "Classroom":
+			label = _classroom_display_label(row)
 		item = {"value": row.get("name"), "label": label}
 		if doctype == "Course":
 			_attach_course_label(item, row.get("name"), row)
@@ -2430,6 +2435,8 @@ def _school_setup_payload(config, row):
 	title_field = config["title_field"]
 	payload["record_type"] = next((key for key, value in SCHOOL_SETUP_TYPES.items() if value["doctype"] == config["doctype"]), "")
 	payload["label"] = payload.get(title_field) or payload.get("name")
+	if config["doctype"] == "Classroom":
+		payload["display_label"] = _classroom_display_label(payload)
 	return payload
 
 
@@ -2440,8 +2447,50 @@ def _normalize_school_setup_record(doc, config):
 			doc.set("status", "Active")
 		elif status not in {"Active", "Inactive"}:
 			frappe.throw(_("Status must be Active or Inactive."))
-	if doc.doctype == "Classroom" and doc.get("campus") and not frappe.db.exists("Campus", doc.get("campus")):
-		frappe.throw(_("Campus does not exist: {0}").format(doc.get("campus")))
+	if doc.doctype == "Classroom":
+		_normalize_classroom_record(doc)
+
+
+def _normalize_classroom_record(doc):
+	classroom_name = (doc.get("classroom_name") or "").strip()
+	campus = (doc.get("campus") or "").strip()
+	doc.set("classroom_name", classroom_name)
+	doc.set("campus", campus)
+	if campus and not frappe.db.exists("Campus", campus):
+		frappe.throw(_("Campus does not exist: {0}").format(campus))
+	if not classroom_name or not campus:
+		return
+	duplicate_filters = {
+		"campus": campus,
+		"classroom_name": classroom_name,
+		"name": ["!=", doc.get("name")],
+	}
+	if frappe.db.exists("Classroom", duplicate_filters):
+		frappe.throw(_("Room {0} already exists at {1}.").format(classroom_name, campus))
+	if _doc_is_new(doc):
+		doc.name = _classroom_record_name(campus, classroom_name)
+
+
+def _doc_is_new(doc):
+	try:
+		return bool(doc.is_new())
+	except Exception:
+		return not bool(doc.get("name"))
+
+
+def _classroom_record_name(campus, classroom_name):
+	return "-".join([_slug_part(campus), _slug_part(classroom_name)])
+
+
+def _slug_part(value):
+	text = re.sub(r"[^a-z0-9]+", "-", str(value or "").strip().lower()).strip("-")
+	return text or "room"
+
+
+def _classroom_display_label(row):
+	classroom_name = row.get("classroom_name") or row.get("room_name") or row.get("name") or ""
+	campus = row.get("campus") or ""
+	return " · ".join([part for part in [campus, classroom_name] if part])
 
 
 
