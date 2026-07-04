@@ -933,7 +933,7 @@ def submit_school_admin_invoice_data(invoice=None):
 		_add_comment("Sales Invoice", doc.name, _("Store credit applied: {0}.").format(flt(application.get("applied"))))
 	doc = frappe.get_doc("Sales Invoice", doc.name)
 	sync_invoice_store_credit_snapshot(doc)
-	applied_amount = flt(application.get("applied"))
+	applied_amount = flt(get_invoice_store_credit_applied(doc.name))
 	frappe.db.commit()
 	doc = frappe.get_doc("Sales Invoice", doc.name)
 	notification = _send_invoice_notification(doc, event="approved", store_credit_applied=applied_amount if applied_amount > 0 else None)

@@ -153,12 +153,27 @@ def apply_store_credit_to_invoice(invoice_doc):
 
 	parent, customer = resolve_parent_customer(parent=invoice_doc.get("parent"), customer=invoice_doc.customer)
 	available = get_store_credit_balance(parent=parent, customer=customer)
-	amount_due = flt(invoice_doc.grand_total or invoice_doc.rounded_total or 0)
 	already_applied = _invoice_store_credit_applied(invoice_doc.name)
-	remaining = max(0, amount_due - already_applied)
+	remaining = _store_credit_remaining_amount(invoice_doc, already_applied=already_applied)
+	if remaining <= 0:
+		sync_invoice_store_credit_snapshot(invoice_doc.name)
+		return {
+			"applied": 0,
+			"already_applied": already_applied,
+			"balance": available,
+			"skipped": True,
+			"reason": "Store credit already applied.",
+		}
 	apply_amount = min(available, remaining)
 	if apply_amount <= 0:
-		return {"applied": 0, "balance": available, "skipped": True, "reason": "No store credit available."}
+		sync_invoice_store_credit_snapshot(invoice_doc.name)
+		return {
+			"applied": 0,
+			"already_applied": already_applied,
+			"balance": available,
+			"skipped": True,
+			"reason": "No store credit available.",
+		}
 
 	entry = create_store_credit_entry(
 		parent=parent,
@@ -181,6 +196,7 @@ def apply_store_credit_to_invoice(invoice_doc):
 	sync_invoice_store_credit_snapshot(invoice_doc.name)
 	return {
 		"applied": apply_amount,
+		"already_applied": already_applied,
 		"balance": entry.balance_after,
 		"ledger": entry.name,
 		"journal_entry": journal_entry,
@@ -188,8 +204,26 @@ def apply_store_credit_to_invoice(invoice_doc):
 	}
 
 
+def apply_store_credit_on_sales_invoice_submit(doc, method=None):
+	if not doc or doc.doctype != "Sales Invoice":
+		return
+	application = apply_store_credit_to_invoice(doc)
+	if flt(application.get("applied")) > 0:
+		doc.add_comment("Comment", _("Store credit applied: {0}.").format(flt(application.get("applied"))))
+
+
 def get_invoice_store_credit_applied(invoice: str) -> float:
 	return _invoice_store_credit_applied(invoice)
+
+
+def _store_credit_remaining_amount(invoice_doc, *, already_applied: float = 0) -> float:
+	total = flt(_doc_field(invoice_doc, "rounded_total") or _doc_field(invoice_doc, "grand_total") or 0)
+	total_remaining = max(0, total - flt(already_applied))
+	docstatus = cint(_doc_field(invoice_doc, "docstatus") or 0)
+	if docstatus == 1:
+		outstanding = max(0, _invoice_outstanding_amount(invoice_doc))
+		return min(outstanding, total_remaining) if flt(already_applied) > 0 else outstanding
+	return total_remaining
 
 
 def get_invoice_payable_amount(invoice_doc) -> float:

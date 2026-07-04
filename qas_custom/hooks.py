@@ -145,6 +145,7 @@ doc_events = {
 	"Sales Invoice": {
 		"before_insert": "qas_custom.modules.notifications.guard.disable_sales_invoice_auto_notifications",
 		"before_submit": "qas_custom.modules.notifications.guard.disable_sales_invoice_auto_notifications",
+		"on_submit": "qas_custom.modules.billing.store_credit.apply_store_credit_on_sales_invoice_submit",
 		"on_update": "qas_custom.modules.notifications.guard.purge_legacy_invoice_email_queue",
 		"on_change": "qas_custom.modules.notifications.guard.purge_legacy_invoice_email_queue",
 	},
