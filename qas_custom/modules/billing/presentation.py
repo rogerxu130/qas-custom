@@ -56,8 +56,6 @@ def build_parent_invoice_context(
 	return {
 		"invoice": invoice_doc.name,
 		"school_name": settings.get("school_name") or "Queensland Art School",
-		"school_logo": settings.get("school_logo") or "",
-		"school_logo_url": settings.get("school_logo_url") or "",
 		"legal_name": settings.get("legal_name") or "",
 		"abn": settings.get("abn") or "",
 		"customer": invoice_doc.get("customer_name") or invoice_doc.get("customer") or "",
