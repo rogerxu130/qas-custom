@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 import frappe
-from frappe.utils import flt, formatdate
+from frappe.utils import flt, formatdate, get_time, getdate
 
 from qas_custom.modules.billing.invoice_amounts import resolve_invoice_print_amounts
 from qas_custom.modules.billing.invoice_settings import get_invoice_payment_context, get_invoice_settings
@@ -10,13 +12,12 @@ from qas_custom.services.display_labels import get_student_parent_name
 DEFAULT_PARENT_PORTAL_URL = "https://portal.queenslandartschool.com"
 
 
-def build_course_invoice_description(student_name: str, course: str, term: str, session_count: int) -> str:
-	parts = [course]
-	if term:
-		parts.append(f"({term})")
+def build_course_invoice_description(student_name: str, course: str, term: str, session_count: int, schedule: str | None = None) -> str:
+	course_label = _course_term_label(course, term)
 	count = int(session_count or 0)
 	session_label = "1 session" if count == 1 else f"{count} sessions"
-	return f"{student_name} - {' '.join(parts)}, {session_label}"
+	parts = [course_label, schedule, session_label]
+	return f"{student_name} - {' - '.join(str(part) for part in parts if part)}"
 
 
 def get_invoice_print_context(invoice_doc):
@@ -60,7 +61,7 @@ def build_parent_invoice_context(invoice_doc, *, store_credit_applied=None, paya
 		"invoice_link": portal_link,
 		"payment_link": portal_link,
 		**payment_context,
-		"items": [_build_parent_invoice_item(row) for row in invoice_doc.get("items", [])],
+		"items": [build_parent_invoice_item(row) for row in invoice_doc.get("items", [])],
 	}
 
 
@@ -99,7 +100,7 @@ def parent_portal_invoice_link(invoice: str):
 	return f"{str(base_url).rstrip('/')}/invoices?{urlencode({'invoice': invoice})}"
 
 
-def _build_parent_invoice_item(row):
+def build_parent_invoice_item(row):
 	student = row.get("student") if hasattr(row, "get") else None
 	student_display_name = row.get("student_display_name") if hasattr(row, "get") else None
 	student_label = student_display_name or get_student_parent_name(student) or student or "Student"
@@ -109,19 +110,108 @@ def _build_parent_invoice_item(row):
 	quantity = flt(row.get("qty") or 0)
 	rate = flt(row.get("rate") or 0)
 	amount = flt(row.get("amount") or quantity * rate)
+	schedule = invoice_item_schedule(row)
 
-	detail_parts = [course]
-	if term:
-		detail_parts.append(term)
+	detail_parts = [_course_term_label(course, term)]
+	if schedule:
+		detail_parts.append(schedule)
 	if session_count:
 		detail_parts.append("1 session" if session_count == 1 else f"{session_count} sessions")
 
 	return {
+		"item_code": row.get("item_code") if hasattr(row, "get") else None,
 		"student": student_label,
+		"student_display_name": student_display_name,
+		"enrollment": row.get("enrollment") if hasattr(row, "get") else None,
 		"course": course,
 		"term": term,
+		"course_session": row.get("course_session") if hasattr(row, "get") else None,
+		"session_count": row.get("session_count") if hasattr(row, "get") else None,
+		"qas_line_type": row.get("qas_line_type") if hasattr(row, "get") else None,
+		"schedule": schedule,
 		"sessions": session_count or quantity,
 		"rate": rate,
 		"amount": amount,
 		"description": " - ".join(str(part) for part in detail_parts if part),
 	}
+
+
+def invoice_item_schedule(row) -> str:
+	if not hasattr(row, "get"):
+		return ""
+
+	weekly_timeslot = row.get("weekly_timeslot")
+	if weekly_timeslot:
+		schedule = _schedule_for_weekly_timeslot(weekly_timeslot)
+		if schedule:
+			return schedule
+
+	enrollment = row.get("enrollment")
+	if enrollment:
+		schedule = _schedule_for_enrollment(enrollment)
+		if schedule:
+			return schedule
+
+	course_session = _course_session_name(row.get("course_session"))
+	if course_session:
+		schedule = _schedule_for_course_session(course_session)
+		if schedule:
+			return schedule
+
+	return ""
+
+
+def _course_term_label(course: str, term: str | None) -> str:
+	if term:
+		return f"{course} ({term})"
+	return course or "Course"
+
+
+def _schedule_for_enrollment(enrollment: str) -> str:
+	weekly_timeslot = frappe.db.get_value("Enrollment", enrollment, "weekly_timeslot")
+	return _schedule_for_weekly_timeslot(weekly_timeslot)
+
+
+def _schedule_for_course_session(course_session: str) -> str:
+	if not frappe.db.exists("Course Sessions", course_session):
+		return ""
+	weekly_timeslot = frappe.db.get_value("Course Sessions", course_session, "weekly_timeslot")
+	return _schedule_for_weekly_timeslot(weekly_timeslot)
+
+
+def _schedule_for_weekly_timeslot(weekly_timeslot: str | None) -> str:
+	if not weekly_timeslot:
+		return ""
+	row = frappe.db.get_value(
+		"Weekly Timeslot",
+		weekly_timeslot,
+		["day_of_week", "start_time", "end_time"],
+		as_dict=True,
+	)
+	if not row:
+		return ""
+
+	start_time = _format_schedule_time(row.get("start_time"))
+	end_time = _format_schedule_time(row.get("end_time"))
+	if start_time and end_time:
+		time_label = f"{start_time}-{end_time}"
+	else:
+		time_label = start_time or end_time
+	return " ".join(str(part) for part in (row.get("day_of_week"), time_label) if part)
+
+
+def _course_session_name(value) -> str:
+	text = str(value or "").strip()
+	if " · " in text:
+		text = text.split(" · ", 1)[0].strip()
+	return text
+
+
+def _format_schedule_time(value) -> str:
+	if not value:
+		return ""
+	try:
+		time_value = get_time(value)
+	except Exception:
+		return str(value)
+	return datetime.combine(getdate(), time_value).strftime("%I:%M %p").lstrip("0")

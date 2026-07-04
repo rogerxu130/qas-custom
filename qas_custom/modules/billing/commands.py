@@ -5,7 +5,7 @@ from frappe import _
 from frappe.utils import flt
 
 from qas_custom.modules.common import has_field, is_new_doc, set_if_field
-from qas_custom.modules.billing.presentation import build_course_invoice_description
+from qas_custom.modules.billing.presentation import build_course_invoice_description, invoice_item_schedule
 from qas_custom.modules.billing.invoice_settings import apply_default_invoice_dates, apply_invoice_payment_snapshot
 from qas_custom.modules.notifications.guard import disable_sales_invoice_auto_notifications
 from qas_custom.services.display_labels import (
@@ -33,7 +33,8 @@ def create_prorata_invoice(inquiry_doc, enrollment, course: str, term: str, star
 
 	student_name = get_student_parent_name(inquiry_doc.student) or inquiry_doc.student
 	student_code = get_student_display_code(inquiry_doc.student) or inquiry_doc.student
-	description = build_course_invoice_description(student_name, course, term, remaining_session_count)
+	schedule = invoice_item_schedule({"weekly_timeslot": enrollment.weekly_timeslot})
+	description = build_course_invoice_description(student_name, course, term, remaining_session_count, schedule=schedule)
 	item = invoice.append(
 		"items",
 		{

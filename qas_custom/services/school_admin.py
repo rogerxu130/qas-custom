@@ -36,7 +36,7 @@ from qas_custom.modules.billing.commands import (
 	get_invoice_customer,
 	get_invoice_item,
 )
-from qas_custom.modules.billing.presentation import build_course_invoice_description
+from qas_custom.modules.billing.presentation import build_course_invoice_description, invoice_item_schedule
 from qas_custom.modules.notifications import (
 	get_invoice_notification_summary,
 	maybe_send_parent_invoice_paid_receipt,
@@ -1668,7 +1668,8 @@ def _invoice_has_enrollment_item(invoice, enrollment_name):
 def _append_enrollment_invoice_item(invoice, *, enrollment, start_session, item_code, course, session_count, unit_rate):
 	student_name = get_student_parent_name(enrollment.student) or enrollment.student
 	student_code = get_student_display_code(enrollment.student) or enrollment.student
-	description = build_course_invoice_description(student_name, course, enrollment.term, session_count)
+	schedule = invoice_item_schedule({"weekly_timeslot": enrollment.weekly_timeslot})
+	description = build_course_invoice_description(student_name, course, enrollment.term, session_count, schedule=schedule)
 	item = invoice.append(
 		"items",
 		{

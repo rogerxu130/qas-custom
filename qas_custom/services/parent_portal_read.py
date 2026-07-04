@@ -6,6 +6,7 @@ import frappe
 from frappe.utils import getdate, get_time, now_datetime, today
 
 from qas_custom.modules.billing.invoice_settings import get_invoice_payment_context
+from qas_custom.modules.billing.presentation import build_parent_invoice_item
 from qas_custom.modules.billing.store_credit import get_invoice_payable_amount, get_invoice_store_credit_applied
 from qas_custom.modules.course_schedule.queries import (
     get_teacher_name_map as _get_teacher_name_map,
@@ -325,22 +326,7 @@ def get_parent_invoices_data():
                 "payment_status": payment_status,
                 "status": doc.status,
                 **get_invoice_payment_context(doc),
-                "items": [
-                    {
-                        "item_code": item.item_code,
-                        "description": item.description,
-                        "amount": float(item.amount or 0),
-                        "student": item.get("student"),
-                        "student_display_name": item.get("student_display_name"),
-                        "enrollment": item.get("enrollment"),
-                        "course": item.get("course"),
-                        "term": item.get("term"),
-                        "course_session": item.get("course_session"),
-                        "session_count": item.get("session_count"),
-                        "qas_line_type": item.get("qas_line_type"),
-                    }
-                    for item in doc.items
-                ],
+                "items": [build_parent_invoice_item(item) for item in doc.items],
             }
         )
 
