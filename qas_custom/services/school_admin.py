@@ -17,6 +17,7 @@ from qas_custom.modules.attendance.commands import create_full_term_attendance_e
 from qas_custom.modules.billing.store_credit import (
 	adjust_store_credit,
 	apply_store_credit_to_invoice,
+	apply_store_credit_to_unpaid_invoices,
 	cancel_store_credit_journal_entries,
 	create_store_credit_entry,
 	get_invoice_payable_amount,
@@ -677,10 +678,25 @@ def adjust_school_admin_store_credit_data(parent=None, customer=None, amount=0, 
 		reason=reason,
 		notes=notes,
 	)
+	auto_application = None
+	if flt(amount) > 0:
+		auto_application = apply_store_credit_to_unpaid_invoices(parent=entry.parent, customer=entry.customer)
 	frappe.db.commit()
+	if auto_application and auto_application.get("invoices"):
+		for application in auto_application.get("invoices"):
+			invoice_name = application.get("invoice")
+			if not invoice_name:
+				continue
+			receipt = _maybe_send_paid_receipt(
+				frappe.get_doc("Sales Invoice", invoice_name),
+				source="store_credit_adjustment",
+			)
+			application["receipt_notification"] = receipt
+		frappe.db.commit()
 	return {
 		"entry": entry.as_dict(),
 		"store_credit": get_store_credit_summary(parent=entry.parent, customer=entry.customer, limit=50),
+		"auto_application": auto_application,
 	}
 
 

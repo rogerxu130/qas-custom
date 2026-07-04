@@ -147,7 +147,78 @@ def adjust_store_credit(parent: str | None = None, customer: str | None = None, 
 	)
 
 
-def apply_store_credit_to_invoice(invoice_doc):
+def apply_store_credit_to_unpaid_invoices(parent: str | None = None, customer: str | None = None, limit: int = 100):
+	parent, customer = resolve_parent_customer(parent=parent, customer=customer)
+	balance = get_store_credit_balance(parent=parent, customer=customer)
+	summary = {
+		"applied": 0,
+		"balance": balance,
+		"invoices": [],
+		"skipped": False,
+		"reason": None,
+		"skipped_non_course_invoices": 0,
+	}
+	if balance <= 0:
+		summary.update({"skipped": True, "reason": "No store credit available."})
+		return summary
+	if not _doctype_available("Sales Invoice"):
+		summary.update({"skipped": True, "reason": "Sales Invoice is not installed."})
+		return summary
+
+	filters = {"customer": customer, "docstatus": 1}
+	if frappe.db.has_column("Sales Invoice", "outstanding_amount"):
+		filters["outstanding_amount"] = [">", 0.005]
+
+	invoice_names = frappe.get_all(
+		"Sales Invoice",
+		filters=filters,
+		pluck="name",
+		order_by="due_date asc, creation asc",
+		limit=max(1, cint(limit) or 100),
+	)
+	if not invoice_names:
+		summary.update({"skipped": True, "reason": "No submitted unpaid invoices found."})
+		return summary
+
+	for invoice_name in invoice_names:
+		if get_store_credit_balance(parent=parent, customer=customer) <= 0:
+			break
+		invoice_doc = frappe.get_doc("Sales Invoice", invoice_name)
+		if cint(invoice_doc.get("docstatus") or 0) != 1 or _invoice_outstanding_amount(invoice_doc) <= 0.005:
+			continue
+		if not _is_course_invoice(invoice_doc):
+			summary["skipped_non_course_invoices"] += 1
+			continue
+		application = apply_store_credit_to_invoice(
+			invoice_doc,
+			reason="Applied after manual store credit adjustment",
+			notes=_("Automatically applied store credit to existing unpaid invoice {0}.").format(invoice_doc.name),
+		)
+		applied = flt(application.get("applied"))
+		if applied <= 0:
+			continue
+		invoice_doc.add_comment(
+			"Comment",
+			_("Store credit automatically applied after manual adjustment: {0}.").format(applied),
+		)
+		summary["applied"] = flt(summary["applied"]) + applied
+		summary["invoices"].append(
+			{
+				"invoice": invoice_doc.name,
+				"applied": applied,
+				"balance": application.get("balance"),
+				"ledger": application.get("ledger"),
+				"journal_entry": application.get("journal_entry"),
+			}
+		)
+
+	summary["balance"] = get_store_credit_balance(parent=parent, customer=customer)
+	if not summary["invoices"]:
+		summary.update({"skipped": True, "reason": "No eligible course invoices needed store credit."})
+	return summary
+
+
+def apply_store_credit_to_invoice(invoice_doc, *, reason: str | None = None, notes: str | None = None):
 	if not _is_course_invoice(invoice_doc):
 		return {"applied": 0, "balance": 0, "skipped": True, "reason": "Invoice is not course-related."}
 
@@ -187,8 +258,8 @@ def apply_store_credit_to_invoice(invoice_doc):
 		reference_document=invoice_doc.name,
 		source_doctype="Sales Invoice",
 		source_document=invoice_doc.name,
-		reason="Applied on invoice approval",
-		notes=_("Applied store credit to invoice {0}.").format(invoice_doc.name),
+		reason=reason or "Applied on invoice approval",
+		notes=notes or _("Applied store credit to invoice {0}.").format(invoice_doc.name),
 	)
 	journal_entry = ensure_store_credit_journal_entry(invoice_doc, apply_amount, ledger=entry.name)
 	if journal_entry and frappe.db.has_column(LEDGER_DOCTYPE, "journal_entry"):
