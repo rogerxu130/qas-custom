@@ -9,6 +9,7 @@
  "engine": "InnoDB",
  "field_order": [
   "teacher_name",
+  "user",
   "status",
   "contact_section",
   "email",
@@ -24,6 +25,14 @@
    "label": "Teacher Name",
    "reqd": 1,
    "unique": 1
+  },
+  {
+   "fieldname": "user",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Linked User",
+   "options": "User"
   },
   {
    "default": "Active",

@@ -103,10 +103,10 @@ SCHOOL_SETUP_TYPES = {
 	"teacher": {
 		"doctype": "Teacher",
 		"title_field": "teacher_name",
-		"fields": ["name", "teacher_name", "status", "email", "mobile", "phone", "notes", "modified"],
-		"edit_fields": ["teacher_name", "status", "email", "mobile", "phone", "notes"],
+		"fields": ["name", "teacher_name", "user", "status", "email", "mobile", "phone", "notes", "modified"],
+		"edit_fields": ["teacher_name", "user", "status", "email", "mobile", "phone", "notes"],
 		"required": ["teacher_name"],
-		"search_fields": ["name", "teacher_name", "email", "mobile", "phone"],
+		"search_fields": ["name", "teacher_name", "user", "email", "mobile", "phone"],
 		"order_by": "teacher_name asc",
 	},
 }
