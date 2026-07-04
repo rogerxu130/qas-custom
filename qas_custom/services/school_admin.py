@@ -1590,7 +1590,7 @@ def _create_term_enrollment_invoice(enrollment, start_session):
 	if full_term_fee <= 0:
 		frappe.throw(_("Course full term fee is required before generating an invoice."))
 	total_sessions = get_course_number(course, ("total_session_per_term", "total_sessions_per_term", "sessions_per_term")) or session_count
-	unit_rate = flt(full_term_fee) / flt(total_sessions)
+	invoice_amount = _enrollment_invoice_amount(full_term_fee, total_sessions, session_count)
 
 	disable_sales_invoice_auto_notifications()
 	invoice_name = _find_draft_family_invoice(parent=parent, customer=customer, term=enrollment.term)
@@ -1626,7 +1626,7 @@ def _create_term_enrollment_invoice(enrollment, start_session):
 		item_code=item_code,
 		course=course,
 		session_count=session_count,
-		unit_rate=unit_rate,
+		amount=invoice_amount,
 	)
 	_sync_invoice_student_summary(invoice)
 	apply_invoice_payment_snapshot(invoice)
@@ -1690,7 +1690,18 @@ def _invoice_has_enrollment_item(invoice, enrollment_name):
 	return any(item.get("enrollment") == enrollment_name for item in invoice.get("items", []))
 
 
-def _append_enrollment_invoice_item(invoice, *, enrollment, start_session, item_code, course, session_count, unit_rate):
+def _enrollment_invoice_amount(full_term_fee, total_sessions, session_count):
+	full_term_fee = flt(full_term_fee)
+	total_sessions = flt(total_sessions)
+	session_count = flt(session_count)
+	if total_sessions <= 0 or session_count <= 0:
+		return 0
+	if session_count >= total_sessions:
+		return flt(full_term_fee, 2)
+	return flt(full_term_fee * session_count / total_sessions, 2)
+
+
+def _append_enrollment_invoice_item(invoice, *, enrollment, start_session, item_code, course, session_count, amount):
 	student_name = get_student_parent_name(enrollment.student) or enrollment.student
 	student_code = get_student_display_code(enrollment.student) or enrollment.student
 	schedule = invoice_item_schedule({"weekly_timeslot": enrollment.weekly_timeslot})
@@ -1701,8 +1712,8 @@ def _append_enrollment_invoice_item(invoice, *, enrollment, start_session, item_
 			"item_code": item_code,
 			"item_name": course,
 			"description": description,
-			"qty": session_count,
-			"rate": unit_rate,
+			"qty": 1,
+			"rate": amount,
 		},
 	)
 	_set_if_field(item, "qas_line_type", "Course Fee")
