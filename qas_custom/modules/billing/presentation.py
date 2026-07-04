@@ -31,7 +31,15 @@ def get_invoice_print_context(invoice_doc):
 	)
 
 
-def build_parent_invoice_context(invoice_doc, *, store_credit_applied=None, payable_amount=None, payment_link=None, invoice_link=None):
+def build_parent_invoice_context(
+	invoice_doc,
+	*,
+	store_credit_applied=None,
+	payable_amount=None,
+	payment_link=None,
+	invoice_link=None,
+	include_portal_link=True,
+):
 	if store_credit_applied is None or payable_amount is None:
 		amounts = resolve_invoice_print_amounts(
 			invoice_doc,
@@ -42,7 +50,7 @@ def build_parent_invoice_context(invoice_doc, *, store_credit_applied=None, paya
 		payable_amount = amounts["payable_amount"]
 	store_credit = flt(store_credit_applied)
 	payable = flt(payable_amount)
-	portal_link = invoice_link or payment_link or parent_portal_invoice_link(invoice_doc.name)
+	portal_link = (invoice_link or payment_link or parent_portal_invoice_link(invoice_doc.name)) if include_portal_link else ""
 	payment_context = get_invoice_payment_context(invoice_doc)
 	settings = get_invoice_settings()
 	return {

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import frappe
 from frappe import _
-from frappe.utils import escape_html, flt, formatdate, now_datetime
+from frappe.utils import cint, escape_html, flt, formatdate, now_datetime
 from frappe.utils.file_manager import save_file
 from frappe.utils.pdf import get_pdf
 
@@ -412,6 +412,7 @@ def render_parent_invoice_pdf(invoice: str, *, store_credit_applied=None, payabl
 		store_credit_applied=amounts["store_credit_applied"],
 		payable_amount=amounts["payable_amount"],
 		invoice_link=parent_portal_invoice_link(doc.name),
+		include_portal_link=_invoice_portal_links_enabled(),
 	)
 	html = _invoice_pdf_html(context)
 	return get_pdf(html)
@@ -446,7 +447,7 @@ def _invoice_notification_amounts(invoice_doc, *, store_credit_applied=None, pay
 def _invoice_pdf_html(context):
 	rows = "\n".join(_invoice_pdf_item_row(item) for item in context["items"])
 	if not rows:
-		rows = """<tr><td colspan="5" class="muted">Invoice details are available in the Parent Portal.</td></tr>"""
+		rows = """<tr><td colspan="5" class="muted">Invoice details are included in this PDF.</td></tr>"""
 
 	payment_block = _invoice_pdf_payment_block(context)
 	invoice_message = _invoice_pdf_message(context.get("invoice_message"))
@@ -611,10 +612,11 @@ def _invoice_email_message(invoice_doc, event, store_credit_applied, payable_amo
 		store_credit_applied=store_credit_applied,
 		payable_amount=payable_amount,
 		payment_link=payment_link,
+		include_portal_link=_invoice_portal_links_enabled(),
 	)
 	greeting = _invoice_email_greeting(context)
 	intro = (
-		_("Your invoice is ready in the Parent Portal.")
+		_("Your invoice is attached to this email.")
 		if event == "approved"
 		else _("We have resent this invoice for your reference.")
 	)
@@ -628,7 +630,7 @@ def _invoice_email_message(invoice_doc, event, store_credit_applied, payable_amo
 	bank_details = _invoice_email_bank_details(context) if flt(context["payable_amount"]) > 0 else ""
 	rows = "\n".join(_invoice_email_item_row(item) for item in context["items"])
 	if not rows:
-		rows = """<tr><td colspan="4" style="padding:12px;color:#64748b;">Invoice details are available in the Parent Portal.</td></tr>"""
+		rows = """<tr><td colspan="4" style="padding:12px;color:#64748b;">Invoice details are included in the attached PDF.</td></tr>"""
 
 	return """
 		<div style="margin:0;padding:0;background:#f8fafc;font-family:Arial,sans-serif;color:#172033;">
@@ -677,9 +679,7 @@ def _invoice_email_message(invoice_doc, event, store_credit_applied, payable_amo
 
 						<p style="margin:0 0 18px;font-size:15px;line-height:1.5;color:#334155;">{payment_line}</p>
 						{bank_details}
-						<p style="margin:0 0 22px;">
-							<a href="{invoice_link}" style="display:inline-block;background:#e85f47;color:#ffffff;text-decoration:none;border-radius:10px;padding:12px 18px;font-weight:700;">View invoice</a>
-						</p>
+						{portal_action}
 						<p style="margin:0;font-size:13px;line-height:1.5;color:#64748b;">If you have already paid, no further action is needed.</p>
 					</div>
 				</div>
@@ -699,8 +699,21 @@ def _invoice_email_message(invoice_doc, event, store_credit_applied, payable_amo
 		rows=rows,
 		payment_line=payment_line,
 		bank_details=bank_details,
-		invoice_link=context["invoice_link"],
+		portal_action=_invoice_email_portal_action(context),
 	)
+
+
+def _invoice_email_portal_action(context):
+	invoice_link = context.get("invoice_link")
+	if not invoice_link:
+		return ""
+	return '''<p style="margin:0 0 22px;">
+		<a href="{0}" style="display:inline-block;background:#e85f47;color:#ffffff;text-decoration:none;border-radius:10px;padding:12px 18px;font-weight:700;">View invoice</a>
+	</p>'''.format(escape_html(invoice_link))
+
+
+def _invoice_portal_links_enabled():
+	return bool(cint(frappe.conf.get("qas_invoice_portal_links_enabled") or 0))
 
 
 def _school_identity_email_html(context):
@@ -801,6 +814,7 @@ def render_parent_receipt_pdf(invoice: str, *, payment_entry=None, amounts=None,
 		store_credit_applied=amounts["store_credit_applied"],
 		payable_amount=0,
 		invoice_link=parent_portal_invoice_link(doc.name),
+		include_portal_link=_invoice_portal_links_enabled(),
 	)
 	context["receipt"] = payment_context
 	html = _receipt_pdf_html(context)
@@ -834,11 +848,12 @@ def _receipt_email_message(invoice_doc, amounts, payment_context):
 		store_credit_applied=amounts["store_credit_applied"],
 		payable_amount=0,
 		payment_link=parent_portal_invoice_link(invoice_doc.name),
+		include_portal_link=_invoice_portal_links_enabled(),
 	)
 	greeting = _invoice_email_greeting(context)
 	rows = "\n".join(_invoice_email_item_row(item) for item in context["items"])
 	if not rows:
-		rows = """<tr><td colspan="4" style="padding:12px;color:#64748b;">Invoice details are available in the Parent Portal.</td></tr>"""
+		rows = """<tr><td colspan="4" style="padding:12px;color:#64748b;">Invoice details are included in the attached receipt PDF.</td></tr>"""
 
 	return """
 		<div style="margin:0;padding:0;background:#f8fafc;font-family:Arial,sans-serif;color:#172033;">
@@ -900,7 +915,7 @@ def _receipt_pdf_html(context):
 	receipt = context["receipt"]
 	rows = "\n".join(_invoice_pdf_item_row(item) for item in context["items"])
 	if not rows:
-		rows = """<tr><td colspan="5" class="muted">Invoice details are available in the Parent Portal.</td></tr>"""
+		rows = """<tr><td colspan="5" class="muted">Invoice details are included in this receipt PDF.</td></tr>"""
 
 	return """
 <!doctype html>
