@@ -12,6 +12,7 @@ def build_session_option(session, timeslot):
 		"course_session": session.name,
 		"session_date": str(session.session_date) if session.session_date else None,
 		"course": timeslot.course,
+		"class_language": timeslot.get("class_language") or "English",
 		"campus": timeslot.campus,
 		"classroom": timeslot.classroom,
 		"teacher": timeslot.teacher,
@@ -24,12 +25,18 @@ def build_session_option(session, timeslot):
 				session.session_date,
 				timeslot.start_time,
 				timeslot.course,
+				_class_language_label(timeslot),
 				timeslot.campus,
 				timeslot.teacher,
 			]
 			if part
 		),
 	}
+
+
+def _class_language_label(timeslot):
+	language = timeslot.get("class_language") if timeslot else None
+	return "Chinese" if language == "Chinese" else None
 
 
 def get_remaining_sessions(weekly_timeslot: str, start_date):
@@ -59,7 +66,7 @@ def get_session_context(course_session: str):
 	timeslot = frappe.db.get_value(
 		"Weekly Timeslot",
 		session.weekly_timeslot,
-		["name", "term", "course", "campus", "classroom", "teacher", "start_time", "end_time"],
+		["name", "term", "course", "class_language", "campus", "classroom", "teacher", "start_time", "end_time"],
 		as_dict=True,
 	)
 	if not timeslot:
@@ -74,7 +81,7 @@ def get_weekly_timeslot_map(timeslot_ids: list[str]):
 	rows = frappe.get_all(
 		"Weekly Timeslot",
 		filters={"name": ["in", timeslot_ids]},
-		fields=["name", "course", "campus", "classroom", "teacher", "day_of_week", "start_time", "end_time"],
+		fields=["name", "course", "class_language", "campus", "classroom", "teacher", "day_of_week", "start_time", "end_time"],
 	)
 	return {row["name"]: row for row in rows}
 

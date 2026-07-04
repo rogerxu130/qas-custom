@@ -108,7 +108,7 @@ def get_campus_admin_contacts_data(from_date=None, to_date=None, campus=None, co
 	timeslots = frappe.get_all(
 		"Weekly Timeslot",
 		filters={"campus": ["in", campuses]},
-		fields=["name", "course", "campus", "classroom", "teacher", "day_of_week", "start_time", "end_time"],
+		fields=["name", "course", "class_language", "campus", "classroom", "teacher", "day_of_week", "start_time", "end_time"],
 	)
 	if not timeslots:
 		return {"sessions": [], "contacts": []}
@@ -159,6 +159,7 @@ def get_campus_admin_contacts_data(from_date=None, to_date=None, campus=None, co
 			"session_date": str(session.session_date) if session else None,
 			"session_status": session.status if session else None,
 			"course": timeslot.course if timeslot else None,
+			"class_language": (timeslot.get("class_language") if timeslot else None) or "English",
 			"campus": timeslot.campus if timeslot else None,
 			"classroom": timeslot.classroom if timeslot else None,
 			"teacher": timeslot.teacher if timeslot else None,
@@ -393,7 +394,7 @@ def _get_attendance_dashboard_items(campuses, start_date, end_date, enrollment_t
 	timeslots = frappe.get_all(
 		"Weekly Timeslot",
 		filters={"campus": ["in", campuses]},
-		fields=["name", "course", "campus", "classroom", "start_time", "end_time"],
+		fields=["name", "course", "class_language", "campus", "classroom", "start_time", "end_time"],
 	)
 	if not timeslots:
 		return []
@@ -560,6 +561,7 @@ def _build_contact_session_item(session, timeslot, contact_count=0):
 		"session_date": str(session.session_date) if session.session_date else None,
 		"status": session.status,
 		"course": timeslot.course if timeslot else None,
+		"class_language": (timeslot.get("class_language") if timeslot else None) or "English",
 		"campus": timeslot.campus if timeslot else None,
 		"classroom": timeslot.classroom if timeslot else None,
 		"teacher": timeslot.teacher if timeslot else None,

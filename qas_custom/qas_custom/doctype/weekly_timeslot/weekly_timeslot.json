@@ -26,6 +26,16 @@
    "reqd": 1
   },
   {
+   "default": "English",
+   "fieldname": "class_language",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Class Language",
+   "options": "English\nChinese",
+   "reqd": 1
+  },
+  {
    "fieldname": "campus",
    "fieldtype": "Link",
    "in_list_view": 1,
@@ -100,5 +110,18 @@
  ],
  "row_format": "Dynamic",
  "rows_threshold_for_grid_search": 20,
- "states": []
+ "states": [],
+ "field_order": [
+  "detail_section",
+  "term",
+  "course",
+  "class_language",
+  "campus",
+  "classroom",
+  "teacher",
+  "day_of_week",
+  "start_time",
+  "end_time",
+  "status"
+ ]
 }

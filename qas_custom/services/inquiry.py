@@ -979,7 +979,7 @@ def _get_session_context(course_session: str | None):
 	timeslot = frappe.db.get_value(
 		"Weekly Timeslot",
 		session.get("weekly_timeslot"),
-		["name", "course", "campus", "classroom", "teacher", "start_time", "end_time"],
+		["name", "course", "class_language", "campus", "classroom", "teacher", "start_time", "end_time"],
 		as_dict=True,
 	)
 	if not timeslot:

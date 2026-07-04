@@ -37,7 +37,7 @@ def get_conversion_session_options(inquiry: str | None, start_date=None, course=
 	timeslots = frappe.get_all(
 		"Weekly Timeslot",
 		filters=timeslot_filters,
-		fields=["name", "course", "campus", "classroom", "teacher", "start_time", "end_time", "term"],
+		fields=["name", "course", "class_language", "campus", "classroom", "teacher", "start_time", "end_time", "term"],
 		order_by="course asc, start_time asc",
 	)
 	if not timeslots:

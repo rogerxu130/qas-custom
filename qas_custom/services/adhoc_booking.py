@@ -63,7 +63,7 @@ def get_available_sessions_data(student=None, course=None, campus=None, date_fro
 	timeslots = frappe.get_all(
 		"Weekly Timeslot",
 		filters=timeslot_filters,
-		fields=["name", "course", "campus", "classroom", "teacher", "start_time", "end_time"],
+		fields=["name", "course", "class_language", "campus", "classroom", "teacher", "start_time", "end_time"],
 		order_by="campus asc, start_time asc",
 	)
 	if not timeslots:
@@ -278,7 +278,7 @@ def validate_booking_context(parent, student: str, course_session: str | None):
 	timeslot = frappe.db.get_value(
 		"Weekly Timeslot",
 		session.get("weekly_timeslot"),
-		["name", "course", "campus", "classroom", "teacher", "start_time", "end_time"],
+		["name", "course", "class_language", "campus", "classroom", "teacher", "start_time", "end_time"],
 		as_dict=True,
 	)
 	if not timeslot:
@@ -388,6 +388,7 @@ def build_session_item(session, timeslot, student=None):
 		"session_id": session.name,
 		"student": student,
 		"course": timeslot.get("course"),
+		"class_language": timeslot.get("class_language") or "English",
 		"campus": timeslot.get("campus"),
 		"classroom": timeslot.get("classroom"),
 		"session_date": str(session.get("session_date")) if session.get("session_date") else None,
