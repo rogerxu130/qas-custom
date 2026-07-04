@@ -31,8 +31,13 @@ from qas_custom.services.school_admin import (
 	cancel_school_admin_invoice_data,
 	convert_school_admin_inquiry_data,
 	create_school_admin_enrollment_data,
+	create_school_admin_enrollment_attendance_data,
 	create_school_admin_enrollment_invoice_data,
+	create_school_admin_family_attendance_data,
+	create_school_admin_family_invoice_data,
 	create_school_admin_manual_invoice_data,
+	create_school_admin_term_invoices_data,
+	create_school_admin_term_attendance_data,
 	create_school_admin_term_data,
 	create_school_admin_weekly_timeslot_data,
 	delete_school_admin_draft_invoice_data,
@@ -458,8 +463,33 @@ def school_admin_activate_enrollment(enrollment=None, payload=None):
 
 
 @frappe.whitelist()
+def school_admin_create_enrollment_attendance(enrollment=None, payload=None):
+	return create_school_admin_enrollment_attendance_data(enrollment=enrollment, payload=payload)
+
+
+@frappe.whitelist()
 def school_admin_create_enrollment_invoice(enrollment=None, payload=None):
 	return create_school_admin_enrollment_invoice_data(enrollment=enrollment, payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_create_family_attendance(parent=None, customer=None, payload=None):
+	return create_school_admin_family_attendance_data(parent=parent, customer=customer, payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_create_family_invoice(parent=None, customer=None, payload=None):
+	return create_school_admin_family_invoice_data(parent=parent, customer=customer, payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_create_term_invoices(term=None, payload=None):
+	return create_school_admin_term_invoices_data(term=term, payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_create_term_attendance(term=None, payload=None):
+	return create_school_admin_term_attendance_data(term=term, payload=payload)
 
 
 @frappe.whitelist()

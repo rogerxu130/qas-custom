@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import frappe
-from frappe.utils import add_days, cint, nowdate
+from frappe.utils import add_days, cint, nowdate, get_url
 
 from qas_custom.modules.common import has_field, set_if_field
 
@@ -10,6 +10,7 @@ SETTINGS_DOCTYPE = "QAS Invoice Settings"
 
 DEFAULT_INVOICE_SETTINGS = {
 	"school_name": "Queensland Art School",
+	"school_logo": "/assets/qas_custom/images/qas-logo.png",
 	"legal_name": "",
 	"abn": "",
 	"school_email": "",
@@ -39,19 +40,19 @@ SNAPSHOT_FIELD_MAP = {
 def get_invoice_settings():
 	settings = dict(DEFAULT_INVOICE_SETTINGS)
 	if not settings_doctype_available():
-		return settings
+		return _with_public_logo_url(settings)
 
 	try:
 		doc = frappe.get_single(SETTINGS_DOCTYPE)
 	except (KeyError, ImportError, frappe.DoesNotExistError):
-		return settings
+		return _with_public_logo_url(settings)
 	for fieldname in settings:
 		value = doc.get(fieldname)
 		if fieldname == "payment_due_days":
 			settings[fieldname] = _normalize_due_days(value)
 		elif value:
 			settings[fieldname] = value
-	return settings
+	return _with_public_logo_url(settings)
 
 
 def update_invoice_settings(payload):
@@ -67,6 +68,15 @@ def update_invoice_settings(payload):
 				doc.set(fieldname, (payload.get(fieldname) or "").strip())
 	doc.save(ignore_permissions=True)
 	return get_invoice_settings()
+
+
+def get_public_school_branding():
+	settings = get_invoice_settings()
+	return {
+		"school_name": settings.get("school_name") or DEFAULT_INVOICE_SETTINGS["school_name"],
+		"school_logo": settings.get("school_logo") or "",
+		"school_logo_url": settings.get("school_logo_url") or "",
+	}
 
 
 def settings_doctype_available():
@@ -117,6 +127,22 @@ def apply_default_invoice_dates(invoice_doc, *, force: bool = False):
 			row.due_date = invoice_doc.due_date
 			changed = True
 	return changed
+
+
+def _with_public_logo_url(settings):
+	settings["school_logo_url"] = _public_asset_url(settings.get("school_logo"))
+	return settings
+
+
+def _public_asset_url(value):
+	path = str(value or "").strip()
+	if not path:
+		return ""
+	if path.startswith(("http://", "https://")):
+		return path
+	if not path.startswith("/"):
+		path = f"/files/{path}"
+	return get_url(path)
 
 
 def _normalize_due_days(value):

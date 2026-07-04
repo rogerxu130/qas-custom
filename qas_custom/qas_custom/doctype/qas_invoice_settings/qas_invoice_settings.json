@@ -8,6 +8,7 @@
  "field_order": [
   "school_section",
   "school_name",
+  "school_logo",
   "legal_name",
   "abn",
   "school_email",
@@ -36,6 +37,12 @@
    "fieldname": "school_name",
    "fieldtype": "Data",
    "label": "School Name"
+  },
+  {
+   "fieldname": "school_logo",
+   "fieldtype": "Attach Image",
+   "label": "School Logo",
+   "default": "/assets/qas_custom/images/qas-logo.png"
   },
   {
    "fieldname": "legal_name",

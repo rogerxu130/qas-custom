@@ -1,5 +1,6 @@
 import frappe
 
+from qas_custom.modules.billing.invoice_settings import get_public_school_branding
 from qas_custom.services.announcements import get_parent_announcements_data
 from qas_custom.services.parent_feed import (
     get_parent_feed_data,
@@ -33,6 +34,11 @@ def ping():
         "module": "parent_portal",
         "message": "Parent portal API is reachable.",
     }
+
+
+@frappe.whitelist(allow_guest=True)
+def parent_portal_get_branding():
+    return get_public_school_branding()
 
 
 def _not_implemented_response(endpoint_name: str):

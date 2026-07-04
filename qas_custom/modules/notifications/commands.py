@@ -461,6 +461,7 @@ def _invoice_pdf_html(context):
 		body {{ color: #172033; font-family: Arial, sans-serif; font-size: 12px; line-height: 1.45; }}
 		* {{ box-sizing: border-box; }}
 		.header {{ border-bottom: 2px solid #172033; margin-bottom: 22px; padding-bottom: 18px; width: 100%; }}
+		.logo {{ height: 46px; margin: 0 0 10px; max-width: 150px; object-fit: contain; }}
 		.brand {{ color: #e85f47; font-size: 12px; font-weight: 700; letter-spacing: .04em; margin: 0 0 8px; text-transform: uppercase; }}
 		h1 {{ font-size: 28px; font-weight: 800; margin: 0; }}
 		.muted {{ color: #64748b; }}
@@ -485,6 +486,7 @@ def _invoice_pdf_html(context):
 	<table class="header">
 		<tr>
 			<td>
+				{school_logo}
 				<p class="brand">{school_name}</p>
 				<h1>Invoice</h1>
 				<div class="muted">{invoice}</div>
@@ -532,6 +534,7 @@ def _invoice_pdf_html(context):
 	""".format(
 		invoice=escape_html(context["invoice"]),
 		school_name=escape_html(context.get("school_name") or "Queensland Art School"),
+		school_logo=_school_logo_pdf_html(context),
 		school_identity=_school_identity_pdf_html(context),
 		due_date=escape_html(context["due_date"] or "-"),
 		posting_date=escape_html(context["posting_date"] or "-"),
@@ -637,6 +640,7 @@ def _invoice_email_message(invoice_doc, event, store_credit_applied, payable_amo
 			<div style="max-width:640px;margin:0 auto;padding:24px;">
 				<div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;">
 					<div style="padding:22px 24px;background:#172033;color:#ffffff;">
+						{school_logo}
 						<p style="margin:0 0 6px;font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:#f7b6a4;">{school_name}</p>
 						<h1 style="margin:0;font-size:24px;line-height:1.3;">Invoice {invoice}</h1>
 						{school_identity}
@@ -688,6 +692,7 @@ def _invoice_email_message(invoice_doc, event, store_credit_applied, payable_amo
 	""".format(
 		invoice=context["invoice"],
 		school_name=escape_html(context.get("school_name") or "Queensland Art School"),
+		school_logo=_school_logo_email_html(context),
 		school_identity=_school_identity_email_html(context),
 		greeting=greeting,
 		intro=intro,
@@ -714,6 +719,26 @@ def _invoice_email_portal_action(context):
 
 def _invoice_portal_links_enabled():
 	return bool(cint(frappe.conf.get("qas_invoice_portal_links_enabled") or 0))
+
+
+def _school_logo_email_html(context):
+	logo = context.get("school_logo_url") or context.get("school_logo")
+	if not logo:
+		return ""
+	return '''<img src="{0}" alt="{1}" style="display:block;height:54px;max-width:160px;object-fit:contain;margin:0 0 12px;" />'''.format(
+		escape_html(logo),
+		escape_html(context.get("school_name") or "Queensland Art School"),
+	)
+
+
+def _school_logo_pdf_html(context):
+	logo = context.get("school_logo_url") or context.get("school_logo")
+	if not logo:
+		return ""
+	return '''<img class="logo" src="{0}" alt="{1}" />'''.format(
+		escape_html(logo),
+		escape_html(context.get("school_name") or "Queensland Art School"),
+	)
 
 
 def _school_identity_email_html(context):
@@ -860,6 +885,7 @@ def _receipt_email_message(invoice_doc, amounts, payment_context):
 			<div style="max-width:640px;margin:0 auto;padding:24px;">
 				<div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;">
 					<div style="padding:22px 24px;background:#172033;color:#ffffff;">
+						{school_logo}
 						<p style="margin:0 0 6px;font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:#f7b6a4;">{school_name}</p>
 						<h1 style="margin:0;font-size:24px;line-height:1.3;">Payment receipt</h1>
 						<div style="margin-top:6px;color:#cbd5e1;">Invoice {invoice}</div>
@@ -898,6 +924,7 @@ def _receipt_email_message(invoice_doc, amounts, payment_context):
 	""".format(
 		invoice=escape_html(context["invoice"]),
 		school_name=escape_html(context.get("school_name") or "Queensland Art School"),
+		school_logo=_school_logo_email_html(context),
 		school_identity=_school_identity_email_html(context),
 		greeting=greeting,
 		payment_date=escape_html(payment_context.get("payment_date_display") or "-"),
@@ -927,6 +954,7 @@ def _receipt_pdf_html(context):
 		body {{ color: #172033; font-family: Arial, sans-serif; font-size: 12px; line-height: 1.45; }}
 		* {{ box-sizing: border-box; }}
 		.header {{ border-bottom: 2px solid #172033; margin-bottom: 22px; padding-bottom: 18px; width: 100%; }}
+		.logo {{ height: 46px; margin: 0 0 10px; max-width: 150px; object-fit: contain; }}
 		.brand {{ color: #e85f47; font-size: 12px; font-weight: 700; letter-spacing: .04em; margin: 0 0 8px; text-transform: uppercase; }}
 		h1 {{ font-size: 28px; font-weight: 800; margin: 0; }}
 		.muted {{ color: #64748b; }}
@@ -948,6 +976,7 @@ def _receipt_pdf_html(context):
 	<table class="header">
 		<tr>
 			<td>
+				{school_logo}
 				<p class="brand">{school_name}</p>
 				<h1>Payment receipt</h1>
 				<div class="muted">Invoice {invoice}</div>
@@ -995,6 +1024,7 @@ def _receipt_pdf_html(context):
 	""".format(
 		invoice=escape_html(context["invoice"]),
 		school_name=escape_html(context.get("school_name") or "Queensland Art School"),
+		school_logo=_school_logo_pdf_html(context),
 		school_identity=_school_identity_pdf_html(context),
 		payment_date=escape_html(receipt.get("payment_date_display") or "-"),
 		payment_method=escape_html(receipt.get("payment_method") or "Payment"),

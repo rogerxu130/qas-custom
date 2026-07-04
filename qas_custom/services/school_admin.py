@@ -1225,6 +1225,38 @@ def populate_school_admin_term_data(term=None):
 	return _populate_planned_enrollments_for_term(term)
 
 
+def populate_school_admin_term_sessions_data(term=None):
+	_require_school_admin()
+	if not term:
+		frappe.throw(_("Term is required."))
+	if not frappe.db.exists("Term", term):
+		frappe.throw(_("Term was not found."))
+	created_sessions = _generate_sessions_for_term(term)
+	frappe.db.commit()
+	return {
+		"term": get_school_admin_term_data(term),
+		"summary": {
+			"created_sessions": len(created_sessions),
+		},
+	}
+
+
+def create_school_admin_term_attendance_data(term=None, payload=None):
+	_require_school_admin()
+	if not term:
+		frappe.throw(_("Term is required."))
+	if not frappe.db.exists("Term", term):
+		frappe.throw(_("Term was not found."))
+	payload = _get_payload(payload)
+	names = _get_attendance_candidate_enrollment_names(term=term)
+	summary = _create_attendance_for_enrollment_names(names, payload=payload)
+	frappe.db.commit()
+	return {
+		"term": get_school_admin_term_data(term),
+		"summary": summary,
+	}
+
+
 def _term_row_payload(row):
 	payload = _normalize_row_payload("Term", row)
 	term = payload.get("name")
@@ -1391,7 +1423,7 @@ def _populate_planned_enrollments_for_term(term):
 	term_doc = frappe.get_doc("Term", term)
 	created_sessions = _generate_sessions_for_term(term)
 	activated_enrollments = 0
-	created_invoices = 0
+	created_attendance_entries = 0
 	skipped = 0
 	errors = 0
 	error_rows = []
@@ -1410,8 +1442,7 @@ def _populate_planned_enrollments_for_term(term):
 			doc = frappe.get_doc("Enrollment", row.name)
 			result = _activate_planned_enrollment(doc, term_doc)
 			activated_enrollments += 1
-			if result.get("invoice_created"):
-				created_invoices += 1
+			created_attendance_entries += cint(result.get("attendance_entries") or 0)
 		except Exception as exc:
 			frappe.db.rollback(save_point=savepoint)
 			errors += 1
@@ -1423,7 +1454,7 @@ def _populate_planned_enrollments_for_term(term):
 		"summary": {
 			"created_sessions": len(created_sessions),
 			"created_enrollments": activated_enrollments,
-			"created_invoices": created_invoices,
+			"created_attendance_entries": created_attendance_entries,
 			"skipped": skipped,
 			"errors": errors,
 			"error_rows": error_rows,
@@ -1465,18 +1496,11 @@ def _activate_planned_enrollment(enrollment, term_doc, start_session=None):
 	start_date = frappe.db.get_value("Course Sessions", start_session, "session_date")
 	_set_if_field(enrollment, "enrollment_date", start_date or term_doc.get("start_date") or enrollment.get("enrollment_date") or today())
 	enrollment.save(ignore_permissions=True)
-	_create_enrollment_attendance_entries(enrollment)
-	invoice = _create_term_enrollment_invoice(enrollment, start_session)
-	if invoice:
-		_set_if_field(enrollment, "invoice", invoice.name)
-		_set_if_field(enrollment, "invoice_status", "Draft")
-		_set_if_field(enrollment, "invoice_amount", invoice.get("grand_total"))
-		enrollment.save(ignore_permissions=True)
+	attendance_entries = _create_enrollment_attendance_entries(enrollment)
 	_add_comment("Enrollment", enrollment.name, _("Planned enrollment activated for term {0}.").format(term_doc.name))
 	return {
 		"enrollment": enrollment.name,
-		"invoice": invoice.name if invoice else None,
-		"invoice_created": bool(invoice and getattr(invoice.flags, "qas_was_created", False)),
+		"attendance_entries": len(attendance_entries),
 	}
 
 
@@ -1754,8 +1778,6 @@ def create_school_admin_enrollment_data(payload=None):
 	_apply_enrollment_payload(doc, payload)
 	_validate_unique_open_enrollment(doc)
 	doc.insert(ignore_permissions=True)
-	if doc.get("status") == "Active":
-		_create_enrollment_attendance_entries(doc)
 	_add_comment("Enrollment", doc.name, "Enrollment created by School Admin.")
 	frappe.db.commit()
 	return _build_enrollment_payload(doc)
@@ -1772,11 +1794,8 @@ def update_school_admin_enrollment_data(enrollment=None, payload=None):
 	_apply_enrollment_payload(doc, payload)
 	_validate_unique_open_enrollment(doc)
 	doc.save(ignore_permissions=True)
-	if doc.get("status") == "Active" and payload.get("weekly_timeslot") and payload.get("weekly_timeslot") != previous_timeslot:
+	if previous_status == "Active" and payload.get("weekly_timeslot") and payload.get("weekly_timeslot") != previous_timeslot:
 		_cancel_future_enrollment_attendance(doc.name, effective_date=payload.get("effective_date") or today())
-		_create_enrollment_attendance_entries(doc, start_date=payload.get("effective_date") or today())
-	elif doc.get("status") == "Active" and previous_status != "Active":
-		_create_enrollment_attendance_entries(doc, start_date=payload.get("effective_date") or today())
 	_add_comment("Enrollment", doc.name, "Enrollment updated by School Admin.")
 	frappe.db.commit()
 	return _build_enrollment_payload(doc)
@@ -1790,8 +1809,6 @@ def activate_school_admin_enrollment_data(enrollment=None, payload=None):
 	doc = frappe.get_doc("Enrollment", enrollment)
 	if doc.get("status") != "Planned":
 		frappe.throw(_("Only planned enrollments can be activated."))
-	if doc.get("invoice"):
-		frappe.throw(_("This enrollment already has an invoice."))
 	payload.pop("status", None)
 	_apply_enrollment_payload(doc, payload)
 	_validate_unique_open_enrollment(doc)
@@ -1805,7 +1822,54 @@ def activate_school_admin_enrollment_data(enrollment=None, payload=None):
 	activated = frappe.get_doc("Enrollment", result["enrollment"])
 	return {
 		"enrollment": _build_enrollment_payload(activated),
-		"invoice": result.get("invoice"),
+		"attendance_entries": result.get("attendance_entries") or 0,
+	}
+
+
+def create_school_admin_enrollment_attendance_data(enrollment=None, payload=None):
+	_require_school_admin()
+	if not enrollment:
+		frappe.throw(_("Enrollment is required."))
+	payload = _get_payload(payload)
+	doc = frappe.get_doc("Enrollment", enrollment)
+	if doc.get("status") == "Planned":
+		payload.pop("status", None)
+		_apply_enrollment_payload(doc, payload)
+		_validate_unique_open_enrollment(doc)
+		term_doc = frappe.get_doc("Term", doc.term)
+		result = _activate_planned_enrollment(
+			doc,
+			term_doc,
+			start_session=payload.get("start_course_session") or doc.get("start_course_session"),
+		)
+		frappe.db.commit()
+		activated = frappe.get_doc("Enrollment", result["enrollment"])
+		return {
+			"enrollment": _build_enrollment_payload(activated),
+			"attendance_entries": result.get("attendance_entries") or 0,
+		}
+	if doc.get("status") != "Active":
+		frappe.throw(_("Set the enrollment to Planned or Active before creating attendance."))
+	if payload:
+		_apply_enrollment_payload(doc, payload)
+		_validate_unique_open_enrollment(doc)
+	term_doc = frappe.get_doc("Term", doc.term)
+	start_session = _validate_enrollment_start_session(
+		payload.get("start_course_session") or doc.get("start_course_session") or _first_course_session_for_timeslot(doc.weekly_timeslot, term_doc),
+		doc.weekly_timeslot,
+		term_doc,
+	)
+	_set_if_field(doc, "start_course_session", start_session)
+	if not doc.get("enrollment_date"):
+		start_date = frappe.db.get_value("Course Sessions", start_session, "session_date")
+		_set_if_field(doc, "enrollment_date", start_date or term_doc.get("start_date") or today())
+	doc.save(ignore_permissions=True)
+	attendance_entries = _create_enrollment_attendance_entries(doc)
+	_add_comment("Enrollment", doc.name, _("Attendance prepared by School Admin."))
+	frappe.db.commit()
+	return {
+		"enrollment": _build_enrollment_payload(doc),
+		"attendance_entries": len(attendance_entries),
 	}
 
 
@@ -1844,6 +1908,60 @@ def create_school_admin_enrollment_invoice_data(enrollment=None, payload=None):
 	_add_comment("Enrollment", doc.name, _("Draft invoice {0} created by School Admin.").format(invoice.name))
 	frappe.db.commit()
 	return {"enrollment": _build_enrollment_payload(doc), "invoice": invoice.name}
+
+
+def create_school_admin_family_attendance_data(parent=None, customer=None, payload=None):
+	_require_school_admin()
+	payload = _get_payload(payload)
+	context = _resolve_family_context(parent=parent, customer=customer)
+	parent_id = context.get("parent")
+	customer_id = context.get("customer")
+	students = _get_family_students(parent_id)
+	student_ids = [row.get("name") for row in students if row.get("name")]
+	if not parent_id and not student_ids:
+		frappe.throw(_("Family was not found."))
+	names = _get_attendance_candidate_enrollment_names(parent=parent_id, students=student_ids)
+	summary = _create_attendance_for_enrollment_names(names, payload=payload)
+	frappe.db.commit()
+	return {
+		"family": get_school_admin_family_data(parent=parent_id, customer=customer_id),
+		"summary": summary,
+	}
+
+
+def create_school_admin_family_invoice_data(parent=None, customer=None, payload=None):
+	_require_school_admin()
+	payload = _get_payload(payload)
+	context = _resolve_family_context(parent=parent, customer=customer)
+	parent_id = context.get("parent")
+	customer_id = context.get("customer")
+	students = _get_family_students(parent_id)
+	student_ids = [row.get("name") for row in students if row.get("name")]
+	if not parent_id and not student_ids:
+		frappe.throw(_("Family was not found."))
+	names = _get_invoice_candidate_enrollment_names(parent=parent_id, students=student_ids)
+	summary = _create_invoices_for_enrollment_names(names, payload=payload)
+	frappe.db.commit()
+	return {
+		"family": get_school_admin_family_data(parent=parent_id, customer=customer_id),
+		"summary": summary,
+	}
+
+
+def create_school_admin_term_invoices_data(term=None, payload=None):
+	_require_school_admin()
+	if not term:
+		frappe.throw(_("Term is required."))
+	if not frappe.db.exists("Term", term):
+		frappe.throw(_("Term was not found."))
+	payload = _get_payload(payload)
+	names = _get_invoice_candidate_enrollment_names(term=term)
+	summary = _create_invoices_for_enrollment_names(names, payload=payload)
+	frappe.db.commit()
+	return {
+		"term": get_school_admin_term_data(term),
+		"summary": summary,
+	}
 
 
 def transfer_school_admin_enrollment_data(enrollment=None, payload=None):
@@ -3412,6 +3530,54 @@ def _get_enrollment_rows(parent=None, students=None, filters=None, limit=80):
 	return _attach_course_labels([_normalize_row_payload("Enrollment", row) for row in rows])
 
 
+def _get_attendance_candidate_enrollment_names(parent=None, students=None, term=None):
+	if not _doctype_available("Enrollment"):
+		return []
+	filters = {
+		"status": ["in", ["Planned", "Active"]],
+		"enrollment_type": "Full-Term",
+	}
+	if parent:
+		filters["parent"] = parent
+	elif students:
+		filters["student"] = ["in", students]
+	if term:
+		filters["term"] = term
+	if not parent and not students and not term:
+		return []
+	return frappe.get_all(
+		"Enrollment",
+		filters=filters,
+		pluck="name",
+		order_by="weekly_timeslot asc, student asc",
+		limit_page_length=0,
+	)
+
+
+def _get_invoice_candidate_enrollment_names(parent=None, students=None, term=None):
+	if not _doctype_available("Enrollment"):
+		return []
+	filters = {
+		"status": "Active",
+		"enrollment_type": "Full-Term",
+	}
+	if parent:
+		filters["parent"] = parent
+	elif students:
+		filters["student"] = ["in", students]
+	if term:
+		filters["term"] = term
+	if not parent and not students and not term:
+		return []
+	return frappe.get_all(
+		"Enrollment",
+		filters=filters,
+		pluck="name",
+		order_by="parent asc, term asc, weekly_timeslot asc, student asc",
+		limit_page_length=0,
+	)
+
+
 def _apply_enrollment_payload(doc, payload):
 	for fieldname in [
 		"student",
@@ -3457,6 +3623,131 @@ def _create_enrollment_attendance_entries(doc, start_date=None):
 	rows = frappe.get_all("Course Sessions", filters=filters, fields=["name", "session_date"], order_by="session_date asc")
 	create_full_term_attendance_entries(rows, doc.student, doc.name)
 	return [row.name for row in rows]
+
+
+def _create_attendance_for_enrollment_names(enrollment_names, payload=None):
+	payload = payload or {}
+	summary = {
+		"eligible": len(enrollment_names or []),
+		"activated_enrollments": 0,
+		"attendance_entries": 0,
+		"skipped": 0,
+		"errors": 0,
+		"error_rows": [],
+	}
+	for enrollment in enrollment_names or []:
+		savepoint = f"attendance_enrollment_{enrollment}".replace("-", "_")
+		frappe.db.savepoint(savepoint)
+		try:
+			doc = frappe.get_doc("Enrollment", enrollment)
+			if doc.get("status") == "Planned":
+				term_doc = frappe.get_doc("Term", doc.term)
+				result = _activate_planned_enrollment(
+					doc,
+					term_doc,
+					start_session=payload.get("start_course_session") or doc.get("start_course_session"),
+				)
+				summary["activated_enrollments"] += 1
+				summary["attendance_entries"] += cint(result.get("attendance_entries") or 0)
+				continue
+			if doc.get("status") != "Active" or doc.get("enrollment_type") != "Full-Term":
+				summary["skipped"] += 1
+				continue
+			term_doc = frappe.get_doc("Term", doc.term)
+			start_session = _validate_enrollment_start_session(
+				payload.get("start_course_session") or doc.get("start_course_session") or _first_course_session_for_timeslot(doc.weekly_timeslot, term_doc),
+				doc.weekly_timeslot,
+				term_doc,
+			)
+			_set_if_field(doc, "start_course_session", start_session)
+			if not doc.get("enrollment_date"):
+				start_date = frappe.db.get_value("Course Sessions", start_session, "session_date")
+				_set_if_field(doc, "enrollment_date", start_date or term_doc.get("start_date") or today())
+			doc.save(ignore_permissions=True)
+			attendance_entries = _create_enrollment_attendance_entries(doc)
+			_add_comment("Enrollment", doc.name, _("Attendance prepared by School Admin."))
+			summary["attendance_entries"] += len(attendance_entries)
+		except Exception as exc:
+			frappe.db.rollback(save_point=savepoint)
+			summary["errors"] += 1
+			summary["error_rows"].append({"enrollment": enrollment, "error": _bulk_action_error_message(exc)})
+	return summary
+
+
+def _create_invoices_for_enrollment_names(enrollment_names, payload=None):
+	payload = payload or {}
+	summary = {
+		"eligible": len(enrollment_names or []),
+		"created_invoices": 0,
+		"invoice_items": 0,
+		"skipped": 0,
+		"errors": 0,
+		"invoices": [],
+		"warnings": [],
+		"error_rows": [],
+	}
+	created_invoice_names = set()
+	invoice_names = set()
+	for enrollment in enrollment_names or []:
+		savepoint = f"invoice_enrollment_{enrollment}".replace("-", "_")
+		frappe.db.savepoint(savepoint)
+		try:
+			doc = frappe.get_doc("Enrollment", enrollment)
+			if doc.get("status") != "Active" or doc.get("enrollment_type") != "Full-Term":
+				summary["skipped"] += 1
+				continue
+			existing_invoice = _existing_invoice_for_enrollment(doc)
+			if existing_invoice:
+				summary["skipped"] += 1
+				continue
+			if not _enrollment_has_attendance(doc.name):
+				summary["warnings"].append({
+					"enrollment": doc.name,
+					"warning": _("No attendance rows found for this enrollment."),
+				})
+			term_doc = frappe.get_doc("Term", doc.term)
+			start_session = _validate_enrollment_start_session(
+				payload.get("start_course_session") or doc.get("start_course_session") or _first_course_session_for_timeslot(doc.weekly_timeslot, term_doc),
+				doc.weekly_timeslot,
+				term_doc,
+			)
+			timeslot_course = frappe.db.get_value("Weekly Timeslot", doc.weekly_timeslot, "course")
+			_set_if_field(doc, "start_course_session", start_session)
+			_set_if_field(doc, "course", doc.get("course") or timeslot_course)
+			if not doc.get("enrollment_date"):
+				start_date = frappe.db.get_value("Course Sessions", start_session, "session_date")
+				_set_if_field(doc, "enrollment_date", start_date or term_doc.get("start_date") or today())
+			doc.save(ignore_permissions=True)
+			invoice = _create_term_enrollment_invoice(doc, start_session)
+			_set_if_field(doc, "invoice", invoice.name)
+			_set_if_field(doc, "invoice_status", "Draft")
+			_set_if_field(doc, "invoice_amount", invoice.get("grand_total"))
+			doc.save(ignore_permissions=True)
+			_add_comment("Enrollment", doc.name, _("Draft invoice {0} created by School Admin.").format(invoice.name))
+			invoice_names.add(invoice.name)
+			if getattr(invoice.flags, "qas_was_created", False):
+				created_invoice_names.add(invoice.name)
+			summary["invoice_items"] += 1
+		except Exception as exc:
+			frappe.db.rollback(save_point=savepoint)
+			summary["errors"] += 1
+			summary["error_rows"].append({"enrollment": enrollment, "error": _bulk_action_error_message(exc)})
+	summary["created_invoices"] = len(created_invoice_names)
+	summary["invoices"] = sorted(invoice_names)
+	return summary
+
+
+def _enrollment_has_attendance(enrollment):
+	if not enrollment or not _doctype_available("Class Attendance Entry"):
+		return False
+	return bool(frappe.db.exists(
+		"Class Attendance Entry",
+		{
+			"source_doctype": "Enrollment",
+			"source_document": enrollment,
+			"status": ["!=", "Cancelled"],
+		},
+	))
 
 
 def _cancel_future_enrollment_attendance(enrollment, effective_date=None):

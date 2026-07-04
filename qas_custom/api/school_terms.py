@@ -6,6 +6,7 @@ from qas_custom.services.school_admin import (
 	get_school_admin_term_data,
 	get_school_admin_terms_data,
 	populate_school_admin_term_data,
+	populate_school_admin_term_sessions_data,
 	update_school_admin_term_data,
 )
 
@@ -38,3 +39,8 @@ def school_terms_copy_term(payload=None):
 @frappe.whitelist()
 def school_terms_populate_term(term=None, plan=None):
 	return populate_school_admin_term_data(term=term or plan)
+
+
+@frappe.whitelist()
+def school_terms_populate_sessions(term=None, plan=None):
+	return populate_school_admin_term_sessions_data(term=term or plan)
