@@ -40,25 +40,33 @@ def run_parent_student_import_data(payload=None):
 	result = _empty_result(dry_run=False)
 	result["input"] = preview.get("input")
 	result["warnings"] = list(preview.get("warnings") or [])
-	for parent_record in batch.get("parents", []):
-		savepoint = f"qas_parent_import_{frappe.generate_hash(length=10)}"
-		frappe.db.savepoint(savepoint)
-		try:
-			parent_result = _run_parent_record(parent_record)
-			result["parents"].append(parent_result)
-			_accumulate_counts(result["counts"], parent_result.get("counts") or {})
-			result["warnings"].extend(parent_result.get("warnings") or [])
-			frappe.db.commit()
-		except Exception as exc:
-			frappe.db.rollback(save_point=savepoint)
-			error = {
-				"parent_email": parent_record.get("email"),
-				"row_numbers": parent_record.get("row_numbers"),
-				"message": str(exc),
-			}
-			result["errors"].append(error)
-			result["counts"]["parent_errors"] += 1
-			frappe.log_error(frappe.get_traceback(), "QAS parent/student import failed")
+	previous_in_import = getattr(frappe.flags, "in_import", None)
+	previous_mute_emails = getattr(frappe.flags, "mute_emails", None)
+	frappe.flags.in_import = True
+	frappe.flags.mute_emails = True
+	try:
+		for parent_record in batch.get("parents", []):
+			savepoint = f"qas_parent_import_{frappe.generate_hash(length=10)}"
+			frappe.db.savepoint(savepoint)
+			try:
+				parent_result = _run_parent_record(parent_record)
+				result["parents"].append(parent_result)
+				_accumulate_counts(result["counts"], parent_result.get("counts") or {})
+				result["warnings"].extend(parent_result.get("warnings") or [])
+				frappe.db.commit()
+			except Exception as exc:
+				frappe.db.rollback(save_point=savepoint)
+				error = {
+					"parent_email": parent_record.get("email"),
+					"row_numbers": parent_record.get("row_numbers"),
+					"message": str(exc),
+				}
+				result["errors"].append(error)
+				result["counts"]["parent_errors"] += 1
+				frappe.log_error(frappe.get_traceback(), "QAS parent/student import failed")
+	finally:
+		_restore_flag("in_import", previous_in_import)
+		_restore_flag("mute_emails", previous_mute_emails)
 
 	result["ok"] = not result["errors"]
 	result["error_count"] = len(result["errors"])
@@ -600,14 +608,27 @@ def _normalize_phone(value):
 	value = (value or "").strip()
 	if not value:
 		return ""
+	candidates = re.split(r"[\n\r\t,;/]+|\s{2,}", value)
+	for candidate in candidates:
+		phone = _normalize_single_phone(candidate)
+		if phone:
+			return phone
+	return _normalize_single_phone(value)
+
+
+def _normalize_single_phone(value):
+	value = (value or "").strip()
+	if not value:
+		return ""
 	if value.startswith("+"):
-		return re.sub(r"\s+", "", value)
+		digits = re.sub(r"\D+", "", value)
+		return f"+{digits}" if 8 <= len(digits) <= 15 else ""
 	digits = re.sub(r"\D+", "", value)
 	if len(digits) == 10 and digits.startswith("0"):
 		return "+61" + digits[1:]
 	if digits.startswith("61"):
 		return "+" + digits
-	return value
+	return ""
 
 
 def _normalize_student_status(value):
@@ -665,3 +686,10 @@ def _has_field(doctype, fieldname):
 
 def _doctype_available(doctype):
 	return frappe.db.exists("DocType", doctype)
+
+
+def _restore_flag(key, value):
+	if value is None:
+		frappe.flags.pop(key, None)
+	else:
+		frappe.flags[key] = value
