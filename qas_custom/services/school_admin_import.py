@@ -15,6 +15,8 @@ from qas_custom.services.school_admin import _require_school_admin
 
 ACTIVE_STUDENT_STATUS = "Active"
 INACTIVE_STUDENT_STATUS = "Inactive"
+ACTIVE_PARENT_STATUS = "Active"
+INACTIVE_PARENT_STATUS = "Inactive"
 
 
 def preview_parent_student_import_data(payload=None):
@@ -69,6 +71,7 @@ def _build_import_batch(payload=None):
 	if not isinstance(rows, list):
 		frappe.throw(_("Import rows must be a list."))
 	default_student_status = _normalize_student_status(payload.get("default_student_status")) if isinstance(payload, dict) else ACTIVE_STUDENT_STATUS
+	default_parent_status = _normalize_parent_status(payload.get("default_parent_status")) if isinstance(payload, dict) else ACTIVE_PARENT_STATUS
 
 	parents_by_email = {}
 	row_results = []
@@ -76,7 +79,7 @@ def _build_import_batch(payload=None):
 		if not isinstance(raw_row, dict):
 			row_results.append(_row_error(index, None, "row", _("Row must be an object.")))
 			continue
-		row = _normalize_raw_row(raw_row, index, default_student_status=default_student_status)
+		row = _normalize_raw_row(raw_row, index, default_student_status=default_student_status, default_parent_status=default_parent_status)
 		row_results.append(row)
 		if row.get("errors"):
 			continue
@@ -87,6 +90,7 @@ def _build_import_batch(payload=None):
 				"email": email,
 				"parent_name": "",
 				"parent_mobile": "",
+				"parent_status": "",
 				"customer_name": "",
 				"customer_group": "",
 				"territory": "",
@@ -106,7 +110,7 @@ def _build_import_batch(payload=None):
 	}
 
 
-def _normalize_raw_row(raw_row, row_number, default_student_status=ACTIVE_STUDENT_STATUS):
+def _normalize_raw_row(raw_row, row_number, default_student_status=ACTIVE_STUDENT_STATUS, default_parent_status=ACTIVE_PARENT_STATUS):
 	row = {str(key or "").strip(): _clean_text(value) for key, value in raw_row.items()}
 	is_student_row = bool(_first(row, ["student_name", "student", "Student Name", "ID", "Date of Birth", "date_of_birth", "student_dob"]))
 	is_customer_row = bool(_first(row, ["Students", "Balance", "Phone number"])) and not is_student_row
@@ -126,6 +130,7 @@ def _normalize_raw_row(raw_row, row_number, default_student_status=ACTIVE_STUDEN
 		"parent_email": parent_email,
 		"parent_name": _normalize_spaces(parent_name),
 		"parent_mobile": _normalize_phone(_first(row, ["parent_mobile", "Parent Mobile", "Phone number", "phone", "mobile_number"])),
+		"parent_status": _normalize_parent_status(_first(row, ["parent_status", "Parent Status", "Parent status", "customer_status", "Customer Status"]) or default_parent_status),
 		"customer_name": _normalize_spaces(_first(row, ["customer_name", "Customer Name"])),
 		"customer_group": _normalize_spaces(_first(row, ["customer_group", "Customer Group"])),
 		"territory": _normalize_spaces(_first(row, ["territory", "Territory"])),
@@ -149,6 +154,7 @@ def _merge_parent_fields(parent, row):
 	for target, source in (
 		("parent_name", "parent_name"),
 		("parent_mobile", "parent_mobile"),
+		("parent_status", "parent_status"),
 		("customer_name", "customer_name"),
 		("customer_group", "customer_group"),
 		("territory", "territory"),
@@ -234,6 +240,7 @@ def _preview_parent_record(parent_record):
 		"parent_email": email,
 		"parent_name": parent_name,
 		"planned_parent_name": parent_record.get("parent_name"),
+		"planned_parent_status": parent_record.get("parent_status"),
 		"user": user,
 		"customer": customer,
 		"student_count": len(parent_record.get("students") or []),
@@ -318,6 +325,7 @@ def _run_parent_record(parent_record):
 
 	return {
 		"parent_email": email,
+		"parent_status": parent_record.get("parent_status"),
 		"user": user.get("name"),
 		"customer": customer_name,
 		"parent": parent.get("name"),
@@ -380,6 +388,9 @@ def _ensure_parent(parent_record, user, customer):
 		changed = True
 	if parent_record.get("parent_mobile") and doc.meta.has_field("mobile_number") and not doc.get("mobile_number"):
 		doc.mobile_number = parent_record.get("parent_mobile")
+		changed = True
+	if parent_record.get("parent_status") and doc.meta.has_field("status") and doc.get("status") != parent_record.get("parent_status"):
+		doc.status = parent_record.get("parent_status")
 		changed = True
 	if customer and doc.meta.has_field("customer") and doc.get("customer") != customer:
 		doc.customer = customer
@@ -606,6 +617,15 @@ def _normalize_student_status(value):
 	if value.lower() == "inactive":
 		return INACTIVE_STUDENT_STATUS
 	return ACTIVE_STUDENT_STATUS
+
+
+def _normalize_parent_status(value):
+	value = _normalize_spaces(value)
+	if not value:
+		return ACTIVE_PARENT_STATUS
+	if value.lower() == "inactive":
+		return INACTIVE_PARENT_STATUS
+	return ACTIVE_PARENT_STATUS
 
 
 def _parse_date(value):
