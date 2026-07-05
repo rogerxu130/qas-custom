@@ -33,18 +33,12 @@
    "fieldtype": "Small Text",
    "label": "Homework"
   },
-  {
-   "fieldname": "photos",
-   "fieldtype": "Attach Image",
-   "label": "Photos"
-  },
-  {
-   "fieldname": "attendance_list",
-   "fieldtype": "Table",
-   "label": "Attendance List",
-   "options": "Attendance Record"
-  }
- ],
+	  {
+	   "fieldname": "photos",
+	   "fieldtype": "Attach Image",
+	   "label": "Photos"
+	  }
+	 ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],

@@ -3959,6 +3959,12 @@ def _apply_weekly_timeslot_payload(doc, payload):
 	_validate_weekly_timeslot_room_conflict(doc)
 
 
+def validate_weekly_timeslot_document(doc, method=None):
+	if not doc.get("end_time") and doc.get("course") and doc.get("start_time"):
+		_apply_course_duration_end_time(doc)
+	_validate_weekly_timeslot_room_conflict(doc)
+
+
 def _apply_course_duration_end_time(doc):
 	course = doc.get("course")
 	start_time = doc.get("start_time")

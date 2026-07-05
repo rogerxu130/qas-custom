@@ -5,6 +5,7 @@ import json
 import frappe
 
 from qas_custom.modules.makeup.commands import (
+    cancel_parent_leave_request_core,
     get_parent_redeemable_sessions_core,
     redeem_parent_voucher_core,
     submit_parent_leave_request_core,
@@ -64,6 +65,19 @@ def redeem_parent_voucher_data(voucher_id=None, session_id=None, student=None):
         voucher_id=voucher_id,
         session_id=session_id,
         student=student,
+    )
+
+
+def cancel_parent_leave_data(voucher_id=None):
+    payload = _get_request_payload()
+    voucher_id = voucher_id or payload.get("voucher_id")
+
+    parent = _require_parent()
+    students = _get_parent_students(parent.name)
+    return cancel_parent_leave_request_core(
+        parent=parent,
+        students=students,
+        voucher_id=voucher_id,
     )
 
 

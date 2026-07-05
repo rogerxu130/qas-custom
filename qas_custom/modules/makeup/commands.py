@@ -6,11 +6,13 @@ import frappe
 from frappe.utils import add_days, get_time, getdate, now_datetime, today
 
 from qas_custom.modules.course_schedule.queries import get_teacher_name_map, get_weekly_timeslot_map
+from qas_custom.modules.attendance.commands import update_attendance_status
 from qas_custom.services.class_attendance import ATTENDANCE_DOCTYPE, create_attendance_entry
 from qas_custom.services.display_labels import get_makeup_voucher_label, sync_makeup_voucher_label
 
 
 MAKEUP_ENROLLMENT_TYPE = "Makeup"
+DEFAULT_VOUCHER_EXPIRY_DAYS = 90
 
 
 def submit_parent_leave_request_core(parent, students: list[dict], student: str, course_session: str):
@@ -36,7 +38,8 @@ def submit_parent_leave_request_core(parent, students: list[dict], student: str,
 	leave_request.flags.ignore_permissions = True
 	leave_request.insert()
 	leave_request.reload()
-	voucher_id = _get_voucher_for_leave_request(leave_request)
+	result = process_leave_request(leave_request)
+	voucher_id = result.get("makeup_voucher") or _get_voucher_for_leave_request(leave_request)
 	voucher_label = sync_makeup_voucher_label(voucher_id)
 
 	return {
@@ -55,6 +58,45 @@ def submit_parent_leave_request_core(parent, students: list[dict], student: str,
 			"classroom": timeslot.classroom,
 			"attendance_status": "Leave",
 		},
+	}
+
+
+def process_leave_request_after_insert(doc, method=None):
+	return process_leave_request(doc)
+
+
+def process_leave_request(leave_request):
+	doc = frappe.get_doc("Leave Request", leave_request) if isinstance(leave_request, str) else leave_request
+	if not doc or doc.get("status") != "Approved":
+		return {"skipped": True, "reason": "Leave request is not approved."}
+	if not doc.get("student") or not doc.get("course_session"):
+		frappe.throw("Leave request requires a student and course session.")
+
+	_populate_leave_request_context(doc)
+	attendance_entry = _mark_leave_attendance(doc)
+	voucher = _ensure_leave_makeup_voucher(doc)
+	_set_leave_request_voucher(doc.name, voucher.name)
+	return {
+		"leave_request": doc.name,
+		"attendance_entry": attendance_entry,
+		"makeup_voucher": voucher.name,
+	}
+
+
+def cancel_parent_leave_request_core(parent, students: list[dict], voucher_id: str | None):
+	voucher = _get_parent_makeup_voucher(voucher_id, parent.name)
+	_validate_voucher_available_for_cancel(voucher)
+
+	restore_status = _restore_leave_attendance(voucher)
+	voucher.status = "Cancelled"
+	voucher.save(ignore_permissions=True)
+
+	if voucher.get("leave_request") and frappe.db.exists("Leave Request", voucher.leave_request):
+		frappe.db.set_value("Leave Request", voucher.leave_request, "status", "Cancelled", update_modified=True)
+
+	return {
+		"voucher": _build_makeup_voucher_payload(voucher),
+		"attendance_status": restore_status,
 	}
 
 
@@ -135,6 +177,19 @@ def create_makeup_attendance_entry(voucher, session_id: str, student: str, preve
 	)
 
 
+def sync_makeup_voucher_attendance_after_save(doc, method=None):
+	if doc.get("status") != "Used" or not doc.get("used_on_session"):
+		return None
+	student = _get_voucher_used_by_student(doc) or doc.get("student")
+	if not student:
+		return None
+	return create_makeup_attendance_entry(
+		voucher=doc,
+		session_id=doc.used_on_session,
+		student=student,
+	)
+
+
 def _validate_student_for_parent(student: str | None, students: list[dict]) -> str:
 	if not student:
 		frappe.throw("Please select a student.")
@@ -169,6 +224,24 @@ def _validate_voucher_available_for_redeem(voucher):
 		frappe.throw("This makeup voucher has already been used.")
 	if voucher.get("expiry_date") and getdate(voucher.expiry_date) < getdate(today()):
 		frappe.throw("This makeup voucher has expired.")
+
+
+def _validate_voucher_available_for_cancel(voucher):
+	if voucher.get("status") != "Valid":
+		frappe.throw("Only unused leave vouchers can be cancelled.")
+	if voucher.get("used_on_session"):
+		frappe.throw("This makeup voucher has already been used.")
+	if not voucher.get("original_session"):
+		frappe.throw("This makeup voucher is not linked to a leave session.")
+
+	session_doc = frappe.get_doc("Course Sessions", voucher.original_session)
+	if session_doc.get("status") == "Cancelled":
+		frappe.throw("The original class session has been cancelled.")
+	timeslot = frappe.get_cached_doc("Weekly Timeslot", session_doc.weekly_timeslot) if session_doc.weekly_timeslot else None
+	if not timeslot:
+		frappe.throw("The original class session is missing a weekly timeslot.")
+	if _get_session_start(session_doc, timeslot) <= now_datetime():
+		frappe.throw("This leave can no longer be cancelled because the class has already started.")
 
 
 def _get_redeemable_makeup_sessions(voucher, student: str | None = None):
@@ -353,6 +426,129 @@ def _get_session_start(session_doc, timeslot):
 		getdate(session_doc.session_date),
 		get_time(timeslot.start_time),
 	)
+
+
+def _populate_leave_request_context(doc):
+	session_doc = frappe.get_doc("Course Sessions", doc.course_session)
+	updates = {}
+	if session_doc.get("weekly_timeslot") and not doc.get("weekly_timeslot"):
+		updates["weekly_timeslot"] = session_doc.weekly_timeslot
+	if session_doc.get("session_date") and not doc.get("session_date"):
+		updates["session_date"] = session_doc.session_date
+	if session_doc.get("weekly_timeslot") and not doc.get("course"):
+		course = frappe.db.get_value("Weekly Timeslot", session_doc.weekly_timeslot, "course")
+		if course:
+			updates["course"] = course
+	for fieldname, value in updates.items():
+		doc.set(fieldname, value)
+	if updates and doc.get("name"):
+		frappe.db.set_value("Leave Request", doc.name, updates, update_modified=False)
+	return doc
+
+
+def _mark_leave_attendance(doc):
+	attendance_entry = frappe.db.get_value(
+		ATTENDANCE_DOCTYPE,
+		{
+			"course_session": doc.course_session,
+			"student": doc.student,
+			"status": ["!=", "Cancelled"],
+		},
+		"name",
+		order_by="creation asc",
+	)
+	if not attendance_entry:
+		frappe.throw("This student is not listed in the selected class session.")
+
+	row = frappe.get_doc(ATTENDANCE_DOCTYPE, attendance_entry)
+	if row.get("status") == "Leave":
+		return row.name
+
+	result = update_attendance_status(
+		course_session=row.course_session,
+		attendance_row=row.name,
+		status="Leave",
+		actor=frappe.session.user,
+		comment=f"Leave request {doc.name}",
+	)
+	return result.get("attendance_entry") or row.name
+
+
+def _ensure_leave_makeup_voucher(doc):
+	existing = frappe.db.exists("Makeup Voucher", {"leave_request": doc.name})
+	if not existing and doc.get("makeup_voucher") and frappe.db.exists("Makeup Voucher", doc.get("makeup_voucher")):
+		existing = doc.get("makeup_voucher")
+	if not existing:
+		existing = frappe.db.exists(
+			"Makeup Voucher",
+			{
+				"student": doc.student,
+				"original_session": doc.course_session,
+				"status": ["in", ["Valid", "Used"]],
+			},
+		)
+	if existing:
+		voucher = frappe.get_doc("Makeup Voucher", existing)
+		changed = False
+		for fieldname, value in {
+			"leave_request": doc.name,
+			"course": doc.get("course"),
+			"original_session": doc.course_session,
+		}.items():
+			if value and voucher.meta.has_field(fieldname) and not voucher.get(fieldname):
+				voucher.set(fieldname, value)
+				changed = True
+		if changed:
+			voucher.save(ignore_permissions=True)
+		return voucher
+
+	voucher = frappe.new_doc("Makeup Voucher")
+	voucher.student = doc.student
+	voucher.course = doc.get("course")
+	voucher.original_session = doc.course_session
+	voucher.leave_request = doc.name
+	voucher.status = "Valid"
+	voucher.issue_date = today()
+	if voucher.meta.has_field("expiry_date"):
+		voucher.expiry_date = add_days(today(), DEFAULT_VOUCHER_EXPIRY_DAYS)
+	voucher.insert(ignore_permissions=True)
+	sync_makeup_voucher_label(voucher.name)
+	return frappe.get_doc("Makeup Voucher", voucher.name)
+
+
+def _set_leave_request_voucher(leave_request, voucher):
+	if not leave_request or not voucher:
+		return
+	if frappe.db.has_column("Leave Request", "makeup_voucher"):
+		frappe.db.set_value("Leave Request", leave_request, "makeup_voucher", voucher, update_modified=False)
+
+
+def _restore_leave_attendance(voucher):
+	attendance_entry = frappe.db.get_value(
+		ATTENDANCE_DOCTYPE,
+		{
+			"course_session": voucher.original_session,
+			"student": voucher.student,
+			"status": "Leave",
+		},
+		"name",
+		order_by="modified desc",
+	)
+	if not attendance_entry:
+		return None
+
+	row = frappe.get_doc(ATTENDANCE_DOCTYPE, attendance_entry)
+	restore_status = row.get("previous_status") or "To be started"
+	if restore_status in {"Leave", "Cancelled"}:
+		restore_status = "To be started"
+	result = update_attendance_status(
+		course_session=row.course_session,
+		attendance_row=row.name,
+		status=restore_status,
+		actor=frappe.session.user,
+		comment=f"Leave cancelled from Makeup Voucher {get_makeup_voucher_label(voucher)}",
+	)
+	return result.get("status")
 
 
 def _validate_no_active_leave(student: str, course_session: str):

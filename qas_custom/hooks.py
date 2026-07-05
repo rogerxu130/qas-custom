@@ -152,6 +152,19 @@ doc_events = {
 	"Student": {
 		"validate": "qas_custom.services.display_labels.sync_student_code",
 	},
+	"Parent": {
+		"after_insert": "qas_custom.services.parent_customer.ensure_parent_customer_after_save",
+		"on_update": "qas_custom.services.parent_customer.ensure_parent_customer_after_save",
+	},
+	"Leave Request": {
+		"after_insert": "qas_custom.modules.makeup.commands.process_leave_request_after_insert",
+	},
+	"Makeup Voucher": {
+		"on_update": "qas_custom.modules.makeup.commands.sync_makeup_voucher_attendance_after_save",
+	},
+	"Weekly Timeslot": {
+		"validate": "qas_custom.services.school_admin.validate_weekly_timeslot_document",
+	},
 	"Session Homework": {
 		"validate": "qas_custom.services.session_homework.validate_session_homework",
 	},
