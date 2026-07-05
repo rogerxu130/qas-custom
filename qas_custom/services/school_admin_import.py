@@ -469,6 +469,9 @@ def _find_parent_matches(email):
 	for fieldname in ("email", "email_id", "contact_email"):
 		if _has_field("Parent", fieldname):
 			matches.extend(frappe.get_all("Parent", filters={fieldname: email}, pluck="name"))
+	if email:
+		matches.extend(frappe.get_all("Parent", filters={"name": email}, pluck="name"))
+		matches.extend(frappe.get_all("Parent", filters={"name": ["like", f"%{email}%"]}, pluck="name"))
 	customer = _find_customer_by_email(email)
 	if customer and _has_field("Parent", "customer"):
 		matches.extend(frappe.get_all("Parent", filters={"customer": customer}, pluck="name"))
