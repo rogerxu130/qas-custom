@@ -472,9 +472,6 @@ def _find_parent_matches(email):
 	if email:
 		matches.extend(frappe.get_all("Parent", filters={"name": email}, pluck="name"))
 		matches.extend(frappe.get_all("Parent", filters={"name": ["like", f"%{email}%"]}, pluck="name"))
-	customer = _find_customer_by_email(email)
-	if customer and _has_field("Parent", "customer"):
-		matches.extend(frappe.get_all("Parent", filters={"customer": customer}, pluck="name"))
 	return _unique(matches)
 
 
@@ -511,28 +508,23 @@ def _find_student_matches(parent, student_row):
 	if not parent_field:
 		return []
 	matches = []
-	if student_row.get("student_dob") and _has_field("Student", "date_of_birth"):
-		matches.extend(
-			frappe.get_all(
-				"Student",
-				filters={parent_field: parent, "date_of_birth": student_row.get("student_dob")},
-				pluck="name",
-			)
-		)
-	if not matches and student_row.get("student_name") and _has_field("Student", "student_name"):
-		rows = frappe.get_all(
-			"Student",
-			filters={parent_field: parent},
-			fields=["name", "student_name", "date_of_birth"],
-			limit_page_length=0,
-		)
-		target = _normalized_key(student_row.get("student_name"))
-		for row in rows:
-			if _normalized_key(row.get("student_name")) != target:
-				continue
-			if student_row.get("student_dob") and row.get("date_of_birth") and str(row.get("date_of_birth")) != student_row.get("student_dob"):
-				continue
-			matches.append(row.name)
+	if not student_row.get("student_name") or not _has_field("Student", "student_name"):
+		return []
+
+	rows = frappe.get_all(
+		"Student",
+		filters={parent_field: parent},
+		fields=["name", "student_name", "date_of_birth"],
+		limit_page_length=0,
+	)
+	target_name = _normalized_key(student_row.get("student_name"))
+	target_dob = student_row.get("student_dob")
+	for row in rows:
+		if _normalized_key(row.get("student_name")) != target_name:
+			continue
+		if target_dob and str(row.get("date_of_birth") or "") != target_dob:
+			continue
+		matches.append(row.name)
 	return _unique(matches)
 
 
