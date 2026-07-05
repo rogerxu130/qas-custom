@@ -7,6 +7,10 @@ from qas_custom.services.announcements import (
 	publish_school_admin_announcement_data,
 	save_school_admin_announcement_data,
 )
+from qas_custom.services.school_admin_import import (
+	preview_parent_student_import_data,
+	run_parent_student_import_data,
+)
 from qas_custom.services.school_admin import (
 	update_school_admin_student_data,
 	update_school_admin_parent_data,
@@ -144,6 +148,16 @@ def school_admin_get_family(parent=None, student=None, customer=None, email=None
 @frappe.whitelist()
 def school_admin_get_store_credit(parent=None, customer=None, limit=50):
 	return get_school_admin_store_credit_data(parent=parent, customer=customer, limit=limit)
+
+
+@frappe.whitelist()
+def school_admin_preview_parent_student_import(payload=None):
+	return preview_parent_student_import_data(payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_run_parent_student_import(payload=None):
+	return run_parent_student_import_data(payload=payload)
 
 
 @frappe.whitelist()

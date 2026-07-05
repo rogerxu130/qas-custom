@@ -19,6 +19,12 @@ def ensure_parent_customer(parent):
 	if existing and frappe.db.exists("Customer", existing):
 		return existing
 
+	existing = _existing_customer_for_parent(doc)
+	if existing:
+		frappe.db.set_value("Parent", doc.name, "customer", existing, update_modified=False)
+		doc.set("customer", existing)
+		return existing
+
 	customer_name = doc.get("parent_name") or doc.get("name")
 	customer = frappe.new_doc("Customer")
 	customer.customer_name = customer_name
@@ -57,6 +63,18 @@ def _parent_mobile(doc):
 		value = (doc.get(fieldname) or "").strip()
 		if value:
 			return value
+	return None
+
+
+def _existing_customer_for_parent(doc):
+	email = _parent_email(doc)
+	if not email:
+		return None
+	for fieldname in ("email_id", "email", "contact_email"):
+		if _has_field("Customer", fieldname):
+			customer = frappe.db.get_value("Customer", {fieldname: email}, "name")
+			if customer:
+				return customer
 	return None
 
 
