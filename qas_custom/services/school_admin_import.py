@@ -273,6 +273,16 @@ def _preview_student_row(parent_name, student_row):
 	elif matches:
 		counts["students_reused"] += 1
 	else:
+		identity_matches = _find_student_identity_matches(student_row)
+		if identity_matches:
+			errors.append({
+				"row": student_row.get("row_number"),
+				"field": "student_name",
+				"message": _("Student {0} with DOB {1} already exists. Please resolve this duplicate manually.").format(
+					student_row.get("student_name"), student_row.get("student_dob")
+				),
+				"matches": identity_matches,
+			})
 		counts["students_to_create"] += 1
 	return {
 		"row": student_row.get("row_number"),
@@ -425,6 +435,15 @@ def _ensure_student(parent, student_row):
 		doc = frappe.get_doc("Student", matches[0])
 		created = False
 	else:
+		identity_matches = _find_student_identity_matches(student_row)
+		if identity_matches:
+			frappe.throw(
+				_("Student {0} with DOB {1} already exists: {2}").format(
+					student_row.get("student_name"),
+					student_row.get("student_dob"),
+					", ".join(identity_matches),
+				)
+			)
 		doc = frappe.new_doc("Student")
 		created = True
 
@@ -526,6 +545,24 @@ def _find_student_matches(parent, student_row):
 			continue
 		matches.append(row.name)
 	return _unique(matches)
+
+
+def _find_student_identity_matches(student_row):
+	if not _doctype_available("Student"):
+		return []
+	if not student_row.get("student_name") or not student_row.get("student_dob"):
+		return []
+	if not _has_field("Student", "student_name") or not _has_field("Student", "date_of_birth"):
+		return []
+
+	rows = frappe.get_all(
+		"Student",
+		filters={"date_of_birth": student_row.get("student_dob")},
+		fields=["name", "student_name"],
+		limit_page_length=0,
+	)
+	target_name = _normalized_key(student_row.get("student_name"))
+	return _unique([row.name for row in rows if _normalized_key(row.get("student_name")) == target_name])
 
 
 def _student_parent_field():

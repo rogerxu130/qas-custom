@@ -21,8 +21,7 @@
    "fieldtype": "Data",
    "in_list_view": 1,
    "label": "Name",
-   "reqd": 1,
-   "unique": 1
+   "reqd": 1
   },
   {
    "fieldname": "linked_user",
@@ -30,7 +29,8 @@
    "in_list_view": 1,
    "label": "Linked User",
    "options": "User",
-   "reqd": 1
+   "reqd": 1,
+   "unique": 1
   },
   {
    "default": "Active",
