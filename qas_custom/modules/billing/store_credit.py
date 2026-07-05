@@ -350,7 +350,7 @@ def ensure_store_credit_journal_entry(invoice_doc, amount: float | None = None, 
 	if not liability_account:
 		frappe.throw(_("Store credit liability account is required."))
 
-	original_user = frappe.session.user
+	original_user = frappe.session.user or "Administrator"
 	try:
 		frappe.set_user("Administrator")
 		journal = frappe.new_doc("Journal Entry")
@@ -394,7 +394,7 @@ def cancel_store_credit_journal_entries(invoice: str):
 		frappe.throw(_(payment_block_reason()))
 	names = _store_credit_journal_entries(invoice=invoice, docstatus=1)
 	cancelled = []
-	original_user = frappe.session.user
+	original_user = frappe.session.user or "Administrator"
 	try:
 		frappe.set_user("Administrator")
 		for name in names:

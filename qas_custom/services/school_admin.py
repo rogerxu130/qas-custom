@@ -3361,7 +3361,7 @@ def _cancel_submitted_invoice_as_admin(invoice):
 	if not payment_mutations_enabled():
 		frappe.throw(_(payment_block_reason()))
 
-	original_user = frappe.session.user
+	original_user = frappe.session.user or "Administrator"
 	try:
 		frappe.set_user("Administrator")
 		doc = frappe.get_doc("Sales Invoice", invoice)
@@ -3388,7 +3388,7 @@ def _cancel_invoice_payment_entries(invoice):
 	)
 	payment_entries = sorted({row.get("parent") for row in rows if row.get("parent")})
 	cancelled = []
-	original_user = frappe.session.user
+	original_user = frappe.session.user or "Administrator"
 	try:
 		frappe.set_user("Administrator")
 		for payment_entry_name in payment_entries:
@@ -3530,7 +3530,7 @@ def _create_payment_entry_for_invoice(doc, amount, mode_of_payment=None, referen
 	if not payment_mutations_enabled():
 		frappe.throw(_(payment_block_reason()))
 
-	original_user = frappe.session.user
+	original_user = frappe.session.user or "Administrator"
 	try:
 		frappe.set_user("Administrator")
 		payment_entry = get_payment_entry("Sales Invoice", doc.name)
