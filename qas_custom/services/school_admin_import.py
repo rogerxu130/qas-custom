@@ -397,6 +397,10 @@ def _ensure_parent(parent_record, user, customer):
 	if parent_record.get("parent_mobile") and doc.meta.has_field("mobile_number") and not doc.get("mobile_number"):
 		doc.mobile_number = parent_record.get("parent_mobile")
 		changed = True
+	for fieldname in ("email", "email_id", "contact_email"):
+		if email and doc.meta.has_field(fieldname) and not doc.get(fieldname):
+			doc.set(fieldname, email)
+			changed = True
 	if parent_record.get("parent_status") and doc.meta.has_field("status") and doc.get("status") != parent_record.get("parent_status"):
 		doc.status = parent_record.get("parent_status")
 		changed = True
@@ -409,7 +413,8 @@ def _ensure_parent(parent_record, user, customer):
 	else:
 		if changed:
 			doc.save(ignore_permissions=True)
-	return {"name": doc.name, "created": created, "updated": changed and not created}
+	status_changed = _force_parent_status(doc.name, parent_record.get("parent_status"))
+	return {"name": doc.name, "created": created, "updated": (changed or status_changed) and not created}
 
 
 def _ensure_student(parent, student_row):
@@ -461,6 +466,9 @@ def _find_parent_matches(email):
 		matches.extend(frappe.get_all("Parent", filters={"linked_user": user}, pluck="name"))
 	if _has_field("Parent", "linked_user"):
 		matches.extend(frappe.get_all("Parent", filters={"linked_user": email}, pluck="name"))
+	for fieldname in ("email", "email_id", "contact_email"):
+		if _has_field("Parent", fieldname):
+			matches.extend(frappe.get_all("Parent", filters={fieldname: email}, pluck="name"))
 	customer = _find_customer_by_email(email)
 	if customer and _has_field("Parent", "customer"):
 		matches.extend(frappe.get_all("Parent", filters={"customer": customer}, pluck="name"))
@@ -686,6 +694,16 @@ def _has_field(doctype, fieldname):
 
 def _doctype_available(doctype):
 	return frappe.db.exists("DocType", doctype)
+
+
+def _force_parent_status(parent, status):
+	if not parent or not status or not _has_field("Parent", "status"):
+		return False
+	current = frappe.db.get_value("Parent", parent, "status")
+	if current == status:
+		return False
+	frappe.db.set_value("Parent", parent, "status", status, update_modified=False)
+	return True
 
 
 def _restore_flag(key, value):
