@@ -1,0 +1,82 @@
+{
+ "actions": [],
+ "allow_import": 0,
+ "allow_rename": 1,
+ "autoname": "format:{student_name}-{date_of_birth}",
+ "creation": "2026-07-05 00:00:00.000000",
+ "doctype": "DocType",
+ "document_type": "Document",
+ "engine": "InnoDB",
+ "field_order": [
+  "detail_section",
+  "student_name",
+  "guardian",
+  "status",
+  "date_of_birth",
+  "age"
+ ],
+ "fields": [
+  {
+   "fieldname": "detail_section",
+   "fieldtype": "Section Break",
+   "label": "Detail"
+  },
+  {
+   "fieldname": "student_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Student Name",
+   "reqd": 1
+  },
+  {
+   "fieldname": "guardian",
+   "fieldtype": "Link",
+   "label": "Parent",
+   "options": "Parent",
+   "reqd": 1
+  },
+  {
+   "default": "Active",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Active\nInactive"
+  },
+  {
+   "fieldname": "date_of_birth",
+   "fieldtype": "Date",
+   "label": "Date of Birth"
+  },
+  {
+   "fieldname": "age",
+   "fieldtype": "Int",
+   "label": "Age"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-07-05 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "QAS Custom",
+ "name": "Student",
+ "naming_rule": "Expression (old style)",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "import": 0,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
