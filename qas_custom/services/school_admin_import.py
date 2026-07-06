@@ -9,6 +9,7 @@ import frappe
 from frappe import _
 from frappe.utils import flt, getdate
 
+from qas_custom.modules.billing.store_credit import LEDGER_DOCTYPE, adjust_store_credit
 from qas_custom.services.parent_customer import ensure_parent_customer
 from qas_custom.services.school_admin import _require_school_admin
 
@@ -71,6 +72,266 @@ def run_parent_student_import_data(payload=None):
 	result["ok"] = not result["errors"]
 	result["error_count"] = len(result["errors"])
 	return _finalize_result(result)
+
+
+def preview_store_credit_import_data(payload=None):
+	_require_school_admin()
+	batch = _build_store_credit_import_batch(payload)
+	return _preview_store_credit_batch(batch)
+
+
+def run_store_credit_import_data(payload=None):
+	_require_school_admin()
+	batch = _build_store_credit_import_batch(payload)
+	preview = _preview_store_credit_batch(batch)
+	if preview.get("blocking_error_count"):
+		return {
+			"ok": False,
+			"dry_run": False,
+			"message": _("Store credit import has blocking errors. Run preview and fix the CSV first."),
+			"preview": preview,
+		}
+
+	result = _empty_result(dry_run=False)
+	result["input"] = preview.get("input")
+	result["warnings"] = list(preview.get("warnings") or [])
+	previous_in_import = getattr(frappe.flags, "in_import", None)
+	previous_mute_emails = getattr(frappe.flags, "mute_emails", None)
+	frappe.flags.in_import = True
+	frappe.flags.mute_emails = True
+	try:
+		for row in batch.get("credits", []):
+			savepoint = f"qas_store_credit_import_{frappe.generate_hash(length=10)}"
+			frappe.db.savepoint(savepoint)
+			try:
+				row_result = _run_store_credit_row(row)
+				result["parents"].append(row_result)
+				_accumulate_counts(result["counts"], row_result.get("counts") or {})
+				frappe.db.commit()
+			except Exception as exc:
+				frappe.db.rollback(save_point=savepoint)
+				result["errors"].append({
+					"row": row.get("row_number"),
+					"parent_email": row.get("parent_email"),
+					"field": "store_credit",
+					"message": str(exc),
+				})
+				result["counts"]["store_credit_errors"] += 1
+				frappe.log_error(frappe.get_traceback(), "QAS store credit import failed")
+	finally:
+		_restore_flag("in_import", previous_in_import)
+		_restore_flag("mute_emails", previous_mute_emails)
+
+	result["ok"] = not result["errors"]
+	result["error_count"] = len(result["errors"])
+	return _finalize_result(result)
+
+
+def _build_store_credit_import_batch(payload=None):
+	payload = _get_payload(payload)
+	rows = payload.get("rows") if isinstance(payload, dict) else payload
+	if not isinstance(rows, list):
+		frappe.throw(_("Import rows must be a list."))
+
+	row_results = []
+	credits = []
+	for index, raw_row in enumerate(rows, start=1):
+		if not isinstance(raw_row, dict):
+			row_results.append(_row_error(index, None, "row", _("Row must be an object.")))
+			continue
+		row = _normalize_store_credit_row(raw_row, index)
+		row_results.append(row)
+		if not row.get("errors"):
+			credits.append(row)
+	return {"rows": row_results, "credits": credits}
+
+
+def _normalize_store_credit_row(raw_row, row_number):
+	row = {str(key or "").strip(): _clean_text(value) for key, value in raw_row.items()}
+	parent_email = _normalize_email(_first(row, ["parent_email", "Parent Email", "email", "Email", "linked_user", "Linked User"]))
+	parent = _normalize_spaces(_first(row, ["parent", "Parent", "parent_id", "Parent ID"]))
+	customer = _normalize_spaces(_first(row, ["customer", "Customer", "customer_name", "Customer Name"]))
+	amount = _money(_first(row, ["amount", "Amount", "store_credit", "Store Credit", "recommended_store_credit_amount", "Recommended Store Credit Amount"]))
+	reason = _normalize_spaces(_first(row, ["reason", "Reason"])) or "Legacy store credit opening balance"
+	notes = _normalize_spaces(_first(row, ["notes", "Notes"]))
+
+	normalized = {
+		"row_number": row_number,
+		"source": row,
+		"parent_email": parent_email,
+		"parent": parent,
+		"customer": customer,
+		"amount": amount,
+		"reason": reason,
+		"notes": notes,
+		"errors": [],
+	}
+	if not parent_email and not parent and not customer:
+		normalized["errors"].append(_field_error("parent_email", _("Parent email, parent, or customer is required.")))
+	if amount <= 0:
+		normalized["errors"].append(_field_error("amount", _("Store credit amount must be greater than zero.")))
+	return normalized
+
+
+def _preview_store_credit_batch(batch):
+	result = _empty_result(dry_run=True)
+	result["input"] = {
+		"row_count": len(batch.get("rows") or []),
+		"parent_count": len(batch.get("credits") or []),
+		"student_count": 0,
+		"store_credit_amount": sum(flt(row.get("amount")) for row in batch.get("credits") or []),
+	}
+
+	for row in batch.get("rows") or []:
+		for error in row.get("errors") or []:
+			result["errors"].append({"row": row.get("row_number"), "parent_email": row.get("parent_email"), **error})
+
+	for row in batch.get("credits") or []:
+		preview = _preview_store_credit_row(row)
+		result["parents"].append(preview)
+		_accumulate_counts(result["counts"], preview.get("counts") or {})
+		result["errors"].extend(preview.get("errors") or [])
+		result["warnings"].extend(preview.get("warnings") or [])
+
+	result["blocking_error_count"] = len(result["errors"])
+	result["warning_count"] = len(result["warnings"])
+	result["ok"] = result["blocking_error_count"] == 0
+	return _finalize_result(result)
+
+
+def _preview_store_credit_row(row):
+	counts = defaultdict(int)
+	errors = []
+	warnings = []
+	resolved = _resolve_store_credit_target(row)
+	if resolved.get("errors"):
+		errors.extend(resolved.get("errors"))
+	else:
+		row.update({"parent": resolved.get("parent"), "customer": resolved.get("customer")})
+		if _store_credit_duplicate_exists(row):
+			counts["store_credit_duplicates_skipped"] += 1
+			warnings.append({
+				"row": row.get("row_number"),
+				"parent_email": row.get("parent_email"),
+				"field": "amount",
+				"message": _("Matching store credit ledger entry already exists and will be skipped."),
+			})
+		else:
+			counts["store_credits_to_create"] += 1
+	return {
+		"row": row.get("row_number"),
+		"parent_email": row.get("parent_email"),
+		"parent": row.get("parent") or resolved.get("parent"),
+		"customer": row.get("customer") or resolved.get("customer"),
+		"amount": row.get("amount"),
+		"reason": row.get("reason"),
+		"notes": row.get("notes"),
+		"counts": dict(counts),
+		"errors": errors,
+		"warnings": warnings,
+	}
+
+
+def _run_store_credit_row(row):
+	resolved = _resolve_store_credit_target(row)
+	if resolved.get("errors"):
+		frappe.throw("; ".join(error.get("message") for error in resolved.get("errors") or []))
+	row = {**row, "parent": resolved.get("parent"), "customer": resolved.get("customer")}
+	counts = defaultdict(int)
+	if _store_credit_duplicate_exists(row):
+		counts["store_credit_duplicates_skipped"] += 1
+		return {
+			"row": row.get("row_number"),
+			"parent_email": row.get("parent_email"),
+			"parent": row.get("parent"),
+			"customer": row.get("customer"),
+			"amount": row.get("amount"),
+			"skipped": True,
+			"counts": dict(counts),
+		}
+
+	entry = adjust_store_credit(
+		parent=row.get("parent"),
+		customer=row.get("customer"),
+		amount=row.get("amount"),
+		reason=row.get("reason"),
+		notes=row.get("notes"),
+	)
+	counts["store_credits_created"] += 1
+	return {
+		"row": row.get("row_number"),
+		"parent_email": row.get("parent_email"),
+		"parent": entry.parent,
+		"customer": entry.customer,
+		"amount": row.get("amount"),
+		"store_credit_ledger": entry.name,
+		"counts": dict(counts),
+	}
+
+
+def _resolve_store_credit_target(row):
+	parent = row.get("parent")
+	customer = row.get("customer")
+	email = row.get("parent_email")
+	errors = []
+
+	if parent and not frappe.db.exists("Parent", parent):
+		errors.append({"row": row.get("row_number"), "parent_email": email, "field": "parent", "message": _("Parent {0} was not found.").format(parent)})
+		parent = None
+	if customer and _doctype_available("Customer") and not frappe.db.exists("Customer", customer):
+		errors.append({"row": row.get("row_number"), "parent_email": email, "field": "customer", "message": _("Customer {0} was not found.").format(customer)})
+		customer = None
+
+	if not parent and email:
+		matches = _find_parent_matches(email)
+		if len(matches) > 1:
+			errors.append({
+				"row": row.get("row_number"),
+				"parent_email": email,
+				"field": "parent_email",
+				"message": _("Multiple Parent records match email {0}.").format(email),
+				"matches": matches,
+			})
+		elif matches:
+			parent = matches[0]
+
+	if parent and not customer and _has_field("Parent", "customer"):
+		customer = frappe.db.get_value("Parent", parent, "customer")
+	if not customer and email:
+		customer = _find_customer_by_email(email)
+
+	if not parent and not customer:
+		errors.append({
+			"row": row.get("row_number"),
+			"parent_email": email,
+			"field": "parent_email",
+			"message": _("Could not match this row to a Parent or Customer."),
+		})
+	if not customer:
+		errors.append({
+			"row": row.get("row_number"),
+			"parent_email": email,
+			"field": "customer",
+			"message": _("Customer is required for store credit."),
+		})
+	return {"parent": parent, "customer": customer, "errors": errors}
+
+
+def _store_credit_duplicate_exists(row):
+	if not _doctype_available(LEDGER_DOCTYPE):
+		return False
+	filters = {
+		"customer": row.get("customer"),
+		"transaction_type": "Manual Adjustment",
+		"credit_amount": flt(row.get("amount")),
+		"debit_amount": 0,
+		"reason": row.get("reason"),
+	}
+	if row.get("notes"):
+		filters["notes"] = row.get("notes")
+	if row.get("parent") and frappe.db.has_column(LEDGER_DOCTYPE, "parent"):
+		filters["parent"] = row.get("parent")
+	return bool(frappe.db.exists(LEDGER_DOCTYPE, filters))
 
 
 def _build_import_batch(payload=None):
