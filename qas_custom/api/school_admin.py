@@ -55,6 +55,7 @@ from qas_custom.services.school_admin import (
 	get_school_admin_course_session_data,
 	get_school_admin_course_sessions_data,
 	get_school_admin_csrf_token_data,
+	get_school_admin_bulk_invoice_submit_job_data,
 	get_school_admin_dashboard_data,
 	get_school_admin_enrollment_data,
 	get_school_admin_enrollments_data,
@@ -75,6 +76,7 @@ from qas_custom.services.school_admin import (
 	get_school_admin_weekly_timeslot_data,
 	get_school_admin_weekly_timeslots_data,
 	mark_school_admin_invoice_paid_data,
+	start_school_admin_bulk_invoice_submit_job_data,
 	mark_school_admin_inquiry_completed_data,
 	mark_school_admin_inquiry_follow_up_data,
 	mark_school_admin_inquiry_inactive_data,
@@ -411,6 +413,16 @@ def school_admin_cancel_invoice(invoice=None, reason=None):
 @frappe.whitelist()
 def school_admin_bulk_invoice_action(payload=None):
 	return bulk_school_admin_invoice_action_data(payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_start_bulk_invoice_submit_job(payload=None):
+	return start_school_admin_bulk_invoice_submit_job_data(payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_get_bulk_invoice_submit_job(job_id=None):
+	return get_school_admin_bulk_invoice_submit_job_data(job_id=job_id)
 
 
 @frappe.whitelist()

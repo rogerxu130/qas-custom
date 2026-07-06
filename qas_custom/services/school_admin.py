@@ -40,6 +40,7 @@ from qas_custom.modules.billing.commands import (
 )
 from qas_custom.modules.billing.presentation import build_course_invoice_description, invoice_item_schedule
 from qas_custom.modules.notifications import (
+	enqueue_parent_invoice_notification,
 	get_invoice_notification_summary,
 	maybe_send_parent_invoice_paid_receipt,
 	parent_portal_invoice_link,
@@ -66,6 +67,7 @@ ACTIVE_TERM_STATUSES = ["Upcoming", "Active"]
 ACTIVE_TIMESLOT_STATUSES = ["Active"]
 COURSE_LABEL_FIELDS = ["name", "course_name", "course_name_zh"]
 DEFAULT_COURSE_INVOICE_ITEM = "Tuition Fee"
+BULK_INVOICE_SUBMIT_JOB_TTL_SECONDS = 86400
 PARENT_EDIT_FIELDS = ["parent_name", "mobile_number", "phone", "email", "email_id", "address", "status", "customer"]
 STUDENT_EDIT_FIELDS = ["student_name", "first_name", "last_name", "date_of_birth", "dob", "gender", "status", "guardian", "parent"]
 COURSE_EDIT_FIELDS = [
@@ -932,7 +934,7 @@ def delete_school_admin_draft_invoice_data(invoice=None):
 	return {"deleted": deleted}
 
 
-def submit_school_admin_invoice_data(invoice=None):
+def submit_school_admin_invoice_data(invoice=None, enqueue_notification=False):
 	_require_school_admin()
 	if not invoice:
 		frappe.throw(_("Invoice is required."))
@@ -952,7 +954,10 @@ def submit_school_admin_invoice_data(invoice=None):
 	applied_amount = flt(get_invoice_store_credit_applied(doc.name))
 	frappe.db.commit()
 	doc = frappe.get_doc("Sales Invoice", doc.name)
-	notification = _send_invoice_notification(doc, event="approved", store_credit_applied=applied_amount if applied_amount > 0 else None)
+	if enqueue_notification:
+		notification = _enqueue_invoice_notification(doc, event="approved", store_credit_applied=applied_amount if applied_amount > 0 else None)
+	else:
+		notification = _send_invoice_notification(doc, event="approved", store_credit_applied=applied_amount if applied_amount > 0 else None)
 	receipt_notification = _maybe_send_paid_receipt(doc, source="invoice_submit")
 	frappe.db.commit()
 	payload = _build_invoice_payload(frappe.get_doc("Sales Invoice", doc.name))
@@ -1050,6 +1055,154 @@ def cancel_school_admin_invoice_data(invoice=None, reason=None):
 	return _build_invoice_payload(frappe.get_doc("Sales Invoice", invoice))
 
 
+def start_school_admin_bulk_invoice_submit_job_data(payload=None):
+	_require_school_admin()
+	payload = _get_payload(payload)
+	invoices = payload.get("invoices") or []
+	if not isinstance(invoices, list):
+		frappe.throw(_("Invoices must be a list."))
+
+	invoice_names = []
+	seen = set()
+	for invoice in invoices:
+		invoice_name = (invoice or "").strip()
+		if invoice_name and invoice_name not in seen:
+			seen.add(invoice_name)
+			invoice_names.append(invoice_name)
+	if not invoice_names:
+		frappe.throw(_("At least one invoice is required."))
+
+	job_id = frappe.generate_hash(length=16)
+	status = _bulk_invoice_submit_initial_status(job_id, invoice_names)
+	_set_bulk_invoice_submit_job_status(job_id, status)
+	frappe.enqueue(
+		"qas_custom.services.school_admin.run_school_admin_bulk_invoice_submit_job",
+		queue="long",
+		timeout=3600,
+		job_name=f"QAS Bulk Invoice Submit {job_id}",
+		enqueue_after_commit=True,
+		qas_job_id=job_id,
+		invoices=invoice_names,
+		requested_by=frappe.session.user,
+	)
+	return status
+
+
+def get_school_admin_bulk_invoice_submit_job_data(job_id=None):
+	_require_school_admin()
+	job_id = (job_id or "").strip()
+	if not job_id:
+		frappe.throw(_("Job ID is required."))
+	status = _get_bulk_invoice_submit_job_status(job_id)
+	if not status:
+		frappe.throw(_("Bulk invoice submit job was not found or has expired."))
+	return status
+
+
+def run_school_admin_bulk_invoice_submit_job(qas_job_id=None, invoices=None, requested_by=None):
+	job_id = (qas_job_id or "").strip()
+	invoice_names = invoices or []
+	if not job_id:
+		return
+
+	if requested_by:
+		frappe.set_user(requested_by)
+
+	status = _get_bulk_invoice_submit_job_status(job_id) or _bulk_invoice_submit_initial_status(job_id, invoice_names)
+	status.update({"status": "running", "started_at": now_datetime().isoformat(), "current_invoice": None})
+	_set_bulk_invoice_submit_job_status(job_id, status)
+
+	for invoice_name in invoice_names:
+		invoice_name = (invoice_name or "").strip()
+		if not invoice_name:
+			continue
+		status["current_invoice"] = invoice_name
+		_set_bulk_invoice_submit_job_status(job_id, status)
+		try:
+			result_row = _run_one_bulk_invoice_submit(invoice_name)
+			status["results"].append(result_row)
+			status["processed"] += 1
+			if result_row.get("skipped"):
+				status["skipped"] += 1
+			elif result_row.get("ok"):
+				status["succeeded"] += 1
+			else:
+				status["failed"] += 1
+		except Exception as exc:
+			frappe.db.rollback()
+			status["processed"] += 1
+			status["failed"] += 1
+			status["results"].append(
+				{
+					"invoice": invoice_name,
+					"ok": False,
+					"message": _bulk_action_error_message(exc),
+				}
+			)
+		_set_bulk_invoice_submit_job_status(job_id, status)
+
+	status["current_invoice"] = None
+	status["completed_at"] = now_datetime().isoformat()
+	status["status"] = "completed_with_errors" if status.get("failed") else "completed"
+	_set_bulk_invoice_submit_job_status(job_id, status)
+	return status
+
+
+def _run_one_bulk_invoice_submit(invoice_name):
+	if not frappe.db.exists("Sales Invoice", invoice_name):
+		return {"invoice": invoice_name, "ok": False, "message": _("Invoice was not found.")}
+
+	docstatus = cint(frappe.db.get_value("Sales Invoice", invoice_name, "docstatus"))
+	if docstatus == 1:
+		return {"invoice": invoice_name, "ok": True, "skipped": True, "docstatus": 1, "message": _("Already submitted")}
+	if docstatus == 2:
+		return {"invoice": invoice_name, "ok": False, "docstatus": 2, "message": _("Cancelled invoices cannot be submitted.")}
+
+	result = submit_school_admin_invoice_data(invoice=invoice_name, enqueue_notification=True)
+	return {
+		"invoice": invoice_name,
+		"ok": True,
+		"status": result.get("status"),
+		"docstatus": result.get("docstatus"),
+		"notification": result.get("notification"),
+		"receipt_notification": result.get("receipt_notification"),
+		"message": _("Done"),
+	}
+
+
+def _bulk_invoice_submit_initial_status(job_id, invoice_names):
+	return {
+		"job_id": job_id,
+		"status": "queued",
+		"total": len(invoice_names or []),
+		"processed": 0,
+		"succeeded": 0,
+		"failed": 0,
+		"skipped": 0,
+		"current_invoice": None,
+		"results": [],
+		"created_at": now_datetime().isoformat(),
+		"started_at": None,
+		"completed_at": None,
+	}
+
+
+def _bulk_invoice_submit_job_cache_key(job_id):
+	return f"qas:school_admin:bulk_invoice_submit:{job_id}"
+
+
+def _set_bulk_invoice_submit_job_status(job_id, status):
+	frappe.cache().set_value(
+		_bulk_invoice_submit_job_cache_key(job_id),
+		status,
+		expires_in_sec=BULK_INVOICE_SUBMIT_JOB_TTL_SECONDS,
+	)
+
+
+def _get_bulk_invoice_submit_job_status(job_id):
+	return frappe.cache().get_value(_bulk_invoice_submit_job_cache_key(job_id))
+
+
 def bulk_school_admin_invoice_action_data(payload=None):
 	_require_school_admin()
 	payload = _get_payload(payload)
@@ -1073,7 +1226,7 @@ def bulk_school_admin_invoice_action_data(payload=None):
 			continue
 		try:
 			if action == "submit":
-				result = submit_school_admin_invoice_data(invoice=invoice_name)
+				result = submit_school_admin_invoice_data(invoice=invoice_name, enqueue_notification=True)
 			else:
 				result = cancel_school_admin_invoice_data(invoice=invoice_name, reason=reason)
 			results.append(
@@ -3515,6 +3668,15 @@ def _reverse_invoice_store_credit_application(doc, reason):
 
 def _send_invoice_notification(doc, event="approved", store_credit_applied=None):
 	return send_parent_invoice_notification(
+		doc,
+		event=event,
+		store_credit_applied=store_credit_applied,
+		payable_amount=None,
+	)
+
+
+def _enqueue_invoice_notification(doc, event="approved", store_credit_applied=None):
+	return enqueue_parent_invoice_notification(
 		doc,
 		event=event,
 		store_credit_applied=store_credit_applied,
