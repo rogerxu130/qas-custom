@@ -1984,7 +1984,13 @@ def create_school_admin_term_invoices_data(term=None, payload=None):
 		frappe.throw(_("Term was not found."))
 	payload = _get_payload(payload)
 	names = _get_invoice_candidate_enrollment_names(term=term)
+	batch_size = cint(payload.get("batch_size") or 0)
+	if batch_size > 0:
+		names, batch_meta = _next_invoice_candidate_batch(names, batch_size)
+	else:
+		batch_meta = {"batch_size": 0, "remaining_before": len(names), "remaining_after": 0, "has_more": False}
 	summary = _create_invoices_for_enrollment_names(names, payload=payload)
+	summary.update(batch_meta)
 	frappe.db.commit()
 	return {
 		"term": get_school_admin_term_data(term),
@@ -3748,6 +3754,26 @@ def _create_attendance_for_enrollment_names(enrollment_names, payload=None):
 			summary["errors"] += 1
 			summary["error_rows"].append({"enrollment": enrollment, "error": _bulk_action_error_message(exc)})
 	return summary
+
+
+def _next_invoice_candidate_batch(enrollment_names, batch_size):
+	batch_size = max(1, cint(batch_size))
+	pending = []
+	remaining_before = 0
+	for enrollment in enrollment_names or []:
+		doc = frappe.get_doc("Enrollment", enrollment)
+		if _existing_invoice_for_enrollment(doc):
+			continue
+		remaining_before += 1
+		if len(pending) < batch_size:
+			pending.append(enrollment)
+	remaining_after = max(remaining_before - len(pending), 0)
+	return pending, {
+		"batch_size": batch_size,
+		"remaining_before": remaining_before,
+		"remaining_after": remaining_after,
+		"has_more": remaining_after > 0,
+	}
 
 
 def _create_invoices_for_enrollment_names(enrollment_names, payload=None):
