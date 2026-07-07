@@ -10,6 +10,9 @@ from frappe import _
 from frappe.utils import flt, getdate
 
 from qas_custom.modules.billing.store_credit import LEDGER_DOCTYPE, adjust_store_credit
+from qas_custom.services.class_attendance import ATTENDANCE_DOCTYPE
+from qas_custom.services.inquiry import create_inquiry_core
+from qas_custom.services.inquiry import _resolve_trial_session_context
 from qas_custom.services.parent_customer import ensure_parent_customer
 from qas_custom.services.school_admin import _require_school_admin
 
@@ -125,6 +128,517 @@ def run_store_credit_import_data(payload=None):
 	result["ok"] = not result["errors"]
 	result["error_count"] = len(result["errors"])
 	return _finalize_result(result)
+
+
+def preview_trial_inquiry_import_data(payload=None):
+	_require_school_admin()
+	batch = _build_trial_inquiry_import_batch(payload)
+	return _preview_trial_inquiry_batch(batch)
+
+
+def run_trial_inquiry_import_data(payload=None):
+	_require_school_admin()
+	batch = _build_trial_inquiry_import_batch(payload)
+	preview = _preview_trial_inquiry_batch(batch)
+	if preview.get("blocking_error_count"):
+		return {
+			"ok": False,
+			"dry_run": False,
+			"message": _("Trial inquiry import has blocking errors. Run preview and fix the CSV first."),
+			"preview": preview,
+		}
+
+	result = _empty_result(dry_run=False)
+	result["input"] = preview.get("input")
+	result["warnings"] = list(preview.get("warnings") or [])
+	previous_in_import = getattr(frappe.flags, "in_import", None)
+	frappe.flags.in_import = True
+	try:
+		for row in batch.get("trials", []):
+			savepoint = f"qas_trial_import_{frappe.generate_hash(length=10)}"
+			frappe.db.savepoint(savepoint)
+			try:
+				row_result = _run_trial_inquiry_row(row)
+				result["parents"].append(row_result)
+				_accumulate_counts(result["counts"], row_result.get("counts") or {})
+				result["warnings"].extend(row_result.get("warnings") or [])
+				frappe.db.commit()
+			except Exception as exc:
+				frappe.db.rollback(save_point=savepoint)
+				result["errors"].append({
+					"row": row.get("row_number"),
+					"parent_email": row.get("parent_email"),
+					"field": "trial_inquiry",
+					"message": str(exc),
+				})
+				result["counts"]["trial_inquiry_errors"] += 1
+				frappe.log_error(frappe.get_traceback(), "QAS trial inquiry import failed")
+	finally:
+		_restore_flag("in_import", previous_in_import)
+
+	result["ok"] = not result["errors"]
+	result["error_count"] = len(result["errors"])
+	return _finalize_result(result)
+
+
+def _build_trial_inquiry_import_batch(payload=None):
+	payload = _get_payload(payload)
+	rows = payload.get("rows") if isinstance(payload, dict) else payload
+	if not isinstance(rows, list):
+		frappe.throw(_("Import rows must be a list."))
+
+	row_results = []
+	trials = []
+	seen_keys = set()
+	for index, raw_row in enumerate(rows, start=1):
+		if not isinstance(raw_row, dict):
+			row_results.append(_row_error(index, None, "row", _("Row must be an object.")))
+			continue
+		row = _normalize_trial_inquiry_row(raw_row, index)
+		key = _trial_import_key(row)
+		if key and key in seen_keys:
+			row["duplicate_in_file"] = True
+		elif key:
+			seen_keys.add(key)
+		row_results.append(row)
+		if not row.get("errors"):
+			trials.append(row)
+	return {"rows": row_results, "trials": trials}
+
+
+def _normalize_trial_inquiry_row(raw_row, row_number):
+	row = {str(key or "").strip(): _clean_text(value) for key, value in raw_row.items()}
+	parent_email = _normalize_email(_first(row, ["parent_email", "Parent Email", "Contact Email Address", "email", "Email"]))
+	parent_name = _normalize_spaces(_first(row, ["parent_name", "Parent Name", "contact_name", "Contact Name"]))
+	parent_phone = _normalize_phone(_first(row, ["parent_phone", "parent_mobile", "Phone bumber", "Phone Number", "phone", "Phone"]))
+	student_name = _normalize_spaces(_first(row, ["student_name", "Student Name", "submitted_student_name"]))
+	student_dob = _parse_date(_first(row, ["student_dob", "Student Birthday", "Date of Birth", "dob", "DOB"]))
+	campus = _normalize_spaces(_first(row, ["campus", "Which Campus?", "Campus"]))
+	class_type = _normalize_spaces(_first(row, ["class_type", "Class Type", "course", "Course"]))
+	form_name = _normalize_spaces(_first(row, ["form_name", "Form Name"]))
+	session_label = _normalize_spaces(_first(row, ["session_label", "Which session?", "submitted_class_session", "Class Session"]))
+	trial_class_date = _parse_date(_first(row, ["trial_class_date", "Trial Class Date", "submitted_trial_date"]))
+	trial_request_date = _parse_datetime_string(_first(row, ["trial_request_date", "Trial Request date", "created_at", "Creation"]))
+	referral_source = _normalize_spaces(_first(row, ["referral_source", "How do you know us?", "Referal", "Referral"]))
+	referral_detail = _normalize_spaces(_first(row, ["referral_detail", "notes", "Notes", "Unnamed: 16"]))
+	source_id = _normalize_spaces(_first(row, ["source_id", "ID", "id"]))
+
+	normalized = {
+		"row_number": row_number,
+		"source": row,
+		"source_id": source_id,
+		"parent_email": parent_email,
+		"parent_name": parent_name,
+		"parent_phone": parent_phone,
+		"student_name": student_name,
+		"student_dob": student_dob,
+		"campus": campus,
+		"class_type": class_type,
+		"form_name": form_name or _normalize_spaces(" ".join(part for part in [campus, class_type] if part)),
+		"session_label": session_label,
+		"trial_class_date": trial_class_date,
+		"trial_request_date": trial_request_date,
+		"referral_source": referral_source,
+		"referral_detail": referral_detail,
+		"errors": [],
+	}
+	if not parent_email:
+		normalized["errors"].append(_field_error("parent_email", _("Parent email is required.")))
+	if not parent_name:
+		normalized["errors"].append(_field_error("parent_name", _("Parent name is required.")))
+	if not student_name:
+		normalized["errors"].append(_field_error("student_name", _("Student name is required.")))
+	if not trial_class_date:
+		normalized["errors"].append(_field_error("trial_class_date", _("Trial class date is required.")))
+	if not session_label:
+		normalized["errors"].append(_field_error("session_label", _("Trial session label is required.")))
+	if not normalized["form_name"]:
+		normalized["errors"].append(_field_error("form_name", _("Campus and class type, or form name, is required.")))
+	return normalized
+
+
+def _preview_trial_inquiry_batch(batch):
+	result = _empty_result(dry_run=True)
+	result["input"] = {
+		"row_count": len(batch.get("rows") or []),
+		"parent_count": len({row.get("parent_email") for row in batch.get("trials") or [] if row.get("parent_email")}),
+		"student_count": len(batch.get("trials") or []),
+		"trial_count": len(batch.get("trials") or []),
+	}
+
+	for row in batch.get("rows") or []:
+		for error in row.get("errors") or []:
+			result["errors"].append({"row": row.get("row_number"), "parent_email": row.get("parent_email"), **error})
+
+	for row in batch.get("trials") or []:
+		preview = _preview_trial_inquiry_row(row)
+		result["parents"].append(preview)
+		_accumulate_counts(result["counts"], preview.get("counts") or {})
+		result["errors"].extend(preview.get("errors") or [])
+		result["warnings"].extend(preview.get("warnings") or [])
+
+	result["blocking_error_count"] = len(result["errors"])
+	result["warning_count"] = len(result["warnings"])
+	result["ok"] = result["blocking_error_count"] == 0
+	return _finalize_result(result)
+
+
+def _preview_trial_inquiry_row(row):
+	counts = defaultdict(int)
+	errors = []
+	warnings = []
+	if row.get("duplicate_in_file"):
+		counts["trial_duplicates_in_file"] += 1
+		warnings.append(_trial_issue(row, "source_id", _("Duplicate row in this CSV. The later duplicate will be skipped.")))
+		return _trial_preview_payload(row, counts, warnings=warnings, skipped=True)
+
+	family = _resolve_trial_family_preview(row)
+	_accumulate_counts(counts, family.get("counts") or {})
+	errors.extend(family.get("errors") or [])
+	warnings.extend(family.get("warnings") or [])
+
+	session = _resolve_trial_session_preview(row)
+	_accumulate_counts(counts, session.get("counts") or {})
+	errors.extend(session.get("errors") or [])
+	warnings.extend(session.get("warnings") or [])
+
+	parent = family.get("parent")
+	student = family.get("student")
+	course_session = session.get("course_session")
+	if not errors and course_session:
+		if parent and student and _trial_inquiry_duplicate_exists(parent, student, course_session):
+			counts["trial_inquiries_duplicates_skipped"] += 1
+			warnings.append(_trial_issue(row, "trial_inquiry", _("Matching Trial Lesson Inquiry already exists and will be skipped.")))
+		elif student and _attendance_student_session_conflict(student, course_session):
+			counts["attendance_duplicates_skipped"] += 1
+			warnings.append(_trial_issue(row, "attendance", _("This student is already listed for this session and will be skipped.")))
+		else:
+			counts["trial_inquiries_to_create"] += 1
+			counts["trial_attendance_to_create"] += 1
+	return _trial_preview_payload(row, counts, family=family, session=session, errors=errors, warnings=warnings)
+
+
+def _trial_preview_payload(row, counts, family=None, session=None, errors=None, warnings=None, skipped=False):
+	family = family or {}
+	session = session or {}
+	return {
+		"row": row.get("row_number"),
+		"parent_email": row.get("parent_email"),
+		"parent": family.get("parent"),
+		"planned_parent_name": row.get("parent_name"),
+		"student": family.get("student"),
+		"student_name": row.get("student_name"),
+		"student_dob": row.get("student_dob"),
+		"student_count": 1,
+		"campus": row.get("campus"),
+		"class_type": row.get("class_type"),
+		"session_label": row.get("session_label"),
+		"trial_class_date": row.get("trial_class_date"),
+		"course_session": session.get("course_session"),
+		"skipped": skipped,
+		"counts": dict(counts),
+		"errors": errors or [],
+		"warnings": warnings or [],
+	}
+
+
+def _resolve_trial_family_preview(row):
+	counts = defaultdict(int)
+	errors = []
+	warnings = []
+	parent_matches = _find_parent_matches(row.get("parent_email"))
+	if len(parent_matches) > 1:
+		errors.append(_trial_issue(row, "parent_email", _("Multiple Parent records match email {0}.").format(row.get("parent_email")), matches=parent_matches))
+		return {"counts": counts, "errors": errors, "warnings": warnings}
+
+	parent = parent_matches[0] if parent_matches else None
+	if parent:
+		counts["parents_reused"] += 1
+	else:
+		counts["parents_to_create"] += 1
+
+	student = None
+	if parent:
+		conflicts = _trial_student_conflicts(parent, row)
+		if conflicts:
+			errors.extend(conflicts)
+		else:
+			matches = _find_student_matches(parent, {"student_name": row.get("student_name"), "student_dob": row.get("student_dob")})
+			if len(matches) > 1:
+				errors.append(_trial_issue(row, "student_name", _("Multiple Student records match this parent and student."), matches=matches))
+			elif matches:
+				student = matches[0]
+				counts["students_reused"] += 1
+				if not row.get("student_dob"):
+					warnings.append(_trial_issue(row, "student_dob", _("Student was matched by name only because DOB is blank.")))
+			else:
+				counts["students_to_create"] += 1
+	else:
+		counts["students_to_create"] += 1
+		if not row.get("student_dob"):
+			warnings.append(_trial_issue(row, "student_dob", _("New student will be created without DOB.")))
+	return {"parent": parent, "student": student, "counts": counts, "errors": errors, "warnings": warnings}
+
+
+def _resolve_trial_session_preview(row):
+	counts = defaultdict(int)
+	errors = []
+	warnings = []
+	payload = _trial_inquiry_payload(row)
+	session_context, review_reason = _resolve_trial_session_context(payload, "Trial Lesson")
+	if review_reason or not session_context:
+		errors.append(_trial_issue(row, "course_session", review_reason or _("Course Session could not be matched.")))
+		return {"counts": counts, "errors": errors, "warnings": warnings}
+	counts["course_sessions_matched"] += 1
+	return {
+		"course_session": session_context["session"].get("name"),
+		"course": session_context["timeslot"].get("course"),
+		"counts": counts,
+		"errors": errors,
+		"warnings": warnings,
+	}
+
+
+def _run_trial_inquiry_row(row):
+	counts = defaultdict(int)
+	warnings = []
+	if row.get("duplicate_in_file"):
+		counts["trial_duplicates_in_file"] += 1
+		return _trial_preview_payload(row, counts, warnings=[_trial_issue(row, "source_id", _("Duplicate row in this CSV was skipped."))], skipped=True)
+
+	session = _resolve_trial_session_preview(row)
+	if session.get("errors"):
+		frappe.throw("; ".join(error.get("message") for error in session.get("errors") or []))
+
+	family = _ensure_trial_family(row)
+	_accumulate_counts(counts, family.get("counts") or {})
+	warnings.extend(family.get("warnings") or [])
+
+	parent = family.get("parent")
+	student = family.get("student")
+	course_session = session.get("course_session")
+	if _trial_inquiry_duplicate_exists(parent, student, course_session):
+		counts["trial_inquiries_duplicates_skipped"] += 1
+		return _trial_preview_payload(row, counts, family=family, session=session, warnings=[_trial_issue(row, "trial_inquiry", _("Matching Trial Lesson Inquiry already exists and was skipped."))], skipped=True)
+	if _attendance_student_session_conflict(student, course_session):
+		counts["attendance_duplicates_skipped"] += 1
+		return _trial_preview_payload(row, counts, family=family, session=session, warnings=[_trial_issue(row, "attendance", _("This student is already listed for this session and was skipped."))], skipped=True)
+
+	payload = _trial_inquiry_payload(row)
+	payload.update({"parent": parent, "student": student, "course_session": course_session})
+	detail = create_inquiry_core(payload, source=payload.get("source") or "Trial Import", actor=frappe.session.user)
+	counts["trial_inquiries_created"] += 1
+	counts["trial_attendance_created"] += 1
+	return {
+		**_trial_preview_payload(row, counts, family=family, session=session, warnings=warnings),
+		"inquiry": (detail.get("inquiry") or {}).get("id"),
+	}
+
+
+def _ensure_trial_family(row):
+	counts = defaultdict(int)
+	warnings = []
+	email = row.get("parent_email")
+	user = _ensure_trial_user(email, row.get("parent_name"))
+	counts["users_created" if user.get("created") else "users_reused"] += 1
+	parent = _ensure_trial_parent(row, user.get("name"))
+	counts["parents_created" if parent.get("created") else "parents_reused"] += 1
+	student = _ensure_trial_student(parent.get("name"), row)
+	counts["students_created" if student.get("created") else "students_reused"] += 1
+	if student.get("matched_by_name_only"):
+		warnings.append(_trial_issue(row, "student_dob", _("Existing student reused by name only because DOB is blank.")))
+	return {"parent": parent.get("name"), "student": student.get("name"), "counts": counts, "warnings": warnings}
+
+
+def _ensure_trial_user(email, parent_name):
+	user_name = _find_user(email)
+	if user_name:
+		return {"name": user_name, "created": False}
+	user_doc = frappe.new_doc("User")
+	user_doc.email = email
+	user_doc.first_name = parent_name or email
+	user_doc.enabled = 1
+	user_doc.user_type = "Website User"
+	user_doc.send_welcome_email = 0
+	user_doc.flags.ignore_permissions = True
+	user_doc.insert(ignore_permissions=True)
+	return {"name": user_doc.name, "created": True}
+
+
+def _ensure_trial_parent(row, user):
+	matches = _find_parent_matches(row.get("parent_email"))
+	if len(matches) > 1:
+		frappe.throw(_("Multiple Parent records match email {0}.").format(row.get("parent_email")))
+	if matches:
+		doc = frappe.get_doc("Parent", matches[0])
+		created = False
+	else:
+		doc = frappe.new_doc("Parent")
+		created = True
+
+	changed = False
+	if not doc.get("parent_name"):
+		doc.parent_name = row.get("parent_name") or row.get("parent_email")
+		changed = True
+	if doc.meta.has_field("linked_user") and not doc.get("linked_user"):
+		doc.linked_user = user
+		changed = True
+	if row.get("parent_phone") and doc.meta.has_field("mobile_number") and not doc.get("mobile_number"):
+		doc.mobile_number = row.get("parent_phone")
+		changed = True
+	for fieldname in ("email", "email_id", "contact_email"):
+		if row.get("parent_email") and doc.meta.has_field(fieldname) and not doc.get(fieldname):
+			doc.set(fieldname, row.get("parent_email"))
+			changed = True
+	if created and doc.meta.has_field("status") and not doc.get("status"):
+		doc.status = ACTIVE_PARENT_STATUS
+	if created:
+		doc.insert(ignore_permissions=True)
+	elif changed:
+		doc.save(ignore_permissions=True)
+	return {"name": doc.name, "created": created, "updated": changed and not created}
+
+
+def _ensure_trial_student(parent, row):
+	conflicts = _trial_student_conflicts(parent, row)
+	if conflicts:
+		frappe.throw("; ".join(error.get("message") for error in conflicts))
+	matches = _find_student_matches(parent, {"student_name": row.get("student_name"), "student_dob": row.get("student_dob")})
+	if len(matches) > 1:
+		frappe.throw(_("Multiple Student records match row {0}.").format(row.get("row_number")))
+	if matches:
+		return {"name": matches[0], "created": False, "matched_by_name_only": not row.get("student_dob")}
+
+	doc = frappe.new_doc("Student")
+	doc.student_name = row.get("student_name")
+	parent_field = _student_parent_field()
+	if parent_field:
+		doc.set(parent_field, parent)
+	if row.get("student_dob") and doc.meta.has_field("date_of_birth"):
+		doc.date_of_birth = row.get("student_dob")
+	elif not row.get("student_dob"):
+		doc.name = _make_trial_no_dob_student_docname(row.get("student_name"))
+		doc.flags.name_set = True
+	if doc.meta.has_field("status"):
+		doc.status = INACTIVE_STUDENT_STATUS
+	doc.insert(ignore_permissions=True)
+	return {"name": doc.name, "created": True}
+
+
+def _trial_student_conflicts(parent, row):
+	if not parent or not _doctype_available("Student"):
+		return []
+	parent_field = _student_parent_field()
+	if not parent_field:
+		return []
+	target_name = _normalized_key(row.get("student_name"))
+	target_dob = row.get("student_dob")
+	students = frappe.get_all(
+		"Student",
+		filters={parent_field: parent},
+		fields=["name", "student_name", "date_of_birth"],
+		limit_page_length=0,
+	)
+	errors = []
+	for student in students:
+		same_name = _normalized_key(student.get("student_name")) == target_name
+		same_dob = target_dob and str(student.get("date_of_birth") or "") == target_dob
+		if same_name and target_dob and student.get("date_of_birth") and str(student.get("date_of_birth")) != target_dob:
+			errors.append(_trial_issue(row, "student_dob", _("Existing student {0} has the same name but different DOB.").format(student.name), matches=[student.name]))
+		if same_dob and not same_name:
+			errors.append(_trial_issue(row, "student_dob", _("Existing student {0} has the same DOB but different name.").format(student.name), matches=[student.name]))
+	return errors
+
+
+def _trial_inquiry_payload(row):
+	return {
+		"inquiry_type": "Trial Lesson",
+		"source": "Trial Import",
+		"parent_name": row.get("parent_name"),
+		"contact_name": row.get("parent_name"),
+		"phone": row.get("parent_phone"),
+		"contact_phone": row.get("parent_phone"),
+		"email": row.get("parent_email"),
+		"contact_email": row.get("parent_email"),
+		"student_name": row.get("student_name"),
+		"submitted_student_name": row.get("student_name"),
+		"date_of_birth": row.get("student_dob"),
+		"submitted_student_dob": row.get("student_dob"),
+		"submitted_form_name": row.get("form_name"),
+		"submitted_class_session": row.get("session_label"),
+		"submitted_trial_date": row.get("trial_class_date"),
+		"appointment_date": row.get("trial_class_date"),
+		"campus": row.get("campus"),
+		"preferred_course": row.get("class_type"),
+		"referral_source": row.get("referral_source"),
+		"referral_detail": row.get("referral_detail") or (f"Source ID: {row.get('source_id')}" if row.get("source_id") else ""),
+	}
+
+
+def _trial_import_key(row):
+	return "|".join(
+		_normalized_key(part)
+		for part in [
+			row.get("parent_email"),
+			row.get("student_name"),
+			row.get("student_dob"),
+			row.get("trial_class_date"),
+			row.get("session_label"),
+		]
+	)
+
+
+def _trial_inquiry_duplicate_exists(parent, student, course_session):
+	return bool(frappe.db.exists("Inquiry", {
+		"inquiry_type": "Trial Lesson",
+		"parent": parent,
+		"student": student,
+		"course_session": course_session,
+		"status": ["!=", "Cancelled"],
+	}))
+
+
+def _attendance_student_session_conflict(student, course_session):
+	if not _doctype_available(ATTENDANCE_DOCTYPE):
+		return False
+	return bool(frappe.db.exists(ATTENDANCE_DOCTYPE, {
+		"student": student,
+		"course_session": course_session,
+		"status": ["!=", "Cancelled"],
+	}))
+
+
+def _trial_issue(row, field, message, matches=None):
+	issue = {
+		"row": row.get("row_number"),
+		"parent_email": row.get("parent_email"),
+		"field": field,
+		"message": str(message),
+	}
+	if matches:
+		issue["matches"] = matches
+	return issue
+
+
+def _parse_datetime_string(value):
+	value = (value or "").strip()
+	if not value:
+		return ""
+	for fmt in ("%Y-%m-%d %H:%M:%S", "%m/%d/%Y %H:%M:%S", "%d/%m/%Y %H:%M:%S"):
+		try:
+			return datetime.strptime(value, fmt).isoformat(sep=" ")
+		except Exception:
+			pass
+	return _parse_date(value)
+
+
+def _make_trial_no_dob_student_docname(student_name):
+	base = (student_name or "Student").strip()
+	for _ in range(5):
+		name = f"{base}-trial-no-dob-{frappe.generate_hash(length=8)}"
+		if not frappe.db.exists("Student", name):
+			return name
+	return f"{base}-trial-no-dob-{frappe.generate_hash(length=12)}"
 
 
 def _build_store_credit_import_batch(payload=None):
@@ -954,7 +1468,7 @@ def _parse_date(value):
 	value = (value or "").strip()
 	if not value:
 		return ""
-	for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"):
+	for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y", "%d-%m-%Y"):
 		try:
 			return datetime.strptime(value, fmt).date().isoformat()
 		except Exception:

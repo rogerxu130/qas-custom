@@ -10,8 +10,10 @@ from qas_custom.services.announcements import (
 from qas_custom.services.school_admin_import import (
 	preview_parent_student_import_data,
 	preview_store_credit_import_data,
+	preview_trial_inquiry_import_data,
 	run_parent_student_import_data,
 	run_store_credit_import_data,
+	run_trial_inquiry_import_data,
 )
 from qas_custom.services.school_admin import (
 	update_school_admin_student_data,
@@ -172,6 +174,16 @@ def school_admin_preview_store_credit_import(payload=None):
 @frappe.whitelist()
 def school_admin_run_store_credit_import(payload=None):
 	return run_store_credit_import_data(payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_preview_trial_inquiry_import(payload=None):
+	return preview_trial_inquiry_import_data(payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_run_trial_inquiry_import(payload=None):
+	return run_trial_inquiry_import_data(payload=payload)
 
 
 @frappe.whitelist()
