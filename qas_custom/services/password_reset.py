@@ -11,9 +11,19 @@ PASSWORD_RESET_TOKEN_DOCTYPE = "Portal Password Reset Token"
 PASSWORD_RESET_EXPIRY_MINUTES = 30
 PASSWORD_RESET_PATH = "/reset-password"
 DEFAULT_PARENT_PORTAL_ALLOWED_ROLES = ("Parent",)
+PORTAL_PARENT = "parent"
+PORTAL_TEACHER = "teacher"
 
 
 def request_password_reset(email: str | None) -> dict:
+    return _request_password_reset(email, portal=PORTAL_PARENT)
+
+
+def request_teacher_password_reset(email: str | None) -> dict:
+    return _request_password_reset(email, portal=PORTAL_TEACHER)
+
+
+def _request_password_reset(email: str | None, portal: str = PORTAL_PARENT) -> dict:
     normalized_email = (email or "").strip().lower()
     generic_response = {
         "ok": True,
@@ -31,7 +41,7 @@ def request_password_reset(email: str | None) -> dict:
     if not user_name:
         return generic_response
 
-    if not _is_parent_portal_user(user_name):
+    if not _is_portal_reset_user(user_name, portal):
         return generic_response
 
     now = now_datetime()
@@ -53,14 +63,22 @@ def request_password_reset(email: str | None) -> dict:
     )
     doc.insert(ignore_permissions=True)
 
-    reset_link = _build_password_reset_link(reset_token)
-    _send_password_reset_email(normalized_email, reset_link, expires_at, doc.name)
+    reset_link = _build_password_reset_link(reset_token, portal=portal)
+    _send_password_reset_email(normalized_email, reset_link, expires_at, doc.name, portal=portal)
 
     frappe.db.commit()
     return generic_response
 
 
 def validate_password_reset_token(token: str | None) -> dict:
+    return _validate_password_reset_token(token, portal=PORTAL_PARENT)
+
+
+def validate_teacher_password_reset_token(token: str | None) -> dict:
+    return _validate_password_reset_token(token, portal=PORTAL_TEACHER)
+
+
+def _validate_password_reset_token(token: str | None, portal: str = PORTAL_PARENT) -> dict:
     normalized_token = (token or "").strip()
     if not normalized_token:
         return {
@@ -91,7 +109,7 @@ def validate_password_reset_token(token: str | None) -> dict:
             "message": f"Reset token is not usable because its status is {token_doc.status}.",
         }
 
-    if not _is_parent_portal_user(token_doc.user):
+    if not _is_portal_reset_user(token_doc.user, portal):
         return {
             "ok": False,
             "valid": False,
@@ -125,7 +143,15 @@ def validate_password_reset_token(token: str | None) -> dict:
 
 
 def confirm_password_reset(token: str | None, new_password: str | None) -> dict:
-    validation = validate_password_reset_token(token)
+    return _confirm_password_reset(token, new_password, portal=PORTAL_PARENT)
+
+
+def confirm_teacher_password_reset(token: str | None, new_password: str | None) -> dict:
+    return _confirm_password_reset(token, new_password, portal=PORTAL_TEACHER)
+
+
+def _confirm_password_reset(token: str | None, new_password: str | None, portal: str = PORTAL_PARENT) -> dict:
+    validation = _validate_password_reset_token(token, portal=portal)
     if not validation.get("valid"):
         return validation
 
@@ -168,18 +194,19 @@ def confirm_password_reset(token: str | None, new_password: str | None) -> dict:
     }
 
 
-def _build_password_reset_link(reset_token: str) -> str:
-    portal_base_url = _get_parent_portal_base_url()
+def _build_password_reset_link(reset_token: str, portal: str = PORTAL_PARENT) -> str:
+    portal_base_url = _get_portal_base_url(portal)
     if portal_base_url:
         return f"{portal_base_url.rstrip('/')}{PASSWORD_RESET_PATH}?token={reset_token}"
 
     return f"{get_url(PASSWORD_RESET_PATH)}?token={reset_token}"
 
 
-def _send_password_reset_email(email: str, reset_link: str, expires_at, token_record: str) -> None:
+def _send_password_reset_email(email: str, reset_link: str, expires_at, token_record: str, portal: str = PORTAL_PARENT) -> None:
     subject = "Reset your password"
+    portal_label = "Teacher Portal" if portal == PORTAL_TEACHER else "Parent Portal"
     message = f"""
-        <p>A password reset was requested for your account.</p>
+        <p>A password reset was requested for your Queensland Art School {portal_label} account.</p>
         <p>Use the link below to set a new password:</p>
         <p><a href="{reset_link}">{reset_link}</a></p>
         <p>This link will expire at {expires_at}.</p>
@@ -212,6 +239,23 @@ def _is_parent_portal_user(user_name: str) -> bool:
     return bool(user_roles.intersection(allowed_roles))
 
 
+def _is_teacher_portal_user(user_name: str) -> bool:
+    user_type = frappe.db.get_value("User", user_name, "user_type")
+    if user_type != "Website User":
+        return False
+
+    if not frappe.db.get_value("User", user_name, "enabled"):
+        return False
+
+    return bool(frappe.db.exists("Teacher", {"user": user_name, "status": ["!=", "Inactive"]}))
+
+
+def _is_portal_reset_user(user_name: str, portal: str = PORTAL_PARENT) -> bool:
+    if portal == PORTAL_TEACHER:
+        return _is_teacher_portal_user(user_name)
+    return _is_parent_portal_user(user_name)
+
+
 def _get_parent_portal_allowed_roles() -> tuple[str, ...]:
     configured_roles = getattr(frappe.conf, "parent_portal_reset_allowed_roles", None)
 
@@ -229,7 +273,16 @@ def _get_parent_portal_allowed_roles() -> tuple[str, ...]:
 
 
 def _get_parent_portal_base_url() -> str | None:
-    configured_url = getattr(frappe.conf, "parent_portal_base_url", None)
+    return _get_portal_base_url(PORTAL_PARENT)
+
+
+def _get_teacher_portal_base_url() -> str | None:
+    return _get_portal_base_url(PORTAL_TEACHER)
+
+
+def _get_portal_base_url(portal: str = PORTAL_PARENT) -> str | None:
+    config_key = "teacher_portal_base_url" if portal == PORTAL_TEACHER else "parent_portal_base_url"
+    configured_url = getattr(frappe.conf, config_key, None)
     if isinstance(configured_url, str) and configured_url.strip():
         return configured_url.strip().rstrip("/")
 

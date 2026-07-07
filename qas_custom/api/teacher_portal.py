@@ -1,5 +1,10 @@
 import frappe
 
+from qas_custom.services.password_reset import (
+    confirm_teacher_password_reset,
+    request_teacher_password_reset,
+    validate_teacher_password_reset_token,
+)
 from qas_custom.services.teacher_portal import (
     get_teacher_csrf_token_data,
     get_teacher_me_data,
@@ -12,6 +17,21 @@ from qas_custom.services.teacher_portal import (
     publish_teacher_video_post_data,
     update_teacher_attendance_data,
 )
+
+
+@frappe.whitelist(allow_guest=True)
+def teacher_portal_request_password_reset(email=None):
+    return request_teacher_password_reset(email)
+
+
+@frappe.whitelist(allow_guest=True)
+def teacher_portal_validate_password_reset_token(token=None):
+    return validate_teacher_password_reset_token(token)
+
+
+@frappe.whitelist(allow_guest=True)
+def teacher_portal_confirm_password_reset(token=None, new_password=None):
+    return confirm_teacher_password_reset(token, new_password)
 
 
 @frappe.whitelist()
