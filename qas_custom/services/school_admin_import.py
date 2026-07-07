@@ -11,8 +11,12 @@ from frappe.utils import flt, getdate
 
 from qas_custom.modules.billing.store_credit import LEDGER_DOCTYPE, adjust_store_credit
 from qas_custom.services.class_attendance import ATTENDANCE_DOCTYPE
-from qas_custom.services.inquiry import create_inquiry_core
-from qas_custom.services.inquiry import _resolve_trial_session_context
+from qas_custom.services.inquiry import (
+	create_inquiry_core,
+	_parse_class_session,
+	_resolve_campus,
+	_resolve_course,
+)
 from qas_custom.services.parent_customer import ensure_parent_customer
 from qas_custom.services.school_admin import _require_school_admin
 
@@ -384,19 +388,130 @@ def _resolve_trial_session_preview(row):
 	counts = defaultdict(int)
 	errors = []
 	warnings = []
-	payload = _trial_inquiry_payload(row)
-	session_context, review_reason = _resolve_trial_session_context(payload, "Trial Lesson")
+	session_context, review_reason = _resolve_trial_import_session(row)
 	if review_reason or not session_context:
 		errors.append(_trial_issue(row, "course_session", review_reason or _("Course Session could not be matched.")))
 		return {"counts": counts, "errors": errors, "warnings": warnings}
 	counts["course_sessions_matched"] += 1
 	return {
-		"course_session": session_context["session"].get("name"),
-		"course": session_context["timeslot"].get("course"),
+		"course_session": session_context.get("course_session"),
+		"course": session_context.get("course"),
 		"counts": counts,
 		"errors": errors,
 		"warnings": warnings,
 	}
+
+
+def _resolve_trial_import_session(row):
+	campus = _resolve_campus(row.get("campus"))
+	if not campus:
+		return None, _("Campus could not be matched from the submitted trial import row.")
+
+	parsed_session = _parse_class_session(row.get("session_label"))
+	if not parsed_session:
+		return None, _("Class session time could not be parsed from the submitted trial import row.")
+
+	trial_date = row.get("trial_class_date")
+	if not trial_date:
+		return None, _("Trial date was not submitted.")
+
+	course = _resolve_trial_import_course(row)
+	timeslots = _get_trial_import_timeslots(
+		campus=campus,
+		day_of_week=parsed_session.get("day_of_week"),
+		start_time=parsed_session.get("start_time"),
+		course=course,
+	)
+	if not timeslots and course:
+		timeslots = _get_trial_import_timeslots(
+			campus=campus,
+			day_of_week=parsed_session.get("day_of_week"),
+			start_time=parsed_session.get("start_time"),
+		)
+
+	if len(timeslots) > 1:
+		timeslots = _filter_trial_timeslots_by_end_time(timeslots, parsed_session.get("end_time"))
+	if len(timeslots) > 1:
+		timeslots = _filter_trial_timeslots_by_course_hint(timeslots, row)
+
+	if not timeslots:
+		return None, _("No Weekly Timeslot matched the submitted campus, weekday, and time.")
+	if len(timeslots) > 1:
+		return None, _("Multiple Weekly Timeslots matched the submitted campus, weekday, and time.")
+
+	timeslot = timeslots[0]
+	course_session = _get_trial_import_course_session(timeslot.get("name"), trial_date)
+	if course_session.get("reason"):
+		return None, course_session.get("reason")
+	return {
+		"course_session": course_session.get("name"),
+		"course": timeslot.get("course"),
+		"timeslot": timeslot.get("name"),
+		"campus": campus,
+	}, None
+
+
+def _resolve_trial_import_course(row):
+	for value in (row.get("class_type"), row.get("form_name")):
+		course = _resolve_course(value)
+		if course:
+			return course
+	return None
+
+
+def _get_trial_import_timeslots(campus, day_of_week, start_time, course=None):
+	filters = {
+		"campus": campus,
+		"day_of_week": day_of_week,
+		"start_time": start_time,
+	}
+	if course:
+		filters["course"] = course
+	fields = ["name", "course", "campus", "start_time"]
+	if _has_field("Weekly Timeslot", "end_time"):
+		fields.append("end_time")
+	return frappe.get_all(
+		"Weekly Timeslot",
+		filters=filters,
+		fields=fields,
+		order_by="modified desc",
+		limit_page_length=0,
+	)
+
+
+def _filter_trial_timeslots_by_end_time(timeslots, end_time):
+	if not end_time or not _has_field("Weekly Timeslot", "end_time"):
+		return timeslots
+	matches = [timeslot for timeslot in timeslots if str(timeslot.get("end_time") or "") == str(end_time)]
+	return matches or timeslots
+
+
+def _filter_trial_timeslots_by_course_hint(timeslots, row):
+	hints = [_normalized_key(row.get("class_type")), _normalized_key(row.get("form_name"))]
+	hints = [hint for hint in hints if hint]
+	if not hints:
+		return timeslots
+	matches = []
+	for timeslot in timeslots:
+		course_key = _normalized_key(timeslot.get("course"))
+		if course_key and any(hint == course_key or hint in course_key or course_key in hint for hint in hints):
+			matches.append(timeslot)
+	return matches or timeslots
+
+
+def _get_trial_import_course_session(weekly_timeslot, trial_date):
+	sessions = frappe.get_all(
+		"Course Sessions",
+		filters={"weekly_timeslot": weekly_timeslot, "session_date": trial_date},
+		fields=["name", "weekly_timeslot", "session_date", "status"],
+		order_by="modified desc",
+		limit_page_length=0,
+	)
+	if not sessions:
+		return {"reason": _("No Course Session exists for the matched Weekly Timeslot and trial date.")}
+	if len(sessions) > 1:
+		return {"reason": _("Multiple Course Sessions matched the submitted trial request.")}
+	return {"name": sessions[0].get("name")}
 
 
 def _run_trial_inquiry_row(row):
