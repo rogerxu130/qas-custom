@@ -134,12 +134,13 @@ def get_school_admin_dashboard_data():
 	start_date = getdate(today())
 	end_date = getdate(add_days(start_date, 7))
 	outstanding = _get_outstanding_invoice_summary()
+	draft_invoice_filters = _draft_invoice_submit_filters()
 	active_enrollment_filters = {"status": "Active"}
 	_apply_active_term_filter(active_enrollment_filters)
 	return {
 		"date": str(start_date),
 		"action_counts": {
-			"draft_invoices": _count_sales_invoices({"docstatus": 0}),
+			"draft_invoices": _count_sales_invoices(draft_invoice_filters),
 			"trial_needs_scheduling": _count(
 				"Inquiry",
 				{"inquiry_type": "Trial Lesson", "status": "Needs Review"},
@@ -1058,19 +1059,15 @@ def cancel_school_admin_invoice_data(invoice=None, reason=None):
 def start_school_admin_bulk_invoice_submit_job_data(payload=None):
 	_require_school_admin()
 	payload = _get_payload(payload)
-	invoices = payload.get("invoices") or []
-	if not isinstance(invoices, list):
-		frappe.throw(_("Invoices must be a list."))
-
-	invoice_names = []
-	seen = set()
-	for invoice in invoices:
-		invoice_name = (invoice or "").strip()
-		if invoice_name and invoice_name not in seen:
-			seen.add(invoice_name)
-			invoice_names.append(invoice_name)
+	if payload.get("all_drafts"):
+		invoice_names = _get_all_draft_invoice_names()
+	else:
+		invoices = payload.get("invoices") or []
+		if not isinstance(invoices, list):
+			frappe.throw(_("Invoices must be a list."))
+		invoice_names = _unique_invoice_names(invoices)
 	if not invoice_names:
-		frappe.throw(_("At least one invoice is required."))
+		frappe.throw(_("At least one draft invoice is required."))
 
 	job_id = frappe.generate_hash(length=16)
 	status = _bulk_invoice_submit_initial_status(job_id, invoice_names)
@@ -1086,6 +1083,34 @@ def start_school_admin_bulk_invoice_submit_job_data(payload=None):
 		requested_by=frappe.session.user,
 	)
 	return status
+
+
+def _unique_invoice_names(invoices):
+	invoice_names = []
+	seen = set()
+	for invoice in invoices or []:
+		invoice_name = (invoice or "").strip()
+		if invoice_name and invoice_name not in seen:
+			seen.add(invoice_name)
+			invoice_names.append(invoice_name)
+	return invoice_names
+
+
+def _draft_invoice_submit_filters():
+	filters = {"docstatus": 0}
+	if _has_field("Sales Invoice", "status"):
+		filters["status"] = ["!=", "Cancelled"]
+	return filters
+
+
+def _get_all_draft_invoice_names():
+	return frappe.get_all(
+		"Sales Invoice",
+		filters=_draft_invoice_submit_filters(),
+		pluck="name",
+		order_by="creation asc",
+		limit_page_length=0,
+	)
 
 
 def get_school_admin_bulk_invoice_submit_job_data(job_id=None):
