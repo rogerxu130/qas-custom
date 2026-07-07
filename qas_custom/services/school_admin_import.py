@@ -416,33 +416,22 @@ def _resolve_trial_import_session(row):
 		return None, _("Trial date was not submitted.")
 
 	course = _resolve_trial_import_course(row)
+	if not course:
+		return None, _("Course could not be matched from the submitted trial import row.")
+
 	timeslots = _get_trial_import_timeslots(
 		campus=campus,
 		day_of_week=parsed_session.get("day_of_week"),
 		start_time=parsed_session.get("start_time"),
 		course=course,
 	)
-	if not timeslots and course:
-		timeslots = _get_trial_import_timeslots(
-			campus=campus,
-			day_of_week=parsed_session.get("day_of_week"),
-			start_time=parsed_session.get("start_time"),
-		)
-
-	if len(timeslots) > 1:
-		timeslots = _filter_trial_timeslots_by_end_time(timeslots, parsed_session.get("end_time"))
-	if len(timeslots) > 1:
-		timeslots = _filter_trial_timeslots_by_course_hint(timeslots, row)
-
 	if not timeslots:
-		return None, _("No Weekly Timeslot matched the submitted campus, weekday, and time.")
-	if len(timeslots) > 1:
-		return None, _("Multiple Weekly Timeslots matched the submitted campus, weekday, and time.")
+		return None, _("No Weekly Timeslot matched the submitted course, campus, weekday, and time.")
 
-	timeslot = timeslots[0]
-	course_session = _get_trial_import_course_session(timeslot.get("name"), trial_date)
+	course_session = _get_trial_import_course_session(timeslots, trial_date)
 	if course_session.get("reason"):
 		return None, course_session.get("reason")
+	timeslot = course_session.get("timeslot") or {}
 	return {
 		"course_session": course_session.get("name"),
 		"course": timeslot.get("course"),
@@ -467,9 +456,9 @@ def _get_trial_import_timeslots(campus, day_of_week, start_time, course=None):
 	}
 	if course:
 		filters["course"] = course
-	fields = ["name", "course", "campus", "start_time"]
-	if _has_field("Weekly Timeslot", "end_time"):
-		fields.append("end_time")
+	if _has_field("Weekly Timeslot", "status"):
+		filters["status"] = "Active"
+	fields = ["name", "course", "campus", "start_time", "day_of_week"]
 	return frappe.get_all(
 		"Weekly Timeslot",
 		filters=filters,
@@ -479,30 +468,11 @@ def _get_trial_import_timeslots(campus, day_of_week, start_time, course=None):
 	)
 
 
-def _filter_trial_timeslots_by_end_time(timeslots, end_time):
-	if not end_time or not _has_field("Weekly Timeslot", "end_time"):
-		return timeslots
-	matches = [timeslot for timeslot in timeslots if str(timeslot.get("end_time") or "") == str(end_time)]
-	return matches or timeslots
-
-
-def _filter_trial_timeslots_by_course_hint(timeslots, row):
-	hints = [_normalized_key(row.get("class_type")), _normalized_key(row.get("form_name"))]
-	hints = [hint for hint in hints if hint]
-	if not hints:
-		return timeslots
-	matches = []
-	for timeslot in timeslots:
-		course_key = _normalized_key(timeslot.get("course"))
-		if course_key and any(hint == course_key or hint in course_key or course_key in hint for hint in hints):
-			matches.append(timeslot)
-	return matches or timeslots
-
-
-def _get_trial_import_course_session(weekly_timeslot, trial_date):
+def _get_trial_import_course_session(timeslots, trial_date):
+	timeslots_by_name = {timeslot.get("name"): timeslot for timeslot in timeslots if timeslot.get("name")}
 	sessions = frappe.get_all(
 		"Course Sessions",
-		filters={"weekly_timeslot": weekly_timeslot, "session_date": trial_date},
+		filters={"weekly_timeslot": ["in", list(timeslots_by_name)], "session_date": trial_date},
 		fields=["name", "weekly_timeslot", "session_date", "status"],
 		order_by="modified desc",
 		limit_page_length=0,
@@ -510,8 +480,8 @@ def _get_trial_import_course_session(weekly_timeslot, trial_date):
 	if not sessions:
 		return {"reason": _("No Course Session exists for the matched Weekly Timeslot and trial date.")}
 	if len(sessions) > 1:
-		return {"reason": _("Multiple Course Sessions matched the submitted trial request.")}
-	return {"name": sessions[0].get("name")}
+		return {"reason": _("Multiple Course Sessions matched the submitted course, campus, weekday, time, and trial date.")}
+	return {"name": sessions[0].get("name"), "timeslot": timeslots_by_name.get(sessions[0].get("weekly_timeslot"))}
 
 
 def _run_trial_inquiry_row(row):
