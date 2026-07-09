@@ -3024,7 +3024,7 @@ def _document_payload(doc):
 		if field.fieldtype in {"Section Break", "Column Break", "Tab Break", "HTML", "Button"}:
 			continue
 		if field.fieldtype == "Table":
-			data[field.fieldname] = [_child_payload(row) for row in doc.get(field.fieldname, [])]
+			data[field.fieldname] = [_child_payload(row) for row in (doc.get(field.fieldname) or [])]
 		else:
 			value = doc.get(field.fieldname)
 			data[field.fieldname] = str(value) if hasattr(value, "isoformat") else value
