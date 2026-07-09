@@ -565,16 +565,19 @@ def _enrollment_schedule_context(row, timeslot, term, course):
 		"course": course or timeslot.get("course"),
 		"weekly_timeslot": timeslot.get("name"),
 		"start_course_session": start_course_session,
-	}
+	}, None
 
 
 def _get_enrollment_import_timeslot(name):
 	if not name or not frappe.db.exists("Weekly Timeslot", name):
 		return None
+	fields = ["name", "term", "course", "campus", "day_of_week", "start_time"]
+	if _has_field("Weekly Timeslot", "status"):
+		fields.append("status")
 	return frappe.db.get_value(
 		"Weekly Timeslot",
 		name,
-		["name", "term", "course", "campus", "day_of_week", "start_time", "status"],
+		fields,
 		as_dict=True,
 	)
 
@@ -589,10 +592,13 @@ def _get_enrollment_import_timeslots(term, campus, course, day_of_week, start_ti
 	}
 	if _has_field("Weekly Timeslot", "status"):
 		filters["status"] = "Active"
+	fields = ["name", "term", "course", "campus", "day_of_week", "start_time"]
+	if _has_field("Weekly Timeslot", "status"):
+		fields.append("status")
 	return frappe.get_all(
 		"Weekly Timeslot",
 		filters=filters,
-		fields=["name", "term", "course", "campus", "day_of_week", "start_time", "status"],
+		fields=fields,
 		order_by="modified desc",
 		limit_page_length=0,
 	)
