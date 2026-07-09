@@ -7,7 +7,7 @@ import re
 
 import frappe
 from frappe import _
-from frappe.utils import flt, getdate, today
+from frappe.utils import cint, flt, getdate, now_datetime, today
 
 from qas_custom.modules.billing.store_credit import LEDGER_DOCTYPE, adjust_store_credit
 from qas_custom.services.class_attendance import ATTENDANCE_DOCTYPE
@@ -19,13 +19,24 @@ from qas_custom.services.inquiry import (
 	_resolve_course,
 )
 from qas_custom.services.parent_customer import ensure_parent_customer
-from qas_custom.services.school_admin import _require_school_admin
+from qas_custom.services.school_admin import (
+	_add_comment as _school_admin_add_comment,
+	_existing_invoice_for_enrollment,
+	_mark_draft_invoice_cancelled,
+	_require_school_admin,
+	cancel_school_admin_invoice_data,
+)
+from qas_custom.utils.environment import payment_block_reason, payment_mutations_enabled
 
 
 ACTIVE_STUDENT_STATUS = "Active"
 INACTIVE_STUDENT_STATUS = "Inactive"
 ACTIVE_PARENT_STATUS = "Active"
 INACTIVE_PARENT_STATUS = "Inactive"
+ENROLLMENT_CANCELLATION_IMPORT_TYPE = "Enrollment Cancellation"
+ENROLLMENT_CANCELLATION_ALLOWED_STATUSES = {"Planned", "Active"}
+OPERATION_REPORT_DOCTYPE = "QAS Operation Report"
+OPERATION_REPORT_SOURCE_SCHOOL_ADMIN_IMPORT = "School Admin Import"
 
 
 def preview_parent_student_import_data(payload=None):
@@ -238,6 +249,955 @@ def run_enrollment_import_data(payload=None):
 	result["ok"] = not result["errors"]
 	result["error_count"] = len(result["errors"])
 	return _finalize_result(result)
+
+
+def preview_enrollment_cancellation_import_data(payload=None):
+	_require_school_admin()
+	batch = _build_enrollment_cancellation_import_batch(payload)
+	return _preview_enrollment_cancellation_batch(batch)
+
+
+def run_enrollment_cancellation_import_data(payload=None):
+	_require_school_admin()
+	started_at = now_datetime()
+	batch = _build_enrollment_cancellation_import_batch(payload)
+	preview = _preview_enrollment_cancellation_batch(batch)
+	if preview.get("blocking_error_count"):
+		result = {
+			"ok": False,
+			"dry_run": False,
+			"message": _("Enrollment cancellation import has blocking errors. Run preview and fix the CSV first."),
+			"preview": preview,
+		}
+		result["report"] = _save_operation_report(
+			report_type=ENROLLMENT_CANCELLATION_IMPORT_TYPE,
+			status="Blocked",
+			result=preview,
+			source=OPERATION_REPORT_SOURCE_SCHOOL_ADMIN_IMPORT,
+			started_at=started_at,
+			source_filename=batch.get("source_filename"),
+		)
+		return result
+
+	result = _empty_result(dry_run=False)
+	result["input"] = preview.get("input")
+	result["warnings"] = list(preview.get("warnings") or [])
+	previous_in_import = getattr(frappe.flags, "in_import", None)
+	previous_mute_emails = getattr(frappe.flags, "mute_emails", None)
+	frappe.flags.in_import = True
+	frappe.flags.mute_emails = True
+	try:
+		for row in batch.get("cancellations", []):
+			savepoint = f"qas_enrollment_cancel_import_{frappe.generate_hash(length=10)}"
+			frappe.db.savepoint(savepoint)
+			try:
+				row_result = _run_enrollment_cancellation_row(row)
+				result["parents"].append(row_result)
+				_accumulate_counts(result["counts"], row_result.get("counts") or {})
+				result["warnings"].extend(row_result.get("warnings") or [])
+				frappe.db.commit()
+			except Exception as exc:
+				frappe.db.rollback(save_point=savepoint)
+				result["errors"].append({
+					"row": row.get("row_number"),
+					"parent_email": row.get("parent_email"),
+					"field": "enrollment_cancellation",
+					"message": str(exc),
+				})
+				result["parents"].append(_enrollment_cancellation_error_payload(row, exc))
+				result["counts"]["enrollment_cancellation_errors"] += 1
+				frappe.log_error(frappe.get_traceback(), "QAS enrollment cancellation import failed")
+	finally:
+		_restore_flag("in_import", previous_in_import)
+		_restore_flag("mute_emails", previous_mute_emails)
+
+	result["ok"] = not result["errors"]
+	result["error_count"] = len(result["errors"])
+	result["warning_count"] = len(result["warnings"])
+	result["manual_action_count"] = _manual_action_count(result.get("parents") or [])
+	status = "Completed With Errors" if result["errors"] else "Completed"
+	result = _finalize_result(result)
+	result["report"] = _save_operation_report(
+		report_type=ENROLLMENT_CANCELLATION_IMPORT_TYPE,
+		status=status,
+		result=result,
+		source=OPERATION_REPORT_SOURCE_SCHOOL_ADMIN_IMPORT,
+		started_at=started_at,
+		source_filename=batch.get("source_filename"),
+	)
+	return result
+
+
+def get_import_runs_data(import_type=None, limit=20):
+	return get_operation_reports_data(
+		report_type=_report_type_label(import_type),
+		source=OPERATION_REPORT_SOURCE_SCHOOL_ADMIN_IMPORT,
+		limit=limit,
+	)
+
+
+def get_import_run_data(import_run=None):
+	return get_operation_report_data(operation_report=import_run)
+
+
+def get_operation_reports_data(report_type=None, source=None, limit=20):
+	_require_school_admin()
+	if not _doctype_available(OPERATION_REPORT_DOCTYPE):
+		return {"items": []}
+	filters = {}
+	if report_type:
+		filters["report_type"] = _report_type_label(report_type)
+	if source:
+		filters["source"] = source
+	rows = frappe.get_all(
+		OPERATION_REPORT_DOCTYPE,
+		filters=filters,
+		fields=[
+			"name",
+			"report_type",
+			"source",
+			"source_reference",
+			"status",
+			"source_filename",
+			"started_at",
+			"finished_at",
+			"input_row_count",
+			"success_count",
+			"error_count",
+			"warning_count",
+			"manual_action_count",
+		],
+		order_by="finished_at desc, creation desc",
+		limit=_limit(limit, default=20, max_value=100),
+	)
+	items = []
+	for row in rows:
+		item = dict(row)
+		item["import_type"] = item.get("report_type")
+		items.append(item)
+	return {"items": items}
+
+
+def get_operation_report_data(operation_report=None):
+	_require_school_admin()
+	if not operation_report:
+		frappe.throw(_("Operation report is required."))
+	if not frappe.db.exists(OPERATION_REPORT_DOCTYPE, operation_report):
+		frappe.throw(_("Operation report {0} was not found.").format(operation_report))
+	doc = frappe.get_doc(OPERATION_REPORT_DOCTYPE, operation_report)
+	report = _decode_report_json(doc.get("report_json")) or {}
+	return {
+		"name": doc.name,
+		"report_type": doc.get("report_type"),
+		"import_type": doc.get("report_type"),
+		"source": doc.get("source"),
+		"source_reference": doc.get("source_reference"),
+		"status": doc.get("status"),
+		"source_filename": doc.get("source_filename"),
+		"started_at": doc.get("started_at"),
+		"finished_at": doc.get("finished_at"),
+		"input_row_count": doc.get("input_row_count"),
+		"success_count": doc.get("success_count"),
+		"error_count": doc.get("error_count"),
+		"warning_count": doc.get("warning_count"),
+		"manual_action_count": doc.get("manual_action_count"),
+		"report": report,
+		"rows": [_operation_report_child_row_payload(row) for row in doc.get("rows") or []],
+	}
+
+
+def _build_enrollment_cancellation_import_batch(payload=None):
+	payload = _get_payload(payload)
+	rows = payload.get("rows") if isinstance(payload, dict) else payload
+	if not isinstance(rows, list):
+		frappe.throw(_("Import rows must be a list."))
+	default_effective_date = _parse_date(payload.get("default_effective_date")) if isinstance(payload, dict) else ""
+
+	row_results = []
+	cancellations = []
+	seen_keys = set()
+	for index, raw_row in enumerate(rows, start=1):
+		if not isinstance(raw_row, dict):
+			row_results.append(_row_error(index, None, "row", _("Row must be an object.")))
+			continue
+		row = _normalize_enrollment_cancellation_row(raw_row, index, default_effective_date=default_effective_date)
+		key = _enrollment_cancellation_import_key(row)
+		if key and key in seen_keys:
+			row["duplicate_in_file"] = True
+		elif key:
+			seen_keys.add(key)
+		row_results.append(row)
+		if not row.get("errors"):
+			cancellations.append(row)
+	return {
+		"rows": row_results,
+		"cancellations": cancellations,
+		"source_filename": payload.get("source_filename") if isinstance(payload, dict) else "",
+	}
+
+
+def _normalize_enrollment_cancellation_row(raw_row, row_number, default_effective_date=""):
+	row = {str(key or "").strip(): _clean_text(value) for key, value in raw_row.items()}
+	student_value = _normalize_spaces(_first(row, ["student", "Student", "student_id", "Student ID"]))
+	student_name = _normalize_spaces(_first(row, ["student_name", "Student Name", "Name"]))
+	normalized = {
+		"row_number": row_number,
+		"source": row,
+		"enrollment": _normalize_spaces(_first(row, ["enrollment", "Enrollment", "Enrollment ID", "enrollment_id", "name"])),
+		"student": student_value if student_value and frappe.db.exists("Student", student_value) else "",
+		"student_name": student_name or ("" if student_value and frappe.db.exists("Student", student_value) else student_value),
+		"student_dob": _parse_date(_first(row, ["student_dob", "Student DOB", "DOB", "Date of Birth", "date_of_birth"])),
+		"parent": _normalize_spaces(_first(row, ["parent", "Parent", "parent_id", "Parent ID"])),
+		"parent_email": _normalize_email(_first(row, ["parent_email", "Parent Email", "email", "Email", "linked_user"])),
+		"invoice": _normalize_spaces(_first(row, ["invoice", "Invoice", "sales_invoice", "Sales Invoice", "invoice_id", "Invoice ID"])),
+		"term": _normalize_spaces(_first(row, ["term", "Term"])),
+		"course": _normalize_spaces(_first(row, ["course", "Course"])),
+		"weekly_timeslot": _normalize_spaces(_first(row, ["weekly_timeslot", "Weekly Timeslot", "timeslot"])),
+		"reason": _normalize_spaces(_first(row, ["reason", "Reason"])) or "Batch enrollment cancellation import",
+		"effective_date": _parse_date(_first(row, ["effective_date", "Effective Date", "end_date", "End Date"])) or default_effective_date or today(),
+		"source_note": _normalize_spaces(_first(row, ["source_note", "Source Note", "note", "notes", "Notes"])),
+		"errors": [],
+	}
+	if not normalized["enrollment"] and not normalized["invoice"] and not (normalized["parent_email"] and (normalized["student"] or normalized["student_name"])):
+		normalized["errors"].append(_field_error("enrollment", _("Enrollment, invoice, or parent_email + student is required.")))
+	if normalized["parent"] and not frappe.db.exists("Parent", normalized["parent"]):
+		normalized["errors"].append(_field_error("parent", _("Parent {0} was not found.").format(normalized["parent"])))
+	if normalized["invoice"] and not frappe.db.exists("Sales Invoice", normalized["invoice"]):
+		normalized["errors"].append(_field_error("invoice", _("Sales Invoice {0} was not found.").format(normalized["invoice"])))
+	return normalized
+
+
+def _preview_enrollment_cancellation_batch(batch):
+	result = _empty_result(dry_run=True)
+	valid_rows = batch.get("cancellations") or []
+	result["input"] = {
+		"row_count": len(batch.get("rows") or []),
+		"parent_count": len({_enrollment_parent_key(row) for row in valid_rows if _enrollment_parent_key(row)}),
+		"student_count": len(valid_rows),
+		"enrollment_count": len(valid_rows),
+		"manual_action_count": 0,
+	}
+
+	for row in batch.get("rows") or []:
+		for error in row.get("errors") or []:
+			result["errors"].append({"row": row.get("row_number"), "parent_email": row.get("parent_email"), **error})
+
+	for row in valid_rows:
+		preview = _preview_enrollment_cancellation_row(row)
+		result["parents"].append(preview)
+		_accumulate_counts(result["counts"], preview.get("counts") or {})
+		result["errors"].extend(preview.get("errors") or [])
+		result["warnings"].extend(preview.get("warnings") or [])
+
+	result["input"]["manual_action_count"] = _manual_action_count(result.get("parents") or [])
+	result["blocking_error_count"] = len(result["errors"])
+	result["warning_count"] = len(result["warnings"])
+	result["manual_action_count"] = result["input"]["manual_action_count"]
+	result["ok"] = result["blocking_error_count"] == 0
+	return _finalize_result(result)
+
+
+def _preview_enrollment_cancellation_row(row):
+	counts = defaultdict(int)
+	errors = []
+	warnings = []
+	if row.get("duplicate_in_file"):
+		counts["enrollment_cancellation_duplicates_in_file"] += 1
+		warnings.append(_enrollment_cancellation_issue(row, "enrollment", _("Duplicate row in this CSV. The later duplicate will be skipped.")))
+		return _enrollment_cancellation_payload(row, counts, warnings=warnings, skipped=True)
+
+	resolved = _resolve_enrollment_cancellation_target(row)
+	_accumulate_counts(counts, resolved.get("counts") or {})
+	errors.extend(resolved.get("errors") or [])
+	warnings.extend(resolved.get("warnings") or [])
+	if errors:
+		return _enrollment_cancellation_payload(row, counts, resolved=resolved, errors=errors, warnings=warnings)
+
+	doc = resolved.get("doc")
+	status = doc.get("status") or ""
+	if status == "Cancelled":
+		counts["enrollments_already_cancelled"] += 1
+		warnings.append(_enrollment_cancellation_issue(row, "status", _("Enrollment is already Cancelled and will be skipped.")))
+		return _enrollment_cancellation_payload(row, counts, resolved=resolved, warnings=warnings, skipped=True)
+	if status not in ENROLLMENT_CANCELLATION_ALLOWED_STATUSES:
+		errors.append(_enrollment_cancellation_issue(row, "status", _("Only Planned or Active enrollments can be cancelled by import. Current status is {0}.").format(status or _("blank"))))
+		return _enrollment_cancellation_payload(row, counts, resolved=resolved, errors=errors, warnings=warnings)
+
+	invoice_action = _classify_enrollment_cancellation_invoice(row, doc)
+	_accumulate_counts(counts, invoice_action.get("counts") or {})
+	warnings.extend(invoice_action.get("warnings") or [])
+	counts["enrollments_to_cancel"] += 1
+	attendance_count = _count_future_enrollment_attendance(doc.name, row.get("effective_date"))
+	if attendance_count:
+		counts["attendance_to_cancel"] += attendance_count
+	return _enrollment_cancellation_payload(
+		row,
+		counts,
+		resolved=resolved,
+		invoice_action=invoice_action,
+		warnings=warnings,
+		message=_("Enrollment will be cancelled."),
+	)
+
+
+def _run_enrollment_cancellation_row(row):
+	preview = _preview_enrollment_cancellation_row(row)
+	if preview.get("errors"):
+		frappe.throw("; ".join(error.get("message") for error in preview.get("errors") or []))
+	if preview.get("skipped"):
+		return preview
+
+	doc = frappe.get_doc("Enrollment", preview.get("enrollment"))
+	status_before = doc.get("status")
+	doc.status = "Cancelled"
+	doc.save(ignore_permissions=True)
+	attendance_cancelled = _cancel_future_enrollment_attendance_for_import(doc.name, effective_date=row.get("effective_date"))
+	reason = row.get("reason") or "Batch enrollment cancellation import"
+	_school_admin_add_comment(
+		"Enrollment",
+		doc.name,
+		_("Enrollment cancelled by School Admin import from {0}. Reason: {1}").format(row.get("effective_date"), reason),
+	)
+
+	counts = defaultdict(int, preview.get("counts") or {})
+	counts["enrollments_to_cancel"] = max(0, counts.get("enrollments_to_cancel", 0) - 1)
+	counts["enrollments_cancelled"] += 1
+	if attendance_cancelled:
+		counts["attendance_to_cancel"] = max(0, counts.get("attendance_to_cancel", 0) - attendance_cancelled)
+		counts["attendance_cancelled"] += attendance_cancelled
+
+	invoice_action = preview.get("invoice_action_detail") or {}
+	invoice_result = _apply_enrollment_cancellation_invoice_action(invoice_action, reason)
+	if invoice_result.get("count_key"):
+		counts[invoice_result.get("count_key")] += 1
+
+	result = {
+		**preview,
+		"status": "Cancelled",
+		"enrollment_status_before": status_before,
+		"attendance_cancelled": attendance_cancelled,
+		"counts": dict(counts),
+		"message": _enrollment_cancellation_run_message(invoice_result, attendance_cancelled),
+	}
+	if invoice_result:
+		result["invoice_action"] = invoice_result.get("action") or result.get("invoice_action")
+		result["invoice_message"] = invoice_result.get("message")
+		result["manual_action_required"] = invoice_result.get("manual_action_required", result.get("manual_action_required"))
+		result["invoice_status"] = invoice_result.get("invoice_status") or result.get("invoice_status")
+	return result
+
+
+def _resolve_enrollment_cancellation_target(row):
+	counts = defaultdict(int)
+	errors = []
+	warnings = []
+	doc = None
+	match_method = ""
+
+	if row.get("enrollment"):
+		if frappe.db.exists("Enrollment", row.get("enrollment")):
+			doc = frappe.get_doc("Enrollment", row.get("enrollment"))
+			match_method = "enrollment"
+		else:
+			errors.append(_enrollment_cancellation_issue(row, "enrollment", _("Enrollment {0} was not found.").format(row.get("enrollment"))))
+	elif row.get("invoice"):
+		resolved = _resolve_cancellation_by_invoice(row)
+		doc = resolved.get("doc")
+		match_method = resolved.get("match_method") or ""
+		errors.extend(resolved.get("errors") or [])
+		warnings.extend(resolved.get("warnings") or [])
+	else:
+		resolved = _resolve_cancellation_by_parent_student(row)
+		doc = resolved.get("doc")
+		match_method = resolved.get("match_method") or ""
+		errors.extend(resolved.get("errors") or [])
+		warnings.extend(resolved.get("warnings") or [])
+
+	if doc:
+		counts["enrollments_matched"] += 1
+		parent = doc.get("parent") or row.get("parent")
+		student = doc.get("student") or row.get("student")
+		return {
+			"doc": doc,
+			"parent": parent,
+			"student": student,
+			"student_name": _student_name(student, row),
+			"match_method": match_method,
+			"counts": counts,
+			"errors": errors,
+			"warnings": warnings,
+		}
+	return {"counts": counts, "errors": errors, "warnings": warnings}
+
+
+def _resolve_cancellation_by_invoice(row):
+	errors = []
+	warnings = []
+	invoice = row.get("invoice")
+	if not invoice or not frappe.db.exists("Sales Invoice", invoice):
+		return {"errors": [_enrollment_cancellation_issue(row, "invoice", _("Sales Invoice {0} was not found.").format(invoice))]}
+
+	student = _resolve_cancellation_student(row)
+	enrollment_names = _invoice_enrollment_names(frappe.get_doc("Sales Invoice", invoice))
+	if student:
+		candidates = _find_enrollments_for_student_invoice(student, invoice, enrollment_names)
+		if len(candidates) == 1:
+			return {"doc": frappe.get_doc("Enrollment", candidates[0]), "match_method": "invoice_student"}
+		if len(candidates) > 1:
+			errors.append(_enrollment_cancellation_issue(row, "enrollment", _("Multiple enrollments match this invoice and student. Add the enrollment column."), matches=candidates))
+		else:
+			errors.append(_enrollment_cancellation_issue(row, "student", _("No enrollment matched this invoice and student.")))
+		return {"errors": errors, "warnings": warnings}
+
+	if len(enrollment_names) == 1:
+		warnings.append(_enrollment_cancellation_issue(row, "student", _("Matched by the single enrollment linked to the invoice because no student was supplied.")))
+		return {"doc": frappe.get_doc("Enrollment", enrollment_names[0]), "match_method": "invoice_single_enrollment", "warnings": warnings}
+	errors.append(_enrollment_cancellation_issue(row, "student", _("Student is required when matching by invoice unless the invoice has exactly one linked enrollment."), matches=enrollment_names))
+	return {"errors": errors, "warnings": warnings}
+
+
+def _resolve_cancellation_by_parent_student(row):
+	errors = []
+	parent = row.get("parent")
+	if not parent:
+		matches = _find_parent_matches(row.get("parent_email"))
+		if len(matches) > 1:
+			errors.append(_enrollment_cancellation_issue(row, "parent_email", _("Multiple Parent records match email {0}.").format(row.get("parent_email")), matches=matches))
+			return {"errors": errors}
+		if matches:
+			parent = matches[0]
+	if not parent:
+		errors.append(_enrollment_cancellation_issue(row, "parent_email", _("Could not match a Parent from {0}.").format(row.get("parent_email"))))
+		return {"errors": errors}
+
+	student = _resolve_cancellation_student(row, parent=parent)
+	if not student:
+		errors.append(_enrollment_cancellation_issue(row, "student", _("Could not match the student under this parent.")))
+		return {"errors": errors}
+
+	filters = {
+		"student": student,
+		"status": ["in", list(ENROLLMENT_CANCELLATION_ALLOWED_STATUSES)],
+	}
+	if parent and _has_field("Enrollment", "parent"):
+		filters["parent"] = parent
+	if row.get("term"):
+		filters["term"] = row.get("term")
+	if row.get("course"):
+		filters["course"] = row.get("course")
+	if row.get("weekly_timeslot"):
+		filters["weekly_timeslot"] = row.get("weekly_timeslot")
+	candidates = frappe.get_all("Enrollment", filters=filters, pluck="name", limit_page_length=20)
+	if len(candidates) == 1:
+		return {"doc": frappe.get_doc("Enrollment", candidates[0]), "match_method": "parent_student"}
+	if len(candidates) > 1:
+		errors.append(_enrollment_cancellation_issue(row, "enrollment", _("Multiple open enrollments match this parent and student. Add enrollment, term, or weekly_timeslot."), matches=candidates))
+	else:
+		errors.append(_enrollment_cancellation_issue(row, "enrollment", _("No open Planned or Active enrollment matched this parent and student.")))
+	return {"errors": errors}
+
+
+def _resolve_cancellation_student(row, parent=None):
+	if row.get("student") and frappe.db.exists("Student", row.get("student")):
+		if parent and not _student_can_belong_to_parent(row.get("student"), parent):
+			return None
+		return row.get("student")
+	if parent and row.get("student_name"):
+		matches = _find_student_matches(parent, {"student_name": row.get("student_name"), "student_dob": row.get("student_dob")})
+		if len(matches) == 1:
+			return matches[0]
+	if row.get("student_name") and row.get("student_dob"):
+		matches = _find_student_identity_matches({"student_name": row.get("student_name"), "student_dob": row.get("student_dob")})
+		if len(matches) == 1:
+			return matches[0]
+	return None
+
+
+def _find_enrollments_for_student_invoice(student, invoice, invoice_enrollments=None):
+	matches = []
+	if invoice_enrollments:
+		rows = frappe.get_all(
+			"Enrollment",
+			filters={"name": ["in", invoice_enrollments], "student": student},
+			pluck="name",
+			limit_page_length=0,
+		)
+		matches.extend(rows)
+	if _has_field("Enrollment", "invoice"):
+		matches.extend(frappe.get_all("Enrollment", filters={"invoice": invoice, "student": student}, pluck="name", limit_page_length=0))
+	if _has_field("Sales Invoice", "enrollment"):
+		header_enrollment = frappe.db.get_value("Sales Invoice", invoice, "enrollment")
+		if header_enrollment:
+			matches.extend(frappe.get_all("Enrollment", filters={"name": header_enrollment, "student": student}, pluck="name", limit_page_length=0))
+	return _unique(matches)
+
+
+def _classify_enrollment_cancellation_invoice(row, enrollment_doc):
+	counts = defaultdict(int)
+	warnings = []
+	invoice_name = row.get("invoice") or _existing_invoice_for_enrollment(enrollment_doc)
+	if not invoice_name:
+		counts["invoices_not_found"] += 1
+		return {"action": "none", "counts": counts, "message": _("No linked invoice was found.")}
+	if not frappe.db.exists("Sales Invoice", invoice_name):
+		counts["invoices_not_found"] += 1
+		warnings.append(_enrollment_cancellation_issue(row, "invoice", _("Linked invoice {0} was not found.").format(invoice_name)))
+		return {"action": "none", "invoice": invoice_name, "counts": counts, "warnings": warnings}
+
+	doc = frappe.get_doc("Sales Invoice", invoice_name)
+	invoice_status = _invoice_status_for_report(doc)
+	if cint(doc.docstatus) == 2 or invoice_status == "Cancelled":
+		counts["invoices_already_cancelled"] += 1
+		return {
+			"action": "already_cancelled",
+			"invoice": invoice_name,
+			"invoice_status": invoice_status,
+			"counts": counts,
+			"message": _("Linked invoice is already cancelled."),
+		}
+
+	safety = _invoice_single_enrollment_safety(doc, enrollment_doc.name)
+	if not safety.get("safe"):
+		counts["invoices_require_manual_adjustment"] += 1
+		message = safety.get("message") or _("Invoice may include other enrollments or students.")
+		warnings.append(_enrollment_cancellation_issue(row, "invoice", _("Invoice {0} requires manual adjustment: {1}").format(invoice_name, message)))
+		return {
+			"action": "manual_adjustment",
+			"invoice": invoice_name,
+			"invoice_status": invoice_status,
+			"counts": counts,
+			"warnings": warnings,
+			"manual_action_required": True,
+			"message": message,
+		}
+
+	if cint(doc.docstatus) == 0:
+		counts["invoices_to_cancel"] += 1
+		return {"action": "cancel_draft", "invoice": invoice_name, "invoice_status": invoice_status, "counts": counts}
+	if cint(doc.docstatus) == 1 and payment_mutations_enabled():
+		counts["invoices_to_cancel"] += 1
+		return {"action": "cancel_submitted", "invoice": invoice_name, "invoice_status": invoice_status, "counts": counts}
+
+	counts["invoices_require_manual_adjustment"] += 1
+	message = payment_block_reason() if cint(doc.docstatus) == 1 else _("Invoice docstatus is not supported for automatic cancellation.")
+	warnings.append(_enrollment_cancellation_issue(row, "invoice", _("Invoice {0} requires manual adjustment: {1}").format(invoice_name, message)))
+	return {
+		"action": "manual_adjustment",
+		"invoice": invoice_name,
+		"invoice_status": invoice_status,
+		"counts": counts,
+		"warnings": warnings,
+		"manual_action_required": True,
+		"message": message,
+	}
+
+
+def _apply_enrollment_cancellation_invoice_action(invoice_action, reason):
+	action = invoice_action.get("action")
+	invoice = invoice_action.get("invoice")
+	if not invoice or action in ("none", "already_cancelled"):
+		return {
+			"action": action or "none",
+			"message": invoice_action.get("message"),
+			"invoice_status": invoice_action.get("invoice_status"),
+			"manual_action_required": False,
+		}
+	if action == "manual_adjustment":
+		return {
+			"action": action,
+			"message": _("Enrollment cancelled. Invoice requires manual adjustment: {0}").format(invoice_action.get("message") or invoice),
+			"invoice_status": invoice_action.get("invoice_status"),
+			"manual_action_required": True,
+			"count_key": "invoices_manual_adjustment_reported",
+		}
+	if action == "cancel_draft":
+		doc = frappe.get_doc("Sales Invoice", invoice)
+		_mark_draft_invoice_cancelled(doc, reason)
+		return {
+			"action": action,
+			"message": _("Draft invoice was marked Cancelled."),
+			"invoice_status": "Cancelled",
+			"manual_action_required": False,
+			"count_key": "invoices_cancelled",
+		}
+	if action == "cancel_submitted":
+		cancel_school_admin_invoice_data(invoice=invoice, reason=reason)
+		return {
+			"action": action,
+			"message": _("Submitted invoice was cancelled with the existing School Admin invoice cancellation flow."),
+			"invoice_status": "Cancelled",
+			"manual_action_required": False,
+			"count_key": "invoices_cancelled",
+		}
+	return {
+		"action": action,
+		"message": _("Invoice action was not recognized. Review manually."),
+		"invoice_status": invoice_action.get("invoice_status"),
+		"manual_action_required": True,
+		"count_key": "invoices_manual_adjustment_reported",
+	}
+
+
+def _invoice_single_enrollment_safety(invoice_doc, enrollment):
+	enrollment_names = _invoice_enrollment_names(invoice_doc)
+	if enrollment_names:
+		unique_enrollments = set(enrollment_names)
+		if unique_enrollments == {enrollment}:
+			return {"safe": True}
+		return {"safe": False, "message": _("Invoice has linked enrollment items: {0}").format(", ".join(sorted(unique_enrollments)))}
+
+	if _has_field("Sales Invoice", "enrollment") and invoice_doc.get("enrollment"):
+		return {"safe": invoice_doc.get("enrollment") == enrollment, "message": _("Invoice header links to another enrollment.")}
+	if _has_field("Sales Invoice", "source_doctype") and invoice_doc.get("source_doctype") == "Enrollment":
+		return {"safe": invoice_doc.get("source_document") == enrollment, "message": _("Invoice source links to another enrollment.")}
+
+	return {"safe": False, "message": _("Invoice does not expose a single enrollment link.")}
+
+
+def _invoice_enrollment_names(invoice_doc):
+	names = []
+	for item in invoice_doc.get("items", []) or []:
+		enrollment = item.get("enrollment")
+		if enrollment:
+			names.append(enrollment)
+	return _unique(names)
+
+
+def _count_future_enrollment_attendance(enrollment, effective_date=None):
+	if not _doctype_available(ATTENDANCE_DOCTYPE):
+		return 0
+	filters = {
+		"source_doctype": "Enrollment",
+		"source_document": enrollment,
+		"status": ["in", ["To be started", "Scheduled"]],
+	}
+	if effective_date:
+		session_ids = frappe.get_all(
+			"Course Sessions",
+			filters={"session_date": [">=", getdate(effective_date)]},
+			pluck="name",
+			limit_page_length=0,
+		)
+		if not session_ids:
+			return 0
+		filters["course_session"] = ["in", session_ids]
+	return frappe.db.count(ATTENDANCE_DOCTYPE, filters)
+
+
+def _cancel_future_enrollment_attendance_for_import(enrollment, effective_date=None):
+	if not _doctype_available(ATTENDANCE_DOCTYPE):
+		return 0
+	filters = {
+		"source_doctype": "Enrollment",
+		"source_document": enrollment,
+		"status": ["in", ["To be started", "Scheduled"]],
+	}
+	if effective_date:
+		session_ids = frappe.get_all(
+			"Course Sessions",
+			filters={"session_date": [">=", getdate(effective_date)]},
+			pluck="name",
+			limit_page_length=0,
+		)
+		if session_ids:
+			filters["course_session"] = ["in", session_ids]
+		else:
+			return 0
+	rows = frappe.get_all(ATTENDANCE_DOCTYPE, filters=filters, pluck="name", limit_page_length=0)
+	for row in rows:
+		frappe.db.set_value(ATTENDANCE_DOCTYPE, row, "status", "Cancelled", update_modified=True)
+	return len(rows)
+
+
+def _enrollment_cancellation_payload(row, counts, resolved=None, invoice_action=None, errors=None, warnings=None, skipped=False, message=None):
+	resolved = resolved or {}
+	doc = resolved.get("doc")
+	invoice_action = invoice_action or {}
+	student = resolved.get("student") or (doc.get("student") if doc else row.get("student"))
+	parent = resolved.get("parent") or (doc.get("parent") if doc else row.get("parent"))
+	invoice = invoice_action.get("invoice") or row.get("invoice") or (doc.get("invoice") if doc else "")
+	manual_action = bool(invoice_action.get("manual_action_required"))
+	return {
+		"row": row.get("row_number"),
+		"parent_email": row.get("parent_email"),
+		"parent": parent,
+		"student": student,
+		"student_name": _student_name(student, row),
+		"student_count": 1,
+		"enrollment": doc.name if doc else row.get("enrollment"),
+		"enrollment_status": doc.get("status") if doc else "",
+		"status": "Skipped" if skipped else (doc.get("status") if doc else ""),
+		"effective_date": row.get("effective_date"),
+		"reason": row.get("reason"),
+		"invoice": invoice,
+		"invoice_status": invoice_action.get("invoice_status"),
+		"invoice_action": _invoice_action_label(invoice_action.get("action")),
+		"invoice_action_detail": invoice_action,
+		"manual_action_required": manual_action,
+		"message": message or invoice_action.get("message") or "",
+		"skipped": skipped,
+		"counts": dict(counts),
+		"errors": errors or [],
+		"warnings": warnings or [],
+		"raw_row": row.get("source"),
+	}
+
+
+def _enrollment_cancellation_error_payload(row, exc):
+	counts = defaultdict(int)
+	counts["enrollment_cancellation_errors"] += 1
+	return {
+		"row": row.get("row_number"),
+		"parent_email": row.get("parent_email"),
+		"parent_record": row.get("parent"),
+		"student": row.get("student"),
+		"student_name": row.get("student_name"),
+		"enrollment": row.get("enrollment"),
+		"invoice": row.get("invoice"),
+		"status": "Error",
+		"message": str(exc),
+		"manual_action_required": False,
+		"counts": dict(counts),
+		"errors": [_enrollment_cancellation_issue(row, "enrollment_cancellation", str(exc))],
+		"warnings": [],
+		"raw_row": row.get("source"),
+	}
+
+
+def _enrollment_cancellation_run_message(invoice_result, attendance_cancelled):
+	pieces = [_("Enrollment cancelled.")]
+	if attendance_cancelled:
+		pieces.append(_("{0} future attendance rows cancelled.").format(attendance_cancelled))
+	if invoice_result.get("message"):
+		pieces.append(invoice_result.get("message"))
+	return " ".join(str(piece) for piece in pieces if piece)
+
+
+def _enrollment_cancellation_issue(row, field, message, matches=None):
+	issue = {
+		"row": row.get("row_number"),
+		"parent_email": row.get("parent_email"),
+		"field": field,
+		"message": str(message),
+	}
+	if matches:
+		issue["matches"] = matches
+	return issue
+
+
+def _enrollment_cancellation_import_key(row):
+	return "|".join(
+		_normalized_key(part)
+		for part in [
+			row.get("enrollment"),
+			row.get("invoice"),
+			row.get("parent") or row.get("parent_email"),
+			row.get("student") or row.get("student_name"),
+			row.get("term"),
+			row.get("weekly_timeslot"),
+		]
+	)
+
+
+def _student_name(student, row=None):
+	if student and frappe.db.exists("Student", student):
+		if _has_field("Student", "student_name"):
+			return frappe.db.get_value("Student", student, "student_name") or student
+		return student
+	return (row or {}).get("student_name") or student or ""
+
+
+def _invoice_status_for_report(doc):
+	if doc.get("status"):
+		return doc.get("status")
+	if cint(doc.docstatus) == 2:
+		return "Cancelled"
+	if cint(doc.docstatus) == 1:
+		return "Submitted"
+	return "Draft"
+
+
+def _invoice_action_label(action):
+	return {
+		"none": "No invoice",
+		"already_cancelled": "Already cancelled",
+		"manual_adjustment": "Manual adjustment required",
+		"cancel_draft": "Cancel draft invoice",
+		"cancel_submitted": "Cancel submitted invoice",
+	}.get(action or "", action or "")
+
+
+def _manual_action_count(rows):
+	return sum(1 for row in rows or [] if row.get("manual_action_required"))
+
+
+def _save_operation_report(
+	report_type,
+	status,
+	result,
+	started_at=None,
+	source=None,
+	source_reference=None,
+	source_filename=None,
+	success_count=None,
+):
+	if not _doctype_available(OPERATION_REPORT_DOCTYPE):
+		return None
+	finished_at = now_datetime()
+	rows = result.get("parents") or []
+	doc = frappe.new_doc(OPERATION_REPORT_DOCTYPE)
+	doc.report_type = report_type
+	doc.source = source or ""
+	doc.source_reference = source_reference or ""
+	doc.status = status
+	doc.source_filename = source_filename or ""
+	doc.started_at = started_at
+	doc.finished_at = finished_at
+	doc.input_row_count = (result.get("input") or {}).get("row_count") or 0
+	doc.success_count = success_count if success_count is not None else ((result.get("counts") or {}).get("enrollments_cancelled") or 0)
+	doc.error_count = result.get("blocking_error_count") or result.get("error_count") or len(result.get("errors") or [])
+	doc.warning_count = result.get("warning_count") or len(result.get("warnings") or [])
+	doc.manual_action_count = result.get("manual_action_count") or _manual_action_count(rows)
+	for row in rows[:500]:
+		doc.append("rows", _operation_report_child_row(row, blocked=status == "Blocked"))
+	doc.insert(ignore_permissions=True)
+	doc.db_set(
+		"report_json",
+		json.dumps(
+			_report_json_payload(
+				result,
+				doc.name,
+				status,
+				finished_at,
+				report_type=report_type,
+				source=source,
+				source_reference=source_reference,
+			),
+			default=str,
+			sort_keys=True,
+		),
+		update_modified=False,
+	)
+	frappe.db.commit()
+	return {
+		"name": doc.name,
+		"report_type": doc.report_type,
+		"import_type": doc.report_type,
+		"source": doc.source,
+		"source_reference": doc.source_reference,
+		"status": doc.status,
+		"finished_at": doc.finished_at,
+		"input_row_count": doc.input_row_count,
+		"success_count": doc.success_count,
+		"error_count": doc.error_count,
+		"warning_count": doc.warning_count,
+		"manual_action_count": doc.manual_action_count,
+	}
+
+
+def _report_json_payload(result, report_name, status, finished_at, report_type=None, source=None, source_reference=None):
+	payload = dict(result or {})
+	payload["report_name"] = report_name
+	payload["report_type"] = report_type
+	payload["report_source"] = source
+	payload["report_source_reference"] = source_reference
+	payload["report_status"] = status
+	payload["report_finished_at"] = str(finished_at)
+	return payload
+
+
+def _operation_report_child_row(row, blocked=False):
+	return {
+		"row_number": row.get("row"),
+		"row_status": _operation_report_row_status(row, blocked=blocked),
+		"action": _operation_report_row_action(row),
+		"manual_action_required": 1 if row.get("manual_action_required") else 0,
+		"reference_doctype": _operation_report_reference_doctype(row),
+		"reference_name": _operation_report_reference_name(row),
+		"parent_record": row.get("parent") or row.get("parent_record"),
+		"parent_email": row.get("parent_email"),
+		"student": row.get("student"),
+		"student_name": row.get("student_name"),
+		"enrollment": row.get("enrollment"),
+		"invoice": row.get("invoice"),
+		"invoice_action": row.get("invoice_action"),
+		"message": row.get("message") or row.get("invoice_message") or "",
+		"raw_row_json": json.dumps(row.get("raw_row") or {}, default=str, sort_keys=True),
+	}
+
+
+def _operation_report_child_row_payload(row):
+	return {
+		"row": row.get("row_number"),
+		"status": row.get("row_status"),
+		"action": row.get("action"),
+		"manual_action_required": bool(row.get("manual_action_required")),
+		"reference_doctype": row.get("reference_doctype"),
+		"reference_name": row.get("reference_name"),
+		"parent": row.get("parent_record"),
+		"parent_email": row.get("parent_email"),
+		"student": row.get("student"),
+		"student_name": row.get("student_name"),
+		"enrollment": row.get("enrollment"),
+		"invoice": row.get("invoice"),
+		"invoice_action": row.get("invoice_action"),
+		"message": row.get("message"),
+		"raw_row": _decode_report_json(row.get("raw_row_json")) or {},
+	}
+
+
+def _operation_report_row_status(row, blocked=False):
+	if row.get("errors"):
+		return "Error"
+	if blocked or row.get("skipped"):
+		return "Skipped"
+	return "Cancelled"
+
+
+def _operation_report_row_action(row):
+	if row.get("invoice_action"):
+		return row.get("invoice_action")
+	if row.get("status"):
+		return row.get("status")
+	return ""
+
+
+def _operation_report_reference_doctype(row):
+	if row.get("enrollment"):
+		return "Enrollment"
+	if row.get("invoice"):
+		return "Sales Invoice"
+	if row.get("student"):
+		return "Student"
+	if row.get("parent"):
+		return "Parent"
+	return ""
+
+
+def _operation_report_reference_name(row):
+	return row.get("enrollment") or row.get("invoice") or row.get("student") or row.get("parent") or ""
+
+
+def _decode_report_json(value):
+	if not value:
+		return None
+	try:
+		return json.loads(value)
+	except Exception:
+		return None
+
+
+def _report_type_label(value):
+	if value in ("enrollment_cancellation", ENROLLMENT_CANCELLATION_IMPORT_TYPE):
+		return ENROLLMENT_CANCELLATION_IMPORT_TYPE
+	return value
+
+
+def _limit(value, default=20, max_value=100):
+	value = cint(value or default)
+	if value <= 0:
+		value = default
+	return min(value, max_value)
 
 
 def _build_enrollment_import_batch(payload=None):

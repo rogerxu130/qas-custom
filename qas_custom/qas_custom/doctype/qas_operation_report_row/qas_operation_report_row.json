@@ -1,0 +1,140 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-07-10 00:00:00.000000",
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "row_number",
+  "row_status",
+  "action",
+  "manual_action_required",
+  "reference_doctype",
+  "reference_name",
+  "parent_record",
+  "parent_email",
+  "student",
+  "student_name",
+  "enrollment",
+  "invoice",
+  "invoice_action",
+  "message",
+  "raw_row_json"
+ ],
+ "fields": [
+  {
+   "fieldname": "row_number",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Row Number",
+   "read_only": 1
+  },
+  {
+   "fieldname": "row_status",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Row Status",
+   "read_only": 1
+  },
+  {
+   "fieldname": "action",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Action",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "manual_action_required",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Manual Action Required",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reference_doctype",
+   "fieldtype": "Data",
+   "label": "Reference Doctype",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reference_name",
+   "fieldtype": "Data",
+   "label": "Reference Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "parent_record",
+   "fieldtype": "Link",
+   "label": "Parent",
+   "options": "Parent",
+   "read_only": 1
+  },
+  {
+   "fieldname": "parent_email",
+   "fieldtype": "Data",
+   "label": "Parent Email",
+   "read_only": 1
+  },
+  {
+   "fieldname": "student",
+   "fieldtype": "Link",
+   "label": "Student",
+   "options": "Student",
+   "read_only": 1
+  },
+  {
+   "fieldname": "student_name",
+   "fieldtype": "Data",
+   "label": "Student Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "enrollment",
+   "fieldtype": "Link",
+   "label": "Enrollment",
+   "options": "Enrollment",
+   "read_only": 1
+  },
+  {
+   "fieldname": "invoice",
+   "fieldtype": "Link",
+   "label": "Invoice",
+   "options": "Sales Invoice",
+   "read_only": 1
+  },
+  {
+   "fieldname": "invoice_action",
+   "fieldtype": "Data",
+   "label": "Invoice Action",
+   "read_only": 1
+  },
+  {
+   "fieldname": "message",
+   "fieldtype": "Small Text",
+   "label": "Message",
+   "read_only": 1
+  },
+  {
+   "fieldname": "raw_row_json",
+   "fieldtype": "Code",
+   "label": "Raw Row JSON",
+   "options": "JSON",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-07-10 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "QAS Custom",
+ "name": "QAS Operation Report Row",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

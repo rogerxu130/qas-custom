@@ -1,0 +1,176 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "QOR-.YYYY.-.#####",
+ "creation": "2026-07-10 00:00:00.000000",
+ "doctype": "DocType",
+ "document_type": "Document",
+ "engine": "InnoDB",
+ "field_order": [
+  "report_type",
+  "source",
+  "source_reference",
+  "source_filename",
+  "status",
+  "started_at",
+  "finished_at",
+  "summary_section",
+  "input_row_count",
+  "success_count",
+  "error_count",
+  "warning_count",
+  "manual_action_count",
+  "report_section",
+  "report_json",
+  "rows"
+ ],
+ "fields": [
+  {
+   "fieldname": "report_type",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Report Type",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "source",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Source",
+   "read_only": 1
+  },
+  {
+   "fieldname": "source_reference",
+   "fieldtype": "Data",
+   "label": "Source Reference",
+   "read_only": 1
+  },
+  {
+   "fieldname": "source_filename",
+   "fieldtype": "Data",
+   "label": "Source Filename",
+   "read_only": 1
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Completed\nCompleted With Errors\nBlocked\nFailed",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "started_at",
+   "fieldtype": "Datetime",
+   "in_standard_filter": 1,
+   "label": "Started At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "finished_at",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Finished At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "summary_section",
+   "fieldtype": "Section Break",
+   "label": "Summary"
+  },
+  {
+   "fieldname": "input_row_count",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Input Row Count",
+   "read_only": 1
+  },
+  {
+   "fieldname": "success_count",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Success Count",
+   "read_only": 1
+  },
+  {
+   "fieldname": "error_count",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Error Count",
+   "read_only": 1
+  },
+  {
+   "fieldname": "warning_count",
+   "fieldtype": "Int",
+   "label": "Warning Count",
+   "read_only": 1
+  },
+  {
+   "fieldname": "manual_action_count",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Manual Action Count",
+   "read_only": 1
+  },
+  {
+   "fieldname": "report_section",
+   "fieldtype": "Section Break",
+   "label": "Report"
+  },
+  {
+   "fieldname": "report_json",
+   "fieldtype": "Code",
+   "label": "Report JSON",
+   "options": "JSON",
+   "read_only": 1
+  },
+  {
+   "fieldname": "rows",
+   "fieldtype": "Table",
+   "label": "Rows",
+   "options": "QAS Operation Report Row",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-07-10 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "QAS Custom",
+ "name": "QAS Operation Report",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "select": 1,
+   "share": 1,
+   "write": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "School Admin",
+   "select": 1
+  }
+ ],
+ "sort_field": "finished_at",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

@@ -8,10 +8,16 @@ from qas_custom.services.announcements import (
 	save_school_admin_announcement_data,
 )
 from qas_custom.services.school_admin_import import (
+	get_import_run_data,
+	get_import_runs_data,
+	get_operation_report_data,
+	get_operation_reports_data,
+	preview_enrollment_cancellation_import_data,
 	preview_enrollment_import_data,
 	preview_parent_student_import_data,
 	preview_store_credit_import_data,
 	preview_trial_inquiry_import_data,
+	run_enrollment_cancellation_import_data,
 	run_enrollment_import_data,
 	run_parent_student_import_data,
 	run_store_credit_import_data,
@@ -196,6 +202,36 @@ def school_admin_preview_enrollment_import(payload=None):
 @frappe.whitelist()
 def school_admin_run_enrollment_import(payload=None):
 	return run_enrollment_import_data(payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_preview_enrollment_cancellation_import(payload=None):
+	return preview_enrollment_cancellation_import_data(payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_run_enrollment_cancellation_import(payload=None):
+	return run_enrollment_cancellation_import_data(payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_get_import_runs(import_type=None, limit=20):
+	return get_import_runs_data(import_type=import_type, limit=limit)
+
+
+@frappe.whitelist()
+def school_admin_get_import_run(import_run=None):
+	return get_import_run_data(import_run=import_run)
+
+
+@frappe.whitelist()
+def school_admin_get_operation_reports(report_type=None, source=None, limit=20):
+	return get_operation_reports_data(report_type=report_type, source=source, limit=limit)
+
+
+@frappe.whitelist()
+def school_admin_get_operation_report(operation_report=None):
+	return get_operation_report_data(operation_report=operation_report)
 
 
 @frappe.whitelist()
