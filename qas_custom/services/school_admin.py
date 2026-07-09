@@ -1997,6 +1997,8 @@ def update_school_admin_enrollment_data(enrollment=None, payload=None):
 	doc = frappe.get_doc("Enrollment", enrollment)
 	previous_timeslot = doc.get("weekly_timeslot")
 	previous_status = doc.get("status")
+	if previous_status == "Planned" and payload.get("status") == "Active":
+		frappe.throw(_("Use Create Attendance to activate planned enrollments."))
 	_apply_enrollment_payload(doc, payload)
 	_validate_unique_open_enrollment(doc)
 	doc.save(ignore_permissions=True)
