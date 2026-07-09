@@ -7,12 +7,13 @@ import re
 
 import frappe
 from frappe import _
-from frappe.utils import flt, getdate
+from frappe.utils import flt, getdate, today
 
 from qas_custom.modules.billing.store_credit import LEDGER_DOCTYPE, adjust_store_credit
 from qas_custom.services.class_attendance import ATTENDANCE_DOCTYPE
 from qas_custom.services.inquiry import (
 	create_inquiry_core,
+	_derive_campus_and_course,
 	_parse_class_session,
 	_resolve_campus,
 	_resolve_course,
@@ -183,6 +184,687 @@ def run_trial_inquiry_import_data(payload=None):
 	result["ok"] = not result["errors"]
 	result["error_count"] = len(result["errors"])
 	return _finalize_result(result)
+
+
+def preview_enrollment_import_data(payload=None):
+	_require_school_admin()
+	batch = _build_enrollment_import_batch(payload)
+	return _preview_enrollment_batch(batch)
+
+
+def run_enrollment_import_data(payload=None):
+	_require_school_admin()
+	batch = _build_enrollment_import_batch(payload)
+	preview = _preview_enrollment_batch(batch)
+	if preview.get("blocking_error_count"):
+		return {
+			"ok": False,
+			"dry_run": False,
+			"message": _("Enrollment import has blocking errors. Run preview and fix the CSV first."),
+			"preview": preview,
+		}
+
+	result = _empty_result(dry_run=False)
+	result["input"] = preview.get("input")
+	result["warnings"] = list(preview.get("warnings") or [])
+	previous_in_import = getattr(frappe.flags, "in_import", None)
+	previous_mute_emails = getattr(frappe.flags, "mute_emails", None)
+	frappe.flags.in_import = True
+	frappe.flags.mute_emails = True
+	try:
+		for row in batch.get("enrollments", []):
+			savepoint = f"qas_enrollment_import_{frappe.generate_hash(length=10)}"
+			frappe.db.savepoint(savepoint)
+			try:
+				row_result = _run_enrollment_row(row)
+				result["parents"].append(row_result)
+				_accumulate_counts(result["counts"], row_result.get("counts") or {})
+				result["warnings"].extend(row_result.get("warnings") or [])
+				frappe.db.commit()
+			except Exception as exc:
+				frappe.db.rollback(save_point=savepoint)
+				result["errors"].append({
+					"row": row.get("row_number"),
+					"parent_email": row.get("parent_email"),
+					"field": "enrollment",
+					"message": str(exc),
+				})
+				result["counts"]["enrollment_errors"] += 1
+				frappe.log_error(frappe.get_traceback(), "QAS enrollment import failed")
+	finally:
+		_restore_flag("in_import", previous_in_import)
+		_restore_flag("mute_emails", previous_mute_emails)
+
+	result["ok"] = not result["errors"]
+	result["error_count"] = len(result["errors"])
+	return _finalize_result(result)
+
+
+def _build_enrollment_import_batch(payload=None):
+	payload = _get_payload(payload)
+	rows = payload.get("rows") if isinstance(payload, dict) else payload
+	if not isinstance(rows, list):
+		frappe.throw(_("Import rows must be a list."))
+	default_term = _normalize_spaces(payload.get("default_term")) if isinstance(payload, dict) else ""
+
+	row_results = []
+	enrollments = []
+	seen_keys = set()
+	for index, raw_row in enumerate(rows, start=1):
+		if not isinstance(raw_row, dict):
+			row_results.append(_row_error(index, None, "row", _("Row must be an object.")))
+			continue
+		row = _normalize_enrollment_row(raw_row, index, default_term=default_term)
+		key = _enrollment_import_key(row)
+		if key and key in seen_keys:
+			row["duplicate_in_file"] = True
+		elif key:
+			seen_keys.add(key)
+		row_results.append(row)
+		if not row.get("errors"):
+			enrollments.append(row)
+	return {"rows": row_results, "enrollments": enrollments}
+
+
+def _normalize_enrollment_row(raw_row, row_number, default_term=""):
+	row = {str(key or "").strip(): _clean_text(value) for key, value in raw_row.items()}
+	enrollment = _enrollment_id_from_row(row)
+	student = _normalize_spaces(_first(row, ["student", "Student", "student_id", "Student ID"]))
+	parent = _normalize_spaces(_first(row, ["parent", "Parent", "parent_id", "Parent ID"]))
+	parent_email = _normalize_email(_first(row, ["parent_email", "Parent Email", "Contact Email", "Contact Email Address", "email", "Email", "linked_user"]))
+	parent_name = _normalize_spaces(_first(row, ["parent_name", "Parent Name", "contact_name", "Contact Name"]))
+	parent_mobile = _normalize_phone(_first(row, ["parent_mobile", "Parent Mobile", "parent_phone", "Parent Phone", "Mobile", "Phone", "Phone Number", "Phone bumber"]))
+	student_name = _normalize_spaces(_first(row, ["student_name", "Student Name", "submitted_student_name", "Name"]))
+	student_dob = _parse_date(_first(row, ["student_dob", "Student DOB", "Student Birthday", "Date of Birth", "date_of_birth", "dob", "DOB"]))
+	term = _normalize_spaces(_first(row, ["term", "Term"])) or default_term
+	course = _normalize_spaces(_first(row, ["course", "Course", "class_type", "Class Type"]))
+	campus = _normalize_spaces(_first(row, ["campus", "Campus", "Which Campus?"]))
+	form_name = _normalize_spaces(_first(row, ["form_name", "Form Name", "formname", "Formname"]))
+	if form_name:
+		derived_campus, derived_course = _derive_campus_and_course(form_name)
+		campus = campus or derived_campus or ""
+		course = course or derived_course or ""
+	session_label = _normalize_spaces(_first(row, ["session_label", "class_session", "Class Session", "Which session?", "submitted_class_session"]))
+	weekly_timeslot = _normalize_spaces(_first(row, ["weekly_timeslot", "Weekly Timeslot", "timeslot", "Weekly Timeslot ID"]))
+	start_course_session = _normalize_spaces(_first(row, ["start_course_session", "Start Course Session", "course_session", "Course Session"]))
+	enrollment_type = _normalize_spaces(_first(row, ["enrollment_type", "Enrollment Type"])) or "Full-Term"
+	submitted_status = _normalize_spaces(_first(row, ["status", "Status", "enrollment_status", "Enrollment Status"]))
+	enrollment_date = _parse_date(_first(row, ["enrollment_date", "Enrollment Date", "created_at", "Creation"]))
+	source_id = _normalize_spaces(_first(row, ["source_id", "Source ID", "entry_id", "Entry ID", "ID"]))
+
+	normalized = {
+		"row_number": row_number,
+		"source": row,
+		"source_id": source_id,
+		"enrollment": enrollment,
+		"student": student,
+		"parent": parent,
+		"parent_email": parent_email,
+		"parent_name": parent_name,
+		"parent_mobile": parent_mobile,
+		"student_name": student_name,
+		"student_dob": student_dob,
+		"term": term,
+		"course": course,
+		"campus": campus,
+		"form_name": form_name,
+		"session_label": session_label,
+		"weekly_timeslot": weekly_timeslot,
+		"start_course_session": start_course_session,
+		"enrollment_type": enrollment_type,
+		"status": "Planned",
+		"submitted_status": submitted_status,
+		"enrollment_date": enrollment_date,
+		"errors": [],
+	}
+	if enrollment_type != "Full-Term":
+		normalized["errors"].append(_field_error("enrollment_type", _("Only Full-Term enrollment import is supported.")))
+	if not normalized["term"] and not normalized["weekly_timeslot"]:
+		normalized["errors"].append(_field_error("term", _("Term is required unless Weekly Timeslot can provide it.")))
+	if not normalized["parent"] and not normalized["parent_email"]:
+		normalized["errors"].append(_field_error("parent_email", _("Parent or parent email is required.")))
+	if not normalized["student"] and not normalized["student_name"]:
+		normalized["errors"].append(_field_error("student_name", _("Student or student name is required.")))
+	if not normalized["weekly_timeslot"] and not (normalized["campus"] and normalized["course"] and normalized["session_label"]):
+		normalized["errors"].append(_field_error("weekly_timeslot", _("Weekly Timeslot, or campus + course + session_label, is required.")))
+	return normalized
+
+
+def _preview_enrollment_batch(batch):
+	result = _empty_result(dry_run=True)
+	valid_rows = batch.get("enrollments") or []
+	result["input"] = {
+		"row_count": len(batch.get("rows") or []),
+		"parent_count": len({_enrollment_parent_key(row) for row in valid_rows if _enrollment_parent_key(row)}),
+		"student_count": len(valid_rows),
+		"enrollment_count": len(valid_rows),
+	}
+
+	for row in batch.get("rows") or []:
+		for error in row.get("errors") or []:
+			result["errors"].append({"row": row.get("row_number"), "parent_email": row.get("parent_email"), **error})
+
+	for row in valid_rows:
+		preview = _preview_enrollment_row(row)
+		result["parents"].append(preview)
+		_accumulate_counts(result["counts"], preview.get("counts") or {})
+		result["errors"].extend(preview.get("errors") or [])
+		result["warnings"].extend(preview.get("warnings") or [])
+
+	result["blocking_error_count"] = len(result["errors"])
+	result["warning_count"] = len(result["warnings"])
+	result["ok"] = result["blocking_error_count"] == 0
+	return _finalize_result(result)
+
+
+def _preview_enrollment_row(row):
+	counts = defaultdict(int)
+	errors = []
+	warnings = []
+	if row.get("duplicate_in_file"):
+		counts["enrollment_duplicates_in_file"] += 1
+		warnings.append(_enrollment_issue(row, "enrollment", _("Duplicate row in this CSV. The later duplicate will be skipped.")))
+		return _enrollment_preview_payload(row, counts, warnings=warnings, skipped=True)
+
+	if row.get("enrollment"):
+		if frappe.db.exists("Enrollment", row.get("enrollment")):
+			counts["enrollments_existing_skipped"] += 1
+			warnings.append(_enrollment_issue(row, "enrollment", _("Existing Enrollment {0} will be skipped. Use the Enrollment workbench for updates.").format(row.get("enrollment"))))
+			return _enrollment_preview_payload(row, counts, warnings=warnings, skipped=True)
+		errors.append(_enrollment_issue(row, "enrollment", _("Enrollment ID {0} was not found. Remove it for a new import row.").format(row.get("enrollment"))))
+		return _enrollment_preview_payload(row, counts, errors=errors)
+
+	family = _resolve_enrollment_family_preview(row)
+	_accumulate_counts(counts, family.get("counts") or {})
+	errors.extend(family.get("errors") or [])
+	warnings.extend(family.get("warnings") or [])
+
+	schedule = _resolve_enrollment_schedule_preview(row)
+	_accumulate_counts(counts, schedule.get("counts") or {})
+	errors.extend(schedule.get("errors") or [])
+	warnings.extend(schedule.get("warnings") or [])
+
+	if row.get("submitted_status") and row.get("submitted_status") != "Planned":
+		warnings.append(_enrollment_issue(row, "status", _("Enrollment import creates Planned records. Submitted status {0} will be ignored.").format(row.get("submitted_status"))))
+
+	student = family.get("student")
+	term = schedule.get("term")
+	weekly_timeslot = schedule.get("weekly_timeslot")
+	if not errors and student and term and weekly_timeslot and _enrollment_duplicate_exists(student, term, weekly_timeslot):
+		counts["enrollments_duplicates_skipped"] += 1
+		warnings.append(_enrollment_issue(row, "enrollment", _("Matching Planned or Active Enrollment already exists and will be skipped.")))
+	elif not errors:
+		counts["enrollments_to_create"] += 1
+	return _enrollment_preview_payload(row, counts, family=family, schedule=schedule, errors=errors, warnings=warnings)
+
+
+def _resolve_enrollment_family_preview(row):
+	counts = defaultdict(int)
+	errors = []
+	warnings = []
+	parent = None
+	student = None
+	parent_matches = []
+
+	if row.get("parent"):
+		if frappe.db.exists("Parent", row.get("parent")):
+			parent = row.get("parent")
+			counts["parents_reused"] += 1
+		else:
+			errors.append(_enrollment_issue(row, "parent", _("Parent {0} was not found.").format(row.get("parent"))))
+	elif row.get("parent_email"):
+		parent_matches = _find_parent_matches(row.get("parent_email"))
+		if len(parent_matches) > 1:
+			errors.append(_enrollment_issue(row, "parent_email", _("Multiple Parent records match email {0}.").format(row.get("parent_email")), matches=parent_matches))
+		elif parent_matches:
+			parent = parent_matches[0]
+			counts["parents_reused"] += 1
+		else:
+			counts["parents_to_create"] += 1
+			if not row.get("parent_name"):
+				errors.append(_enrollment_issue(row, "parent_name", _("Parent name is required when creating a new parent.")))
+
+	if parent and _record_status("Parent", parent) not in ("", ACTIVE_PARENT_STATUS):
+		counts["parents_to_update"] += 1
+
+	if row.get("parent_email"):
+		if _find_user(row.get("parent_email")):
+			counts["users_reused"] += 1
+		else:
+			counts["users_to_create"] += 1
+
+	customer = _parent_customer(parent) if parent else None
+	if parent and not customer:
+		customer = _find_customer_for_parent(row.get("parent_email"), [parent])
+	if parent:
+		counts["customers_reused" if customer else "customers_to_create"] += 1
+	elif row.get("parent_email"):
+		counts["customers_to_create"] += 1
+
+	if row.get("student"):
+		if frappe.db.exists("Student", row.get("student")):
+			student = row.get("student")
+			counts["students_reused"] += 1
+			if parent and not _student_can_belong_to_parent(student, parent):
+				errors.append(_enrollment_issue(row, "student", _("Student {0} belongs to a different parent.").format(student), matches=[student]))
+		else:
+			errors.append(_enrollment_issue(row, "student", _("Student {0} was not found.").format(row.get("student"))))
+	elif parent and not errors:
+		conflicts = _trial_student_conflicts(parent, row)
+		if conflicts:
+			errors.extend(conflicts)
+		else:
+			matches = _find_student_matches(parent, {"student_name": row.get("student_name"), "student_dob": row.get("student_dob")})
+			if len(matches) > 1:
+				errors.append(_enrollment_issue(row, "student_name", _("Multiple Student records match this parent and student."), matches=matches))
+			elif matches:
+				student = matches[0]
+				counts["students_reused"] += 1
+			else:
+				identity_matches = _find_student_identity_matches(row)
+				if identity_matches:
+					errors.append(_enrollment_issue(row, "student_name", _("Student {0} with DOB {1} already exists. Please resolve this duplicate manually.").format(row.get("student_name"), row.get("student_dob")), matches=identity_matches))
+				counts["students_to_create"] += 1
+				if _parent_student_count(parent):
+					warnings.append(_enrollment_issue(row, "student_name", _("New student will be created under an existing parent. Check this is not a returning student.")))
+	else:
+		identity_matches = _find_student_identity_matches(row)
+		if identity_matches:
+			errors.append(_enrollment_issue(row, "student_name", _("Student {0} with DOB {1} already exists. Please resolve this duplicate manually.").format(row.get("student_name"), row.get("student_dob")), matches=identity_matches))
+		counts["students_to_create"] += 1
+
+	if student and _record_status("Student", student) not in ("", ACTIVE_STUDENT_STATUS):
+		counts["students_to_update"] += 1
+	if not row.get("student") and not row.get("student_dob"):
+		warnings.append(_enrollment_issue(row, "student_dob", _("Student DOB is blank. Matching is less reliable.")))
+	return {"parent": parent, "student": student, "counts": counts, "errors": errors, "warnings": warnings}
+
+
+def _resolve_enrollment_schedule_preview(row):
+	counts = defaultdict(int)
+	errors = []
+	context, reason = _resolve_enrollment_schedule(row)
+	if reason or not context:
+		errors.append(_enrollment_issue(row, "weekly_timeslot", reason or _("Weekly Timeslot could not be matched.")))
+		return {"counts": counts, "errors": errors, "warnings": []}
+	counts["weekly_timeslots_matched"] += 1
+	if context.get("start_course_session"):
+		counts["course_sessions_matched"] += 1
+	return {**context, "counts": counts, "errors": errors, "warnings": []}
+
+
+def _resolve_enrollment_schedule(row):
+	if row.get("weekly_timeslot"):
+		timeslot = _get_enrollment_import_timeslot(row.get("weekly_timeslot"))
+		if not timeslot:
+			return None, _("Weekly Timeslot {0} was not found.").format(row.get("weekly_timeslot"))
+		if timeslot.get("status") and timeslot.get("status") != "Active":
+			return None, _("Weekly Timeslot {0} is not Active.").format(row.get("weekly_timeslot"))
+		term = row.get("term") or timeslot.get("term")
+		if row.get("term") and timeslot.get("term") and row.get("term") != timeslot.get("term"):
+			return None, _("Weekly Timeslot does not belong to term {0}.").format(row.get("term"))
+		course = timeslot.get("course")
+		if row.get("course"):
+			resolved_course = _resolve_course(row.get("course"))
+			if not resolved_course:
+				return None, _("Course could not be matched from the submitted enrollment row.")
+			if course and resolved_course != course:
+				return None, _("Weekly Timeslot course does not match submitted course {0}.").format(row.get("course"))
+			course = resolved_course
+		return _enrollment_schedule_context(row, timeslot, term, course)
+
+	term = row.get("term")
+	if not term:
+		return None, _("Term is required to match Weekly Timeslot.")
+	if not frappe.db.exists("Term", term):
+		return None, _("Term {0} was not found.").format(term)
+	campus = _resolve_campus(row.get("campus"))
+	if not campus:
+		return None, _("Campus could not be matched from the submitted enrollment row.")
+	course = _resolve_course(row.get("course"))
+	if not course:
+		return None, _("Course could not be matched from the submitted enrollment row.")
+	parsed_session = _parse_class_session(row.get("session_label"))
+	if not parsed_session:
+		return None, _("Class session time could not be parsed from the submitted enrollment row.")
+	timeslots = _get_enrollment_import_timeslots(
+		term=term,
+		campus=campus,
+		course=course,
+		day_of_week=parsed_session.get("day_of_week"),
+		start_time=parsed_session.get("start_time"),
+	)
+	if not timeslots:
+		return None, _("No Weekly Timeslot matched the submitted term, course, campus, weekday, and time.")
+	if len(timeslots) > 1:
+		return None, _("Multiple Weekly Timeslots matched the submitted term, course, campus, weekday, and time.")
+	return _enrollment_schedule_context(row, timeslots[0], term, course)
+
+
+def _enrollment_schedule_context(row, timeslot, term, course):
+	if not term:
+		return None, _("Term is required before creating an enrollment.")
+	if not frappe.db.exists("Term", term):
+		return None, _("Term {0} was not found.").format(term)
+	start_course_session = row.get("start_course_session")
+	if start_course_session:
+		session = frappe.db.get_value(
+			"Course Sessions",
+			start_course_session,
+			["name", "weekly_timeslot", "session_date", "status"],
+			as_dict=True,
+		)
+		if not session:
+			return None, _("Start Course Session {0} was not found.").format(start_course_session)
+		if session.get("weekly_timeslot") != timeslot.get("name"):
+			return None, _("Start Course Session does not belong to the matched Weekly Timeslot.")
+		if session.get("status") == "Cancelled":
+			return None, _("Start Course Session is cancelled.")
+	return {
+		"term": term,
+		"course": course or timeslot.get("course"),
+		"weekly_timeslot": timeslot.get("name"),
+		"start_course_session": start_course_session,
+	}
+
+
+def _get_enrollment_import_timeslot(name):
+	if not name or not frappe.db.exists("Weekly Timeslot", name):
+		return None
+	return frappe.db.get_value(
+		"Weekly Timeslot",
+		name,
+		["name", "term", "course", "campus", "day_of_week", "start_time", "status"],
+		as_dict=True,
+	)
+
+
+def _get_enrollment_import_timeslots(term, campus, course, day_of_week, start_time):
+	filters = {
+		"term": term,
+		"campus": campus,
+		"course": course,
+		"day_of_week": day_of_week,
+		"start_time": start_time,
+	}
+	if _has_field("Weekly Timeslot", "status"):
+		filters["status"] = "Active"
+	return frappe.get_all(
+		"Weekly Timeslot",
+		filters=filters,
+		fields=["name", "term", "course", "campus", "day_of_week", "start_time", "status"],
+		order_by="modified desc",
+		limit_page_length=0,
+	)
+
+
+def _run_enrollment_row(row):
+	counts = defaultdict(int)
+	warnings = []
+	if row.get("duplicate_in_file"):
+		counts["enrollment_duplicates_in_file"] += 1
+		return _enrollment_preview_payload(row, counts, warnings=[_enrollment_issue(row, "enrollment", _("Duplicate row in this CSV was skipped."))], skipped=True)
+	if row.get("enrollment"):
+		if frappe.db.exists("Enrollment", row.get("enrollment")):
+			counts["enrollments_existing_skipped"] += 1
+			return _enrollment_preview_payload(row, counts, warnings=[_enrollment_issue(row, "enrollment", _("Existing Enrollment was skipped. Use the Enrollment workbench for updates."))], skipped=True)
+		frappe.throw(_("Enrollment ID {0} was not found. Remove it for a new import row.").format(row.get("enrollment")))
+
+	schedule = _resolve_enrollment_schedule_preview(row)
+	if schedule.get("errors"):
+		frappe.throw("; ".join(error.get("message") for error in schedule.get("errors") or []))
+	family_preview = _resolve_enrollment_family_preview(row)
+	if family_preview.get("errors"):
+		frappe.throw("; ".join(error.get("message") for error in family_preview.get("errors") or []))
+	warnings.extend(family_preview.get("warnings") or [])
+	if row.get("submitted_status") and row.get("submitted_status") != "Planned":
+		warnings.append(_enrollment_issue(row, "status", _("Enrollment import created a Planned record and ignored submitted status {0}.").format(row.get("submitted_status"))))
+
+	family = _ensure_enrollment_family(row)
+	_accumulate_counts(counts, family.get("counts") or {})
+	warnings.extend(family.get("warnings") or [])
+	parent = family.get("parent")
+	student = family.get("student")
+	term = schedule.get("term")
+	weekly_timeslot = schedule.get("weekly_timeslot")
+	if _enrollment_duplicate_exists(student, term, weekly_timeslot):
+		counts["enrollments_duplicates_skipped"] += 1
+		return _enrollment_preview_payload(row, counts, family=family, schedule=schedule, warnings=[_enrollment_issue(row, "enrollment", _("Matching Planned or Active Enrollment already exists and was skipped."))], skipped=True)
+
+	doc = frappe.new_doc("Enrollment")
+	doc.student = student
+	doc.parent = parent
+	doc.term = term
+	doc.course = schedule.get("course")
+	doc.weekly_timeslot = weekly_timeslot
+	if schedule.get("start_course_session") and doc.meta.has_field("start_course_session"):
+		doc.start_course_session = schedule.get("start_course_session")
+	doc.enrollment_type = "Full-Term"
+	doc.status = "Planned"
+	if doc.meta.has_field("enrollment_date"):
+		doc.enrollment_date = row.get("enrollment_date") or today()
+	doc.insert(ignore_permissions=True)
+	counts["enrollments_created"] += 1
+	return {
+		**_enrollment_preview_payload(row, counts, family=family, schedule=schedule, warnings=warnings),
+		"enrollment": doc.name,
+	}
+
+
+def _ensure_enrollment_family(row):
+	counts = defaultdict(int)
+	warnings = []
+	if row.get("parent"):
+		parent = _ensure_existing_enrollment_parent(row, counts)
+	else:
+		user = _ensure_user(row.get("parent_email"), row.get("parent_name"))
+		counts["users_created" if user.get("created") else "users_reused"] += 1
+		parent_matches = _find_parent_matches(row.get("parent_email"))
+		if len(parent_matches) > 1:
+			frappe.throw(_("Multiple Parent records match email {0}.").format(row.get("parent_email")))
+		customer = _find_customer_for_parent(row.get("parent_email"), parent_matches)
+		parent_record = {
+			"email": row.get("parent_email"),
+			"parent_name": row.get("parent_name"),
+			"parent_mobile": row.get("parent_mobile"),
+			"parent_status": ACTIVE_PARENT_STATUS,
+		}
+		parent_result = _ensure_parent(parent_record, user.get("name"), customer)
+		parent = parent_result.get("name")
+		if parent_result.get("created"):
+			counts["parents_created"] += 1
+		elif parent_result.get("updated"):
+			counts["parents_updated"] += 1
+		else:
+			counts["parents_reused"] += 1
+
+	customer_before = _parent_customer(parent)
+	customer_name = ensure_parent_customer(parent)
+	if customer_name:
+		counts["customers_reused" if customer_before == customer_name else "customers_created"] += 1
+
+	if row.get("student"):
+		student_result = _ensure_existing_enrollment_student(parent, row)
+	else:
+		student_result = _ensure_student(parent, {
+			"row_number": row.get("row_number"),
+			"student_name": row.get("student_name"),
+			"student_dob": row.get("student_dob"),
+			"student_status": ACTIVE_STUDENT_STATUS,
+		})
+	student = student_result.get("name") or student_result.get("student")
+	if student_result.get("created"):
+		counts["students_created"] += 1
+	elif student_result.get("updated"):
+		counts["students_updated"] += 1
+	else:
+		counts["students_reused"] += 1
+	if not row.get("student_dob") and not row.get("student"):
+		warnings.append(_enrollment_issue(row, "student_dob", _("Student was imported without DOB.")))
+	return {"parent": parent, "student": student, "customer": customer_name, "counts": counts, "warnings": warnings}
+
+
+def _ensure_existing_enrollment_parent(row, counts):
+	doc = frappe.get_doc("Parent", row.get("parent"))
+	changed = False
+	if row.get("parent_email") and doc.meta.has_field("linked_user"):
+		user = _ensure_user(row.get("parent_email"), row.get("parent_name") or doc.get("parent_name"))
+		counts["users_created" if user.get("created") else "users_reused"] += 1
+		if not doc.get("linked_user"):
+			doc.linked_user = user.get("name")
+			changed = True
+	if row.get("parent_name") and not doc.get("parent_name"):
+		doc.parent_name = row.get("parent_name")
+		changed = True
+	if row.get("parent_mobile") and doc.meta.has_field("mobile_number") and not doc.get("mobile_number"):
+		doc.mobile_number = row.get("parent_mobile")
+		changed = True
+	if doc.meta.has_field("status") and doc.get("status") != ACTIVE_PARENT_STATUS:
+		doc.status = ACTIVE_PARENT_STATUS
+		changed = True
+	if changed:
+		doc.save(ignore_permissions=True)
+		counts["parents_updated"] += 1
+	else:
+		counts["parents_reused"] += 1
+	return doc.name
+
+
+def _ensure_existing_enrollment_student(parent, row):
+	doc = frappe.get_doc("Student", row.get("student"))
+	parent_field = _student_parent_field()
+	changed = False
+	if parent_field:
+		current_parent = doc.get(parent_field)
+		if current_parent and current_parent != parent:
+			frappe.throw(_("Student {0} belongs to a different parent.").format(doc.name))
+		if not current_parent:
+			doc.set(parent_field, parent)
+			changed = True
+	if row.get("student_name") and not doc.get("student_name"):
+		doc.student_name = row.get("student_name")
+		changed = True
+	if row.get("student_dob") and doc.meta.has_field("date_of_birth") and not doc.get("date_of_birth"):
+		doc.date_of_birth = row.get("student_dob")
+		changed = True
+	if doc.meta.has_field("status") and doc.get("status") != ACTIVE_STUDENT_STATUS:
+		doc.status = ACTIVE_STUDENT_STATUS
+		changed = True
+	if changed:
+		doc.save(ignore_permissions=True)
+	return {"name": doc.name, "created": False, "updated": changed}
+
+
+def _enrollment_duplicate_exists(student, term, weekly_timeslot):
+	if not student or not term or not weekly_timeslot or not _doctype_available("Enrollment"):
+		return False
+	return bool(frappe.db.exists("Enrollment", {
+		"student": student,
+		"term": term,
+		"weekly_timeslot": weekly_timeslot,
+		"enrollment_type": "Full-Term",
+		"status": ["in", ["Planned", "Active"]],
+	}))
+
+
+def _student_can_belong_to_parent(student, parent):
+	parent_field = _student_parent_field()
+	if not parent_field:
+		return True
+	current_parent = frappe.db.get_value("Student", student, parent_field)
+	return not current_parent or current_parent == parent
+
+
+def _parent_customer(parent):
+	if parent and _has_field("Parent", "customer"):
+		return frappe.db.get_value("Parent", parent, "customer")
+	return None
+
+
+def _parent_student_count(parent):
+	parent_field = _student_parent_field()
+	if not parent or not parent_field:
+		return 0
+	return len(frappe.get_all("Student", filters={parent_field: parent}, pluck="name", limit_page_length=0))
+
+
+def _enrollment_preview_payload(row, counts, family=None, schedule=None, errors=None, warnings=None, skipped=False):
+	family = family or {}
+	schedule = schedule or {}
+	return {
+		"row": row.get("row_number"),
+		"parent_email": row.get("parent_email"),
+		"parent": family.get("parent") or row.get("parent"),
+		"planned_parent_name": row.get("parent_name"),
+		"student": family.get("student") or row.get("student"),
+		"student_name": row.get("student_name") or family.get("student"),
+		"student_dob": row.get("student_dob"),
+		"student_count": 1,
+		"term": schedule.get("term") or row.get("term"),
+		"course": schedule.get("course") or row.get("course"),
+		"weekly_timeslot": schedule.get("weekly_timeslot") or row.get("weekly_timeslot"),
+		"session_label": row.get("session_label"),
+		"start_course_session": schedule.get("start_course_session") or row.get("start_course_session"),
+		"enrollment_type": "Full-Term",
+		"status": "Planned",
+		"skipped": skipped,
+		"counts": dict(counts),
+		"errors": errors or [],
+		"warnings": warnings or [],
+	}
+
+
+def _enrollment_issue(row, field, message, matches=None):
+	issue = {
+		"row": row.get("row_number"),
+		"parent_email": row.get("parent_email"),
+		"field": field,
+		"message": str(message),
+	}
+	if matches:
+		issue["matches"] = matches
+	return issue
+
+
+def _enrollment_id_from_row(row):
+	explicit = _normalize_spaces(_first(row, ["enrollment", "Enrollment", "Enrollment ID", "name", "Name (Enrollment)"]))
+	if explicit:
+		return explicit
+	generic_id = _normalize_spaces(_first(row, ["ID", "id"]))
+	if generic_id and _looks_like_frappe_enrollment_row(row):
+		return generic_id
+	return ""
+
+
+def _looks_like_frappe_enrollment_row(row):
+	frappe_enrollment_keys = ["Weekly Timeslot", "Enrollment Type", "Enrollment Date", "Start Course Session"]
+	if any(row.get(key) for key in frappe_enrollment_keys):
+		return True
+	return all(key in row for key in ["Student", "Parent", "Term"])
+
+
+def _record_status(doctype, name):
+	if name and _has_field(doctype, "status"):
+		return frappe.db.get_value(doctype, name, "status") or ""
+	return ""
+
+
+def _enrollment_parent_key(row):
+	return row.get("parent") or row.get("parent_email") or row.get("parent_name")
+
+
+def _enrollment_import_key(row):
+	return "|".join(
+		_normalized_key(part)
+		for part in [
+			row.get("enrollment"),
+			row.get("parent") or row.get("parent_email"),
+			row.get("student") or row.get("student_name"),
+			row.get("student_dob"),
+			row.get("term"),
+			row.get("weekly_timeslot") or row.get("session_label"),
+		]
+	)
 
 
 def _build_trial_inquiry_import_batch(payload=None):
