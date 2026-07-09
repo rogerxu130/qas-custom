@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 import json
 import re
 
 import frappe
 from frappe import _
-from frappe.utils import add_days, cint, flt, getdate, now_datetime, nowdate, today
+from frappe.utils import add_days, cint, flt, get_time, getdate, now_datetime, nowdate, today
 
 from qas_custom.services.billing_enrollment import (
 	convert_inquiry_to_full_term_core,
@@ -39,6 +39,11 @@ from qas_custom.modules.billing.commands import (
 	get_invoice_item,
 )
 from qas_custom.modules.billing.presentation import build_course_invoice_description, invoice_item_schedule
+from qas_custom.modules.makeup.commands import (
+    get_parent_redeemable_sessions_core,
+    redeem_parent_voucher_core,
+    submit_parent_leave_request_core,
+)
 from qas_custom.modules.notifications import (
 	enqueue_parent_invoice_notification,
 	get_invoice_notification_summary,
@@ -48,7 +53,7 @@ from qas_custom.modules.notifications import (
 )
 from qas_custom.modules.notifications.guard import disable_sales_invoice_auto_notifications
 from qas_custom.services.class_attendance import get_attendance_entries
-from qas_custom.services.display_labels import get_course_session_snapshot_label, get_student_display_code, get_student_display_name, get_student_parent_name
+from qas_custom.services.display_labels import get_course_session_snapshot_label, get_makeup_voucher_label, get_student_display_code, get_student_display_name, get_student_parent_name
 from qas_custom.utils.environment import payment_block_reason, payment_mutations_enabled
 from qas_custom.services.inquiry import (
 	add_inquiry_note_core,
@@ -227,6 +232,7 @@ def get_school_admin_family_data(parent=None, student=None, customer=None, email
 		"enrollments": _get_enrollment_rows(parent=parent_id, students=student_ids, limit=80),
 		"inquiries": _get_family_inquiry_rows(parent=parent_id, students=student_ids, email=email, limit=80),
 		"invoices": _get_invoice_rows(customer=customer_id, parent=parent_id, students=student_ids, limit=80),
+		"vouchers": _get_family_voucher_rows(students=student_ids, limit=80),
 	}
 
 
@@ -365,7 +371,7 @@ def get_school_admin_students_data(parent=None, query=None, status=None, limit=1
 		filters[parent_field] = parent
 	if status and _has_field("Student", "status"):
 		filters["status"] = status
-	fields = _safe_fields("Student", ["name", *STUDENT_EDIT_FIELDS, "modified"])
+	fields = _safe_fields("Student", ["name", *STUDENT_EDIT_FIELDS, "age", "student_code", "modified"])
 	or_filters = _text_search_filters("Student", query, ["name", "student_name", "first_name", "last_name"])
 	rows = frappe.get_all(
 		"Student",
@@ -2477,6 +2483,303 @@ def get_school_admin_vouchers_data(student=None, status=None, limit=120):
 	return {"items": [_normalize_row_payload("Makeup Voucher", row) for row in rows]}
 
 
+
+def get_school_admin_leave_options_data(parent=None, student=None):
+    _require_school_admin()
+    if not student:
+        frappe.throw(_("Student is required."))
+    parent_doc, students = _get_school_admin_family_context(parent=parent, student=student)
+    _assert_student_in_family(student, students)
+    return {"parent": parent_doc.name, "student": student, "sessions": _get_school_admin_leave_sessions(student)}
+
+
+def submit_school_admin_leave_request_data(parent=None, student=None, course_session=None, reason=None):
+    _require_school_admin()
+    reason = _school_admin_required_reason(reason)
+    parent_doc, students = _get_school_admin_family_context(parent=parent, student=student)
+    _assert_student_in_family(student, students)
+    result = submit_parent_leave_request_core(
+        parent=parent_doc,
+        students=students,
+        student=student,
+        course_session=course_session,
+    )
+    _audit_school_admin_leave_result(result, reason)
+    frappe.db.commit()
+    return result
+
+
+def get_school_admin_redeemable_sessions_data(parent=None, voucher_id=None, student=None):
+    _require_school_admin()
+    parent_doc, students, voucher = _get_school_admin_voucher_family_context(parent=parent, voucher_id=voucher_id)
+    if student:
+        _assert_student_in_family(student, students)
+    return get_parent_redeemable_sessions_core(
+        parent=parent_doc,
+        students=students,
+        voucher_id=voucher.name,
+        student=student,
+    )
+
+
+def redeem_school_admin_voucher_data(parent=None, voucher_id=None, session_id=None, student=None, reason=None):
+    _require_school_admin()
+    reason = _school_admin_required_reason(reason)
+    parent_doc, students, voucher = _get_school_admin_voucher_family_context(parent=parent, voucher_id=voucher_id)
+    _assert_student_in_family(student, students)
+    result = redeem_parent_voucher_core(
+        parent=parent_doc,
+        students=students,
+        voucher_id=voucher.name,
+        session_id=session_id,
+        student=student,
+    )
+    _audit_school_admin_redeem_result(result, reason)
+    frappe.db.commit()
+    return result
+
+
+def _get_school_admin_family_context(parent=None, student=None):
+    context = _resolve_family_context(parent=parent, student=student)
+    parent_id = context.get("parent")
+    if not parent_id:
+        frappe.throw(_("Family parent was not found."))
+    if parent and parent_id != parent:
+        frappe.throw(_("Selected student does not belong to this family."), frappe.PermissionError)
+    parent_doc = frappe.get_doc("Parent", parent_id)
+    students = _get_family_students(parent_id)
+    if not students:
+        frappe.throw(_("This family has no linked students."))
+    return parent_doc, students
+
+
+def _get_school_admin_voucher_family_context(parent=None, voucher_id=None):
+    if not voucher_id:
+        frappe.throw(_("Makeup voucher is required."))
+    if not frappe.db.exists("Makeup Voucher", voucher_id):
+        frappe.throw(_("Makeup voucher was not found."))
+    voucher = frappe.get_doc("Makeup Voucher", voucher_id)
+    if not voucher.get("student"):
+        frappe.throw(_("This makeup voucher is missing a source student."))
+    source_parent = _find_parent_for_student(voucher.student)
+    if parent and source_parent and parent != source_parent:
+        frappe.throw(_("This voucher does not belong to the selected family."), frappe.PermissionError)
+    parent_doc, students = _get_school_admin_family_context(parent=parent or source_parent, student=voucher.student)
+    return parent_doc, students, voucher
+
+
+def _assert_student_in_family(student, students):
+    if not student:
+        frappe.throw(_("Student is required."))
+    allowed = {row.get("name") for row in students}
+    if student not in allowed:
+        frappe.throw(_("This student is not linked to the selected family."), frappe.PermissionError)
+    return student
+
+
+def _school_admin_required_reason(reason):
+    reason = (reason or "").strip()
+    if not reason:
+        frappe.throw(_("Reason is required."))
+    return reason
+
+
+def _get_school_admin_leave_sessions(student):
+    if not _doctype_available("Class Attendance Entry") or not _doctype_available("Course Sessions"):
+        return []
+    fields = _safe_fields(
+        "Class Attendance Entry",
+        ["name", "course_session", "student", "status", "enrollment_type", "source_doctype", "source_document"],
+    )
+    attendance_rows = frappe.get_all(
+        "Class Attendance Entry",
+        filters={"student": student, "status": "To be started"},
+        fields=fields,
+        limit_page_length=0,
+    )
+    if not attendance_rows:
+        return []
+    attendance_rows = _school_admin_leave_visible_attendance(attendance_rows)
+    session_ids = sorted({row.get("course_session") for row in attendance_rows if row.get("course_session")})
+    if not session_ids:
+        return []
+    session_rows = frappe.get_all(
+        "Course Sessions",
+        filters={"name": ["in", session_ids], "session_date": [">=", today()], "status": ["!=", "Cancelled"]},
+        fields=_safe_fields("Course Sessions", ["name", "weekly_timeslot", "session_date", "status"]),
+        order_by="session_date asc, modified asc",
+        limit_page_length=0,
+    )
+    timeslot_map = _get_timeslot_map([row.get("weekly_timeslot") for row in session_rows if row.get("weekly_timeslot")])
+    attendance_by_session = {row.get("course_session"): row for row in attendance_rows}
+    sessions = []
+    for session in session_rows:
+        session_id = session.get("name")
+        timeslot = timeslot_map.get(session.get("weekly_timeslot"))
+        if not session_id or not timeslot:
+            continue
+        if _school_admin_session_start(session, timeslot) <= now_datetime():
+            continue
+        if _school_admin_has_active_leave_or_voucher(student, session_id):
+            continue
+        attendance = attendance_by_session.get(session_id) or {}
+        sessions.append({
+            "session_id": session_id,
+            "course": timeslot.get("course"),
+            "session_date": session.get("session_date"),
+            "day_of_week": timeslot.get("day_of_week"),
+            "start_time": timeslot.get("start_time"),
+            "end_time": timeslot.get("end_time"),
+            "campus": timeslot.get("campus"),
+            "classroom": timeslot.get("classroom"),
+            "teacher": timeslot.get("teacher"),
+            "attendance_entry": attendance.get("name"),
+            "attendance_status": attendance.get("status"),
+        })
+    return sessions
+
+
+def _school_admin_leave_visible_attendance(attendance_rows):
+    enrollment_names = sorted({
+        row.get("source_document")
+        for row in attendance_rows
+        if row.get("source_doctype") == "Enrollment" and row.get("source_document")
+    })
+    active_enrollments = set()
+    if enrollment_names and _doctype_available("Enrollment"):
+        active_enrollments = set(frappe.get_all(
+            "Enrollment",
+            filters={"name": ["in", enrollment_names], "status": "Active"},
+            pluck="name",
+            limit_page_length=0,
+        ))
+    visible = []
+    for row in attendance_rows:
+        enrollment_type = row.get("enrollment_type") or "Full-Term"
+        if enrollment_type == "Makeup":
+            continue
+        if row.get("source_doctype") == "Enrollment" and row.get("source_document") not in active_enrollments:
+            continue
+        visible.append(row)
+    return visible
+
+
+def _school_admin_session_start(session, timeslot):
+    if not session.get("session_date") or not timeslot.get("start_time"):
+        frappe.throw(_("The selected class session is missing date or time."))
+    return datetime.combine(getdate(session.get("session_date")), get_time(timeslot.get("start_time")))
+
+
+def _school_admin_has_active_leave_or_voucher(student, course_session):
+    if frappe.db.exists("Leave Request", {"student": student, "course_session": course_session, "status": "Approved"}):
+        return True
+    return bool(frappe.db.exists(
+        "Makeup Voucher",
+        {
+            "student": student,
+            "original_session": course_session,
+            "status": ["in", ["Valid", "Used"]],
+        },
+    ))
+
+
+def _get_family_voucher_rows(students=None, status=None, limit=80):
+    if not students or not _doctype_available("Makeup Voucher"):
+        return []
+    filters = {"student": ["in", students]}
+    if status:
+        filters["status"] = status
+    fields = _safe_fields(
+        "Makeup Voucher",
+        ["name", "student", "course", "original_session", "leave_request", "status", "issue_date", "expiry_date", "used_on_session", "used_date", "used_by_student", "voucher_label"],
+    )
+    rows = frappe.get_all(
+        "Makeup Voucher",
+        filters=filters,
+        fields=fields,
+        order_by="modified desc",
+        limit=_limit(limit, default=80, max_value=300),
+    )
+    items = [_normalize_row_payload("Makeup Voucher", row) for row in rows]
+    session_map = _get_school_admin_session_summary_map(
+        [item.get("original_session") for item in items if item.get("original_session")]
+        + [item.get("used_on_session") for item in items if item.get("used_on_session")]
+    )
+    for item in items:
+        item["voucher_id"] = item.get("name")
+        item["voucher_label"] = get_makeup_voucher_label(item)
+        item["student_display"] = get_student_display_name(item.get("student")) or item.get("student")
+        item["source_student_display"] = item["student_display"]
+        item["used_by_student_display"] = get_student_display_name(item.get("used_by_student")) if item.get("used_by_student") else None
+        original_session = session_map.get(item.get("original_session")) or {}
+        used_session = session_map.get(item.get("used_on_session")) or {}
+        item["leave_session_date"] = original_session.get("session_date")
+        item["leave_day_of_week"] = original_session.get("day_of_week")
+        item["leave_start_time"] = original_session.get("start_time")
+        item["used_session_date"] = used_session.get("session_date")
+        item["used_day_of_week"] = used_session.get("day_of_week")
+        item["used_start_time"] = used_session.get("start_time")
+    return items
+
+
+def _get_school_admin_session_summary_map(session_ids):
+    session_ids = sorted({session_id for session_id in session_ids if session_id})
+    if not session_ids:
+        return {}
+    rows = frappe.get_all(
+        "Course Sessions",
+        filters={"name": ["in", session_ids]},
+        fields=_safe_fields("Course Sessions", ["name", "weekly_timeslot", "session_date", "status"]),
+        limit_page_length=0,
+    )
+    timeslot_map = _get_timeslot_map([row.get("weekly_timeslot") for row in rows if row.get("weekly_timeslot")])
+    payload = {}
+    for row in rows:
+        timeslot = timeslot_map.get(row.get("weekly_timeslot")) or {}
+        payload[row.get("name")] = {
+            "session_id": row.get("name"),
+            "course": timeslot.get("course"),
+            "session_date": row.get("session_date"),
+            "day_of_week": timeslot.get("day_of_week"),
+            "start_time": timeslot.get("start_time"),
+            "end_time": timeslot.get("end_time"),
+            "campus": timeslot.get("campus"),
+            "classroom": timeslot.get("classroom"),
+            "teacher": timeslot.get("teacher"),
+        }
+    return payload
+
+
+def _audit_school_admin_leave_result(result, reason):
+    user = frappe.session.user
+    leave_request = result.get("leave_request")
+    voucher = result.get("makeup_voucher")
+    session = result.get("session") or {}
+    comment = _("Created by School Admin {0}. Reason: {1}").format(user, reason)
+    if leave_request:
+        _add_comment("Leave Request", leave_request, comment)
+    if voucher:
+        _add_comment("Makeup Voucher", voucher, _("Generated from School Admin leave request by {0}. Reason: {1}").format(user, reason))
+    attendance_entry = frappe.db.get_value(
+        "Class Attendance Entry",
+        {"course_session": session.get("session_id"), "student": session.get("student"), "status": "Leave"},
+        "name",
+        order_by="modified desc",
+    )
+    if attendance_entry:
+        _add_comment("Class Attendance Entry", attendance_entry, comment)
+
+
+def _audit_school_admin_redeem_result(result, reason):
+    user = frappe.session.user
+    voucher = (result.get("voucher") or {}).get("voucher_id")
+    attendance_entry = result.get("attendance_entry")
+    if voucher:
+        _add_comment("Makeup Voucher", voucher, _("Redeemed by School Admin {0}. Reason: {1}").format(user, reason))
+    if attendance_entry:
+        _add_comment("Class Attendance Entry", attendance_entry, _("Created from School Admin voucher redemption by {0}. Reason: {1}").format(user, reason))
+
+
 def update_school_admin_voucher_data(voucher=None, payload=None):
 	_require_school_admin()
 	if not voucher:
@@ -3258,7 +3561,7 @@ def _get_family_students(parent=None, student=None):
 		filters = {"name": student}
 	else:
 		return []
-	fields = _safe_fields("Student", ["name", *STUDENT_EDIT_FIELDS, "modified"])
+	fields = _safe_fields("Student", ["name", *STUDENT_EDIT_FIELDS, "age", "student_code", "modified"])
 	rows = frappe.get_all("Student", filters=filters, fields=fields, order_by="student_name asc")
 	return [_normalize_row_payload("Student", row) for row in rows]
 

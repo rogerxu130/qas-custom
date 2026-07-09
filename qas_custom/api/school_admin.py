@@ -76,7 +76,9 @@ from qas_custom.services.school_admin import (
 	get_school_admin_invoices_data,
 	get_school_admin_invoice_settings_data,
 	get_school_admin_invoice_items_data,
+	get_school_admin_leave_options_data,
 	get_school_admin_me_data,
+	get_school_admin_redeemable_sessions_data,
 	get_school_admin_setup_records_data,
 	get_school_admin_store_credit_data,
 	get_school_admin_teacher_revenue_share_sessions_data,
@@ -93,9 +95,11 @@ from qas_custom.services.school_admin import (
 	mark_school_admin_inquiry_no_show_data,
 	populate_school_admin_term_data,
 	reschedule_school_admin_inquiry_data,
+	redeem_school_admin_voucher_data,
 	resend_school_admin_invoice_data,
 	save_school_admin_setup_record_data,
 	school_admin_global_search_data,
+	submit_school_admin_leave_request_data,
 	submit_school_admin_invoice_data,
 	transfer_school_admin_enrollment_data,
 	copy_school_admin_term_data,
@@ -681,6 +685,27 @@ def school_admin_get_course_session(course_session=None):
 @frappe.whitelist()
 def school_admin_update_attendance(attendance_entry=None, status=None, comments=None):
 	return update_school_admin_attendance_data(attendance_entry=attendance_entry, status=status, comments=comments)
+
+
+
+@frappe.whitelist()
+def school_admin_get_leave_options(parent=None, student=None):
+    return get_school_admin_leave_options_data(parent=parent, student=student)
+
+
+@frappe.whitelist()
+def school_admin_submit_leave_request(parent=None, student=None, course_session=None, reason=None):
+    return submit_school_admin_leave_request_data(parent=parent, student=student, course_session=course_session, reason=reason)
+
+
+@frappe.whitelist()
+def school_admin_get_redeemable_sessions(parent=None, voucher_id=None, student=None):
+    return get_school_admin_redeemable_sessions_data(parent=parent, voucher_id=voucher_id, student=student)
+
+
+@frappe.whitelist()
+def school_admin_redeem_voucher(parent=None, voucher_id=None, session_id=None, student=None, reason=None):
+    return redeem_school_admin_voucher_data(parent=parent, voucher_id=voucher_id, session_id=session_id, student=student, reason=reason)
 
 
 @frappe.whitelist()
