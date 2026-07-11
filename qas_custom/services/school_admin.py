@@ -1046,6 +1046,8 @@ def cancel_school_admin_invoice_data(invoice=None, reason=None):
 
 	doc = frappe.get_doc("Sales Invoice", invoice)
 	if cint(doc.docstatus) == 2:
+		_clear_deleted_invoice_enrollment_snapshot(doc, action="cancelled")
+		frappe.db.commit()
 		return _build_invoice_payload(doc)
 	if cint(doc.docstatus) == 1:
 		if not payment_mutations_enabled():
@@ -1056,6 +1058,7 @@ def cancel_school_admin_invoice_data(invoice=None, reason=None):
 		_reverse_invoice_store_credit_application(doc, reason)
 		paid_credit = _create_invoice_cancellation_store_credit(doc, paid_credit_amount, reason)
 		_cancel_submitted_invoice_as_admin(doc.name)
+		_clear_deleted_invoice_enrollment_snapshot(frappe.get_doc("Sales Invoice", doc.name), action="cancelled")
 		_add_comment("Sales Invoice", doc.name, f"Invoice cancelled by School Admin. Reason: {reason}")
 		frappe.db.commit()
 		payload = _build_invoice_payload(frappe.get_doc("Sales Invoice", invoice))
@@ -1064,6 +1067,7 @@ def cancel_school_admin_invoice_data(invoice=None, reason=None):
 		return payload
 
 	_mark_draft_invoice_cancelled(doc, reason)
+	_clear_deleted_invoice_enrollment_snapshot(doc, action="cancelled")
 	frappe.db.commit()
 	return _build_invoice_payload(frappe.get_doc("Sales Invoice", invoice))
 
@@ -1849,6 +1853,8 @@ def _find_draft_family_invoice(parent, customer, term):
 		return None
 
 	filters = {"customer": customer, "docstatus": 0}
+	if _has_field("Sales Invoice", "status"):
+		filters["status"] = ["!=", "Cancelled"]
 	if parent and _has_field("Sales Invoice", "parent"):
 		filters["parent"] = parent
 	if _has_field("Sales Invoice", "qas_invoice_type"):
@@ -3146,9 +3152,23 @@ def _active_sales_invoice_for_enrollment_item(enrollment):
 	if not invoice_names:
 		return None
 
+	return _active_sales_invoice_name({"name": ["in", invoice_names]})
+
+
+def _active_sales_invoice_filters(filters):
+	filters = dict(filters or {})
+	filters["docstatus"] = ["!=", 2]
+	if _has_field("Sales Invoice", "status"):
+		filters["status"] = ["!=", "Cancelled"]
+	return filters
+
+
+def _active_sales_invoice_name(filters):
+	if not _doctype_available("Sales Invoice"):
+		return None
 	rows = frappe.get_all(
 		"Sales Invoice",
-		filters={"name": ["in", invoice_names], "docstatus": ["!=", 2]},
+		filters=_active_sales_invoice_filters(filters),
 		pluck="name",
 		limit=1,
 	)
@@ -3157,28 +3177,20 @@ def _active_sales_invoice_for_enrollment_item(enrollment):
 
 def _existing_invoice_for_enrollment(enrollment_doc):
 	invoice = enrollment_doc.get("invoice")
-	if invoice and frappe.db.exists("Sales Invoice", invoice):
-		return invoice
+	if invoice:
+		active_invoice = _active_sales_invoice_name({"name": invoice})
+		if active_invoice:
+			return active_invoice
 	if not _doctype_available("Sales Invoice"):
 		return None
 	if _has_field("Sales Invoice", "enrollment"):
-		rows = frappe.get_all(
-			"Sales Invoice",
-			filters={"enrollment": enrollment_doc.name, "docstatus": ["!=", 2]},
-			pluck="name",
-			limit=1,
-		)
-		if rows:
-			return rows[0]
+		active_invoice = _active_sales_invoice_name({"enrollment": enrollment_doc.name})
+		if active_invoice:
+			return active_invoice
 	if _has_field("Sales Invoice", "source_doctype") and _has_field("Sales Invoice", "source_document"):
-		rows = frappe.get_all(
-			"Sales Invoice",
-			filters={"source_doctype": "Enrollment", "source_document": enrollment_doc.name, "docstatus": ["!=", 2]},
-			pluck="name",
-			limit=1,
-		)
-		if rows:
-			return rows[0]
+		active_invoice = _active_sales_invoice_name({"source_doctype": "Enrollment", "source_document": enrollment_doc.name})
+		if active_invoice:
+			return active_invoice
 	item_invoice = _active_sales_invoice_for_enrollment_item(enrollment_doc.name)
 	if item_invoice:
 		return item_invoice
@@ -3951,7 +3963,7 @@ def _create_invoice_cancellation_store_credit(doc, amount, reason):
 	return credit
 
 
-def _clear_deleted_invoice_enrollment_snapshot(doc):
+def _clear_deleted_invoice_enrollment_snapshot(doc, action="deleted"):
 	enrollment_names = set()
 	for candidate in [doc.get("enrollment")]:
 		if candidate:
@@ -3974,7 +3986,11 @@ def _clear_deleted_invoice_enrollment_snapshot(doc):
 				updates[fieldname] = value
 		if updates:
 			frappe.db.set_value("Enrollment", enrollment, updates, update_modified=True)
-			_add_comment("Enrollment", enrollment, _("Draft invoice {0} was deleted by School Admin.").format(doc.name))
+			if action == "cancelled":
+				message = _("Invoice {0} was cancelled by School Admin; enrollment invoice link was cleared.")
+			else:
+				message = _("Draft invoice {0} was deleted by School Admin.")
+			_add_comment("Enrollment", enrollment, message.format(doc.name))
 
 
 def _reverse_invoice_store_credit_application(doc, reason):
