@@ -16,6 +16,7 @@ from qas_custom.services.campus_admin import (
 	mark_campus_admin_inquiry_inactive_data,
 	mark_campus_admin_inquiry_no_show_data,
 	reopen_campus_admin_inquiry_data,
+	send_campus_admin_trial_class_reminder_data,
 )
 
 
@@ -70,6 +71,11 @@ def campus_admin_get_course_sessions(campus=None, course=None, from_date=None, t
 @frappe.whitelist()
 def campus_admin_add_inquiry_note(inquiry=None, note=None):
 	return add_campus_admin_inquiry_note_data(inquiry=inquiry, note=note)
+
+
+@frappe.whitelist()
+def campus_admin_send_trial_class_reminder(inquiry=None):
+	return send_campus_admin_trial_class_reminder_data(inquiry=inquiry)
 
 
 @frappe.whitelist()

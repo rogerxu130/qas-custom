@@ -97,6 +97,7 @@ from qas_custom.services.school_admin import (
 	reschedule_school_admin_inquiry_data,
 	redeem_school_admin_voucher_data,
 	resend_school_admin_invoice_data,
+	send_school_admin_trial_class_reminder_data,
 	save_school_admin_setup_record_data,
 	school_admin_global_search_data,
 	submit_school_admin_leave_request_data,
@@ -375,6 +376,11 @@ def school_admin_get_inquiry(inquiry=None):
 @frappe.whitelist()
 def school_admin_add_inquiry_note(inquiry=None, note=None):
 	return add_school_admin_inquiry_note_data(inquiry=inquiry, note=note)
+
+
+@frappe.whitelist()
+def school_admin_send_trial_class_reminder(inquiry=None):
+	return send_school_admin_trial_class_reminder_data(inquiry=inquiry)
 
 
 @frappe.whitelist()

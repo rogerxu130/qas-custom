@@ -17,6 +17,7 @@ from qas_custom.services.inquiry import (
 	build_inquiry_detail,
 	build_inquiry_summary,
 	mark_inquiry_status_core,
+	send_trial_class_reminder_core,
 )
 
 
@@ -97,6 +98,11 @@ def get_campus_admin_inquiries_data(status=None, inquiry_type=None, from_date=No
 def get_campus_admin_inquiry_data(inquiry=None):
 	_require_inquiry_access(inquiry)
 	return build_inquiry_detail(inquiry)
+
+
+def send_campus_admin_trial_class_reminder_data(inquiry=None):
+	_require_inquiry_access(inquiry)
+	return send_trial_class_reminder_core(inquiry=inquiry)
 
 
 def get_campus_admin_contacts_data(from_date=None, to_date=None, campus=None, course_session=None, query=None):

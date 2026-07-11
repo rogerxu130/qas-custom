@@ -7,8 +7,12 @@ from frappe.utils.file_manager import save_file
 from frappe.utils.pdf import get_pdf
 
 from qas_custom.modules.billing.invoice_amounts import resolve_invoice_print_amounts
+from qas_custom.modules.billing.invoice_settings import get_invoice_settings
 from qas_custom.modules.billing.presentation import build_parent_invoice_context, parent_portal_invoice_link
 from qas_custom.utils.environment import email_block_reason, outbound_email_enabled, sendmail_or_skip
+
+
+TRIAL_CLASS_REMINDER_EVENT_PREFIX = "trial_class_reminder:"
 
 
 def send_parent_invoice_notification(
@@ -299,6 +303,236 @@ def get_invoice_notification_summary(invoice: str):
 		"latest": _notification_payload(rows[0]) if rows else None,
 		"items": [_notification_payload(row) for row in rows],
 	}
+
+
+def send_trial_class_reminder(inquiry_doc):
+	"""Send one explicit, repeatable reminder for a scheduled trial lesson."""
+	doc = frappe.get_doc("Inquiry", inquiry_doc) if isinstance(inquiry_doc, str) else inquiry_doc
+	if doc.get("inquiry_type") != "Trial Lesson":
+		frappe.throw(_("Trial class reminders are only available for Trial Lesson inquiries."))
+
+	context = _trial_class_reminder_context(doc)
+	event_key = "{0}{1}:{2}".format(
+		TRIAL_CLASS_REMINDER_EVENT_PREFIX,
+		doc.name,
+		now_datetime().strftime("%Y%m%d%H%M%S%f"),
+	)
+	subject = _("Reminder: {0}'s Trial Class on {1}").format(context["student_name"], context["date_display"])
+	message = _trial_class_reminder_email_message(context)
+	log_name = _create_notification_log(
+		event_key=event_key,
+		recipient=context["recipient"],
+		subject=subject,
+		message=message,
+		document_type="Inquiry",
+		document_name=doc.name,
+	)
+
+	try:
+		mail_result = sendmail_or_skip(
+			action="trial_class_reminder",
+			recipients=[context["recipient"]["email"]],
+			subject=subject,
+			message=message,
+			reference_doctype="Inquiry",
+			reference_name=doc.name,
+			reply_to=context["school_email"],
+			delayed=False,
+		)
+		if mail_result and mail_result.get("skipped"):
+			reason = mail_result.get("reason") or email_block_reason()
+			_mark_notification_failed(log_name, reason)
+			_set_inquiry_reminder_status(doc.name, "Failed")
+			return {
+				"sent": False,
+				"skipped": True,
+				"recipient": context["recipient"]["email"],
+				"reason": reason,
+				"notification_log": log_name,
+			}
+
+		_mark_notification_sent(log_name)
+		_set_inquiry_reminder_status(doc.name, "Sent")
+		return {
+			"sent": True,
+			"recipient": context["recipient"]["email"],
+			"notification_log": log_name,
+		}
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "QAS trial class reminder failed: {0}".format(doc.name))
+		_mark_notification_failed(log_name, "Email send failed.")
+		_set_inquiry_reminder_status(doc.name, "Failed")
+		return {
+			"sent": False,
+			"recipient": context["recipient"]["email"],
+			"reason": "Email send failed.",
+			"notification_log": log_name,
+		}
+
+
+def get_trial_class_reminder_summary(inquiry: str):
+	if not inquiry or not _notification_log_available():
+		return None
+
+	meta = frappe.get_meta("Notification Log")
+	fields = _safe_notification_fields()
+	filters = {"document_type": "Inquiry", "document_name": inquiry}
+	if meta.has_field("event_key"):
+		filters["event_key"] = ["like", "{0}%".format(TRIAL_CLASS_REMINDER_EVENT_PREFIX)]
+	else:
+		filters["subject"] = ["like", "Reminder:%Trial Class%"]
+
+	rows = frappe.get_all(
+		"Notification Log",
+		filters=filters,
+		fields=fields,
+		order_by="creation desc",
+		limit_page_length=1,
+	)
+	return _notification_payload(rows[0]) if rows else None
+
+
+def _trial_class_reminder_context(inquiry_doc):
+	session = None
+	timeslot = None
+	if inquiry_doc.get("course_session"):
+		session = frappe.db.get_value(
+			"Course Sessions",
+			inquiry_doc.course_session,
+			["name", "weekly_timeslot", "session_date"],
+			as_dict=True,
+		)
+		if session and session.get("weekly_timeslot"):
+			timeslot = frappe.db.get_value(
+				"Weekly Timeslot",
+				session.weekly_timeslot,
+				["name", "course", "campus", "start_time", "end_time"],
+				as_dict=True,
+			)
+
+	campus_name = (timeslot or {}).get("campus") or inquiry_doc.get("campus")
+	campus = frappe.db.get_value("Campus", campus_name, ["name", "address"], as_dict=True) if campus_name else None
+	settings = get_invoice_settings()
+	student_name = _trial_class_reminder_student_name(inquiry_doc)
+	parent_name = inquiry_doc.get("contact_name") or _trial_class_reminder_parent_name(inquiry_doc.get("parent"))
+	date_value = (session or {}).get("session_date") or inquiry_doc.get("current_appointment_date")
+	start_time = (timeslot or {}).get("start_time") or inquiry_doc.get("current_appointment_time")
+	end_time = (timeslot or {}).get("end_time")
+	context = {
+		"recipient": _trial_class_reminder_recipient(inquiry_doc),
+		"parent_name": parent_name or "Parent",
+		"student_name": student_name,
+		"course": (timeslot or {}).get("course") or inquiry_doc.get("preferred_course"),
+		"campus": campus_name,
+		"campus_address": (campus or {}).get("address"),
+		"date_display": formatdate(date_value, "d MMMM yyyy") if date_value else None,
+		"start_time": _trial_class_reminder_time(start_time),
+		"end_time": _trial_class_reminder_time(end_time),
+		"school_name": settings.get("school_name") or "Queensland Art School",
+		"school_email": settings.get("school_email"),
+		"school_phone": settings.get("school_phone"),
+	}
+
+	labels = {
+		"recipient": "parent email",
+		"student_name": "student name",
+		"course": "course",
+		"campus": "campus",
+		"campus_address": "campus address",
+		"date_display": "appointment date",
+		"start_time": "appointment start time",
+		"end_time": "appointment end time",
+		"school_email": "school reply email",
+		"school_phone": "school phone",
+	}
+	missing = [labels[key] for key in labels if not context.get(key) or (key == "recipient" and not context[key].get("email"))]
+	if missing:
+		frappe.throw(_("Cannot send trial class reminder. Missing: {0}.").format(", ".join(missing)))
+	return context
+
+
+def _trial_class_reminder_recipient(inquiry_doc):
+	email = (inquiry_doc.get("contact_email") or "").strip()
+	parent = inquiry_doc.get("parent")
+	linked_user = None
+	if parent:
+		fields = ["name"]
+		for fieldname in ["linked_user", "email", "email_id", "contact_email"]:
+			if frappe.db.has_column("Parent", fieldname):
+				fields.append(fieldname)
+		parent_row = frappe.db.get_value("Parent", parent, fields, as_dict=True) or {}
+		linked_user = parent_row.get("linked_user")
+		if not email:
+			email = _first_value(parent_row, ["email", "email_id", "contact_email"])
+	if not email and linked_user:
+		email = frappe.db.get_value("User", linked_user, "email") or linked_user
+	return {"email": email, "for_user": linked_user, "parent": parent}
+
+
+def _trial_class_reminder_parent_name(parent):
+	if not parent:
+		return None
+	return frappe.db.get_value("Parent", parent, "parent_name")
+
+
+def _trial_class_reminder_student_name(inquiry_doc):
+	if inquiry_doc.get("student"):
+		name = frappe.db.get_value("Student", inquiry_doc.student, "student_name")
+		if name:
+			return name
+	return inquiry_doc.get("submitted_student_name")
+
+
+def _trial_class_reminder_time(value):
+	text = str(value or "").strip()
+	return text[:5] if len(text) >= 5 else text
+
+
+def _trial_class_reminder_email_message(context):
+	def value(key):
+		return escape_html(context.get(key) or "")
+
+	return """
+		<div style="margin:0;padding:0;background:#f8fafc;font-family:Arial,sans-serif;color:#172033;">
+			<div style="max-width:640px;margin:0 auto;padding:24px;">
+				<div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;">
+					<div style="padding:22px 24px;background:#172033;color:#ffffff;">
+						<p style="margin:0 0 6px;font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:#f7b6a4;">{school_name}</p>
+						<h1 style="margin:0;font-size:24px;line-height:1.3;">Trial class reminder</h1>
+					</div>
+					<div style="padding:24px;">
+						<p style="margin:0 0 18px;font-size:16px;line-height:1.5;">Hello {parent_name},</p>
+						<p style="margin:0 0 18px;font-size:16px;line-height:1.5;">This is a friendly reminder about your child's upcoming trial class.</p>
+						<table style="width:100%;border-collapse:collapse;margin:0 0 22px;">
+							<tr><td style="padding:9px 0;color:#64748b;">Student</td><td style="padding:9px 0;text-align:right;font-weight:700;">{student_name}</td></tr>
+							<tr><td style="padding:9px 0;color:#64748b;">Course</td><td style="padding:9px 0;text-align:right;font-weight:700;">{course}</td></tr>
+							<tr><td style="padding:9px 0;color:#64748b;">Campus</td><td style="padding:9px 0;text-align:right;font-weight:700;">{campus}</td></tr>
+							<tr><td style="padding:9px 0;color:#64748b;">Address</td><td style="padding:9px 0;text-align:right;font-weight:700;">{campus_address}</td></tr>
+							<tr><td style="padding:9px 0;color:#64748b;">Date</td><td style="padding:9px 0;text-align:right;font-weight:700;">{date_display}</td></tr>
+							<tr><td style="padding:9px 0;color:#64748b;">Time</td><td style="padding:9px 0;text-align:right;font-weight:700;">{start_time} - {end_time}</td></tr>
+						</table>
+						<p style="margin:0;font-size:15px;line-height:1.5;color:#475569;">If you are unable to attend or need to make changes, please reply to this email or call {school_name} on {school_phone}.</p>
+					</div>
+				</div>
+			</div>
+		</div>
+	""".format(
+		school_name=value("school_name"),
+		parent_name=value("parent_name"),
+		student_name=value("student_name"),
+		course=value("course"),
+		campus=value("campus"),
+		campus_address=value("campus_address").replace("\n", "<br>"),
+		date_display=value("date_display"),
+		start_time=value("start_time"),
+		end_time=value("end_time"),
+		school_phone=value("school_phone"),
+	)
+
+
+def _set_inquiry_reminder_status(inquiry, status):
+	if frappe.db.has_column("Inquiry", "reminder_status"):
+		frappe.db.set_value("Inquiry", inquiry, "reminder_status", status, update_modified=False)
 
 
 def _invoice_recipient(invoice_doc):

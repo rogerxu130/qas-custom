@@ -17,6 +17,7 @@ from qas_custom.modules.attendance.commands import (
 	ensure_trial_inquiry_attendance_entry,
 	remove_trial_inquiry_attendance_entries,
 )
+from qas_custom.modules.notifications.commands import get_trial_class_reminder_summary, send_trial_class_reminder
 from qas_custom.utils.environment import sendmail_or_skip
 
 
@@ -62,6 +63,15 @@ def get_inquiry_data(inquiry=None):
 	if not inquiry:
 		frappe.throw(_("Inquiry is required."))
 	return build_inquiry_detail(inquiry)
+
+
+def send_trial_class_reminder_core(inquiry=None):
+	if not inquiry:
+		frappe.throw(_("Inquiry is required."))
+	inquiry_doc = frappe.get_doc("Inquiry", inquiry)
+	send_trial_class_reminder(inquiry_doc)
+	frappe.db.commit()
+	return build_inquiry_detail(inquiry_doc.name)
 
 
 def reschedule_inquiry_data(inquiry=None, payload=None):
@@ -288,9 +298,16 @@ def add_inquiry_note_core(inquiry: str | None, note: str | None, actor=None):
 
 def build_inquiry_detail(inquiry: str):
 	inquiry_doc = frappe.get_doc("Inquiry", inquiry)
+	reminder = get_trial_class_reminder_summary(inquiry_doc.name)
+	if inquiry_doc.reminder_status:
+		if not reminder:
+			reminder = {"status": inquiry_doc.reminder_status}
+		elif reminder.get("status") == "Logged":
+			reminder["status"] = inquiry_doc.reminder_status
 	return {
 		"inquiry": _build_inquiry_payload(inquiry_doc),
 		"notes": _get_note_payloads(inquiry_doc.name),
+		"reminder": reminder,
 	}
 
 

@@ -61,6 +61,7 @@ from qas_custom.services.inquiry import (
 	build_inquiry_summary,
 	mark_inquiry_status_core,
 	reschedule_inquiry_core,
+	send_trial_class_reminder_core,
 )
 from qas_custom.services.teacher_revenue_share import get_teacher_revenue_share_session_rows
 
@@ -780,6 +781,11 @@ def get_school_admin_inquiry_data(inquiry=None):
 def add_school_admin_inquiry_note_data(inquiry=None, note=None):
 	_require_school_admin()
 	return add_inquiry_note_core(inquiry, note, actor=frappe.session.user)
+
+def send_school_admin_trial_class_reminder_data(inquiry=None):
+	_require_school_admin()
+	return send_trial_class_reminder_core(inquiry=inquiry)
+
 
 
 def update_school_admin_inquiry_status_data(inquiry=None, status=None):
