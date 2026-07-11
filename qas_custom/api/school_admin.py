@@ -461,8 +461,8 @@ def school_admin_delete_draft_invoice(invoice=None):
 
 
 @frappe.whitelist()
-def school_admin_submit_invoice(invoice=None):
-	return submit_school_admin_invoice_data(invoice=invoice)
+def school_admin_submit_invoice(invoice=None, send_notifications=True):
+	return submit_school_admin_invoice_data(invoice=invoice, send_notifications=send_notifications)
 
 
 @frappe.whitelist()

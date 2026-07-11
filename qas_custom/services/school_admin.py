@@ -947,10 +947,11 @@ def delete_school_admin_draft_invoice_data(invoice=None):
 	return {"deleted": deleted}
 
 
-def submit_school_admin_invoice_data(invoice=None, enqueue_notification=False):
+def submit_school_admin_invoice_data(invoice=None, enqueue_notification=False, send_notifications=True):
 	_require_school_admin()
 	if not invoice:
 		frappe.throw(_("Invoice is required."))
+	send_notifications = cint(send_notifications)
 	doc = frappe.get_doc("Sales Invoice", invoice)
 	if cint(doc.docstatus) != 0:
 		frappe.throw(_("Only draft invoices can be submitted."))
@@ -967,7 +968,12 @@ def submit_school_admin_invoice_data(invoice=None, enqueue_notification=False):
 	applied_amount = flt(get_invoice_store_credit_applied(doc.name))
 	frappe.db.commit()
 	doc = frappe.get_doc("Sales Invoice", doc.name)
-	if enqueue_notification:
+	receipt_notification = None
+	if not send_notifications:
+		_add_comment("Sales Invoice", doc.name, "Invoice submitted without parent notifications by School Admin.")
+		notification = _skipped_invoice_notification("Parent notifications were skipped for this submission.")
+		receipt_notification = _skipped_invoice_notification("Parent notifications were skipped for this submission.", receipt=True)
+	elif enqueue_notification:
 		notification = _enqueue_invoice_notification(doc, event="approved", store_credit_applied=applied_amount if applied_amount > 0 else None)
 	else:
 		notification = _send_invoice_notification(doc, event="approved", store_credit_applied=applied_amount if applied_amount > 0 else None)
@@ -4042,6 +4048,10 @@ def _maybe_send_paid_receipt(doc, *, payment_entry=None, source=None):
 		payment_entry=payment_entry,
 		source=source,
 	)
+
+
+def _skipped_invoice_notification(reason, receipt=False):
+	return {"sent": False, "skipped": True, "reason": reason, "receipt": receipt}
 
 
 def _create_payment_entry_for_invoice(doc, amount, mode_of_payment=None, reference_no=None, notes=None):
