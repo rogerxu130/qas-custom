@@ -12,11 +12,13 @@ from qas_custom.services.school_admin_import import (
 	get_import_runs_data,
 	get_operation_report_data,
 	get_operation_reports_data,
+	preview_enrollment_change_data,
 	preview_enrollment_cancellation_import_data,
 	preview_enrollment_import_data,
 	preview_parent_student_import_data,
 	preview_store_credit_import_data,
 	preview_trial_inquiry_import_data,
+	run_enrollment_change_data,
 	run_enrollment_cancellation_import_data,
 	run_enrollment_import_data,
 	run_parent_student_import_data,
@@ -217,6 +219,16 @@ def school_admin_preview_enrollment_cancellation_import(payload=None):
 @frappe.whitelist()
 def school_admin_run_enrollment_cancellation_import(payload=None):
 	return run_enrollment_cancellation_import_data(payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_preview_enrollment_change(payload=None):
+	return preview_enrollment_change_data(payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_run_enrollment_change(payload=None):
+	return run_enrollment_change_data(payload=payload)
 
 
 @frappe.whitelist()
