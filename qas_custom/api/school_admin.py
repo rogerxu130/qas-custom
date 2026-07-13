@@ -53,6 +53,7 @@ from qas_custom.services.school_admin import (
 	create_school_admin_enrollment_invoice_data,
 	create_school_admin_family_attendance_data,
 	create_school_admin_family_invoice_data,
+	create_school_admin_course_session_attendance_data,
 	create_school_admin_manual_invoice_data,
 	create_school_admin_term_invoices_data,
 	create_school_admin_term_attendance_data,
@@ -704,6 +705,10 @@ def school_admin_get_course_session(course_session=None):
 def school_admin_update_attendance(attendance_entry=None, status=None, comments=None):
 	return update_school_admin_attendance_data(attendance_entry=attendance_entry, status=status, comments=comments)
 
+
+@frappe.whitelist()
+def school_admin_create_course_session_attendance(course_session=None, payload=None):
+	return create_school_admin_course_session_attendance_data(course_session=course_session, payload=payload)
 
 
 @frappe.whitelist()

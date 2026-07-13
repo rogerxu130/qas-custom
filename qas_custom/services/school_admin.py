@@ -56,7 +56,7 @@ from qas_custom.modules.notifications import (
 	send_parent_invoice_notification,
 )
 from qas_custom.modules.notifications.guard import disable_sales_invoice_auto_notifications
-from qas_custom.services.class_attendance import get_attendance_entries
+from qas_custom.services.class_attendance import create_attendance_entry, get_attendance_entries
 from qas_custom.services.display_labels import get_course_session_snapshot_label, get_makeup_voucher_label, get_student_display_code, get_student_display_name, get_student_parent_name
 from qas_custom.utils.environment import payment_block_reason, payment_mutations_enabled
 from qas_custom.services.inquiry import (
@@ -2476,6 +2476,64 @@ def update_school_admin_attendance_data(attendance_entry=None, status=None, comm
 	)
 	frappe.db.commit()
 	return result
+
+
+def create_school_admin_course_session_attendance_data(course_session=None, payload=None):
+	_require_school_admin()
+	payload = _get_payload(payload)
+	if not course_session:
+		frappe.throw(_("Course session is required."))
+	student = (payload.get("student") or "").strip()
+	if not student:
+		frappe.throw(_("Student is required."))
+	if not frappe.db.exists("Student", student):
+		frappe.throw(_("Student was not found."))
+	if _has_field("Student", "status"):
+		student_status = frappe.db.get_value("Student", student, "status")
+		if student_status and student_status != "Active":
+			frappe.throw(_("Only active students can be added to a course session."))
+	if not frappe.db.exists("Course Sessions", course_session):
+		frappe.throw(_("Course session was not found."))
+	session = frappe.get_doc("Course Sessions", course_session)
+	if session.get("status") == "Cancelled":
+		frappe.throw(_("Cannot add attendance to a cancelled course session."))
+	enrollment_type = (payload.get("enrollment_type") or "Pay-as-you-go").strip()
+	_validate_course_session_attendance_type(enrollment_type)
+	status = (payload.get("status") or "To be started").strip()
+	_validate_course_session_attendance_status(status)
+	comments = (payload.get("comments") or "").strip()
+	attendance_entry = create_attendance_entry(
+		course_session=course_session,
+		student=student,
+		enrollment_type=enrollment_type,
+		status=status,
+		comments=comments or _("Manually added by School Admin."),
+		prevent_student_duplicate=True,
+	)
+	_add_comment(
+		"Class Attendance Entry",
+		attendance_entry,
+		_("Manually added to course session {0} by School Admin.").format(course_session),
+	)
+	frappe.db.commit()
+	return {
+		"attendance_entry": attendance_entry,
+		"course_session": get_school_admin_course_session_data(course_session),
+	}
+
+
+def _validate_course_session_attendance_type(enrollment_type):
+	field = frappe.get_meta("Class Attendance Entry").get_field("enrollment_type")
+	options = [option.strip() for option in (field.options or "").splitlines() if option.strip()]
+	if options and enrollment_type not in options:
+		frappe.throw(_("Invalid attendance type: {0}").format(enrollment_type))
+
+
+def _validate_course_session_attendance_status(status):
+	field = frappe.get_meta("Class Attendance Entry").get_field("status")
+	options = [option.strip() for option in (field.options or "").splitlines() if option.strip()]
+	if options and status not in options:
+		frappe.throw(_("Invalid attendance status: {0}").format(status))
 
 
 def _get_school_admin_attendance_rows(course_session):
