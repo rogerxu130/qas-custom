@@ -23,7 +23,9 @@
   "bank_account_number",
   "bank_reference_note",
   "store_credit_section",
-  "store_credit_liability_account"
+  "store_credit_liability_account",
+  "store_credit_bonus_enabled",
+  "store_credit_bonus_rules"
  ],
  "fields": [
   {
@@ -122,6 +124,21 @@
    "fieldtype": "Link",
    "label": "Store Credit Liability Account",
    "options": "Account"
+  },
+  {
+   "default": "1",
+   "description": "Automatically grant promotion store credit when a single top-up or invoice payment reaches a configured threshold.",
+   "fieldname": "store_credit_bonus_enabled",
+   "fieldtype": "Check",
+   "label": "Enable Store Credit Bonus"
+  },
+  {
+   "default": "[{\"enabled\":1,\"threshold_amount\":1500,\"bonus_amount\":100,\"applies_to\":\"Both\",\"label\":\"$1,500 store credit bonus\"},{\"enabled\":1,\"threshold_amount\":2000,\"bonus_amount\":220,\"applies_to\":\"Both\",\"label\":\"$2,000 store credit bonus\"}]",
+   "description": "JSON rules. Each rule supports enabled, threshold_amount, bonus_amount, applies_to, and label.",
+   "fieldname": "store_credit_bonus_rules",
+   "fieldtype": "Code",
+   "label": "Store Credit Bonus Rules",
+   "options": "JSON"
   }
  ],
  "index_web_pages_for_search": 0,

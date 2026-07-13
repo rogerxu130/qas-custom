@@ -13,6 +13,8 @@ STORE_CREDIT_LIABILITY_ACCOUNT_NAME = "Store Credit Liability"
 COURSE_INVOICE_TYPES = {"Course", "Store Credit Top-up", "Holiday Program"}
 COURSE_LINE_TYPES = {"Course Fee", "Trial Fee", "Makeup", "Pay-as-you-go", "Holiday Program"}
 BALANCE_FIELDS = ("store_credit", "credit_balance", "available_credit", "balance")
+STORE_CREDIT_BONUS_TYPE = "Promotion Bonus"
+STORE_CREDIT_BONUS_SCOPES = {"Both", "Top-up", "Invoice Payment"}
 
 
 def get_store_credit_balance(parent: str | None = None, customer: str | None = None) -> float:
@@ -145,6 +147,200 @@ def adjust_store_credit(parent: str | None = None, customer: str | None = None, 
 		source_doctype="User",
 		source_document=frappe.session.user,
 	)
+
+
+def get_store_credit_bonus_rules(scope: str | None = None):
+	settings = get_invoice_settings()
+	if not cint(settings.get("store_credit_bonus_enabled")):
+		return []
+	rules = settings.get("store_credit_bonus_rules") or []
+	if not isinstance(rules, list):
+		return []
+	scope = _normalize_bonus_scope(scope) if scope else None
+	matches = []
+	for rule in rules:
+		if not isinstance(rule, dict) or not cint(rule.get("enabled", 1)):
+			continue
+		applies_to = _normalize_bonus_scope(rule.get("applies_to"))
+		if scope and applies_to not in {"Both", scope}:
+			continue
+		threshold = flt(rule.get("threshold_amount"))
+		bonus = flt(rule.get("bonus_amount"))
+		if threshold <= 0 or bonus <= 0:
+			continue
+		matches.append(
+			{
+				"enabled": 1,
+				"threshold_amount": threshold,
+				"bonus_amount": bonus,
+				"applies_to": applies_to,
+				"label": rule.get("label") or "",
+			}
+		)
+	return sorted(matches, key=lambda row: row["threshold_amount"], reverse=True)
+
+
+def get_store_credit_bonus_rule_for_amount(amount: float, scope: str | None = None):
+	amount = flt(amount)
+	if amount <= 0:
+		return None
+	for rule in get_store_credit_bonus_rules(scope=scope):
+		if amount + 0.0001 >= flt(rule.get("threshold_amount")):
+			return rule
+	return None
+
+
+def get_store_credit_bonus_for_source(source_doctype: str | None, source_document: str | None):
+	if not _ledger_available() or not source_doctype or not source_document:
+		return None
+	name = frappe.db.get_value(
+		LEDGER_DOCTYPE,
+		{
+			"transaction_type": STORE_CREDIT_BONUS_TYPE,
+			"source_doctype": source_doctype,
+			"source_document": source_document,
+		},
+		"name",
+	)
+	return frappe.get_doc(LEDGER_DOCTYPE, name).as_dict() if name else None
+
+
+def grant_store_credit_bonus_for_amount(
+	*,
+	parent: str | None = None,
+	customer: str | None = None,
+	amount: float = 0,
+	scope: str | None = None,
+	source_doctype: str | None = None,
+	source_document: str | None = None,
+	invoice: str | None = None,
+	payment_entry: str | None = None,
+	student: str | None = None,
+	enrollment: str | None = None,
+	posting_date: str | None = None,
+):
+	amount = flt(amount)
+	scope = _normalize_bonus_scope(scope)
+	summary = {
+		"created": False,
+		"already_exists": False,
+		"skipped": True,
+		"reason": None,
+		"payment_amount": amount,
+		"bonus_amount": 0,
+		"rule": None,
+		"entry": None,
+	}
+	if amount <= 0:
+		summary["reason"] = "Payment amount is required."
+		return summary
+	rule = get_store_credit_bonus_rule_for_amount(amount, scope=scope)
+	if not rule:
+		summary["reason"] = "No bonus rule matched."
+		return summary
+	if not source_doctype or not source_document:
+		summary["reason"] = "Source document is required for duplicate protection."
+		return summary
+
+	existing = get_store_credit_bonus_for_source(source_doctype, source_document)
+	if existing:
+		summary.update(
+			{
+				"already_exists": True,
+				"reason": "Bonus already granted for this source.",
+				"entry": existing,
+				"bonus_amount": flt(existing.get("credit_amount")),
+				"rule": rule,
+			}
+		)
+		return summary
+
+	parent, customer = resolve_parent_customer(parent=parent, customer=customer)
+
+	bonus_amount = flt(rule.get("bonus_amount"))
+	entry = create_store_credit_entry(
+		parent=parent,
+		customer=customer,
+		student=student,
+		transaction_type=STORE_CREDIT_BONUS_TYPE,
+		credit_amount=bonus_amount,
+		payment_amount=amount,
+		invoice=invoice,
+		payment_entry=payment_entry,
+		enrollment=enrollment,
+		reference_doctype=source_doctype,
+		reference_document=source_document,
+		source_doctype=source_doctype,
+		source_document=source_document,
+		reason=rule.get("label") or "Store credit promotion bonus",
+		notes=_("Automatic store credit bonus for a single {0} amount of {1}.").format(scope.lower(), amount),
+		posting_date=posting_date,
+	)
+	summary.update(
+		{
+			"created": True,
+			"skipped": False,
+			"reason": None,
+			"bonus_amount": bonus_amount,
+			"rule": rule,
+			"entry": entry.as_dict(),
+		}
+	)
+	return summary
+
+
+def grant_store_credit_bonus_for_payment_entry(payment_entry):
+	if not payment_entry:
+		return None
+	doc = frappe.get_doc("Payment Entry", payment_entry) if isinstance(payment_entry, str) else payment_entry
+	if doc.get("payment_type") and doc.get("payment_type") != "Receive":
+		return {"created": False, "skipped": True, "reason": "Payment is not a received payment."}
+
+	amount = flt(doc.get("paid_amount") or doc.get("received_amount") or 0)
+	if amount <= 0:
+		return {"created": False, "skipped": True, "reason": "Payment amount is required."}
+
+	invoice_name = None
+	for row in doc.get("references", []):
+		if row.get("reference_doctype") == "Sales Invoice" and row.get("reference_name"):
+			invoice_name = row.get("reference_name")
+			break
+	if not invoice_name:
+		return {"created": False, "skipped": True, "reason": "No linked sales invoice."}
+
+	invoice_doc = frappe.get_doc("Sales Invoice", invoice_name) if invoice_name and _doctype_available("Sales Invoice") else None
+	customer = doc.get("party") if doc.get("party_type") == "Customer" else None
+	if not customer and invoice_doc:
+		customer = invoice_doc.get("customer")
+	parent = invoice_doc.get("parent") if invoice_doc else None
+	student = (invoice_doc.get("primary_student") or invoice_doc.get("student")) if invoice_doc else None
+	enrollment = invoice_doc.get("enrollment") if invoice_doc else None
+
+	if not customer:
+		return {"created": False, "skipped": True, "reason": "Customer could not be resolved."}
+
+	return grant_store_credit_bonus_for_amount(
+		parent=parent,
+		customer=customer,
+		amount=amount,
+		scope="Invoice Payment",
+		source_doctype="Payment Entry",
+		source_document=doc.name,
+		invoice=invoice_name,
+		payment_entry=doc.name,
+		student=student,
+		enrollment=enrollment,
+		posting_date=doc.get("posting_date"),
+	)
+
+
+def grant_store_credit_bonus_on_payment_entry_submit(doc, method=None):
+	try:
+		result = grant_store_credit_bonus_for_payment_entry(doc)
+		if result and result.get("created"):
+			doc.add_comment("Comment", _("Store credit bonus granted: {0}.").format(flt(result.get("bonus_amount"))))
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "QAS Store Credit Bonus Failed")
 
 
 def apply_store_credit_to_unpaid_invoices(parent: str | None = None, customer: str | None = None, limit: int = 100):
@@ -610,6 +806,11 @@ def _store_credit_liability_parent_account(company: str):
 def _set_if_has_field(doc, fieldname: str, value):
 	if value is not None and doc.meta.has_field(fieldname):
 		doc.set(fieldname, value)
+
+
+def _normalize_bonus_scope(scope: str | None):
+	scope = (scope or "Both").strip()
+	return scope if scope in STORE_CREDIT_BONUS_SCOPES else "Both"
 
 
 def _doctype_available(doctype: str) -> bool:

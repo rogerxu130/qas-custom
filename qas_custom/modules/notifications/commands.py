@@ -195,26 +195,92 @@ def send_parent_invoice_notification_job(
 
 
 def maybe_send_parent_invoice_paid_receipt(invoice_doc, *, payment_entry=None, source: str | None = None):
-	doc = frappe.get_doc("Sales Invoice", invoice_doc) if isinstance(invoice_doc, str) else invoice_doc
-	if not doc or int(doc.get("docstatus") or 0) != 1:
-		return {"sent": False, "skipped": True, "reason": "Invoice is not submitted."}
+	doc, amounts, result = _prepare_paid_receipt(invoice_doc)
+	if result:
+		return result
+	return send_parent_payment_receipt(doc, payment_entry=payment_entry, source=source, amounts=amounts)
 
-	amounts = _invoice_notification_amounts(doc)
-	outstanding = _invoice_outstanding_amount(doc)
-	payable_amount = flt(amounts.get("payable_amount"))
-	if outstanding > 0.005 and payable_amount > 0.005:
+
+def enqueue_parent_invoice_paid_receipt(invoice_doc, *, payment_entry=None, source: str | None = None):
+	"""Queue a paid-invoice receipt without delaying the financial transaction."""
+	doc, amounts, result = _prepare_paid_receipt(invoice_doc)
+	if result:
+		return result
+
+	recipient = _invoice_recipient(doc)
+	payment_doc = _payment_entry_doc(payment_entry)
+	payment_context = _receipt_payment_context(doc, payment_doc, amounts, source=source)
+	event_key = _paid_receipt_event_key(doc.name)
+	subject = _receipt_email_subject(doc)
+	message = _receipt_email_message(doc, amounts, payment_context)
+	log_name = _create_notification_log(
+		event_key=event_key,
+		recipient=recipient,
+		subject=subject,
+		message=message,
+		document_type="Sales Invoice",
+		document_name=doc.name,
+	)
+
+	if not recipient.get("email"):
+		_mark_notification_failed(log_name, "No parent email found.")
+		return {
+			"sent": False,
+			"queued": False,
+			"reason": "No parent email found.",
+			"notification_log": log_name,
+			"receipt": True,
+		}
+
+	_mark_notification_queued(log_name)
+	if not outbound_email_enabled():
+		_mark_notification_failed(log_name, email_block_reason())
+		return {
+			"sent": False,
+			"queued": False,
+			"skipped": True,
+			"recipient": recipient["email"],
+			"reason": email_block_reason(),
+			"notification_log": log_name,
+			"receipt": True,
+		}
+
+	frappe.enqueue(
+		"qas_custom.modules.notifications.commands.send_parent_payment_receipt_job",
+		queue="short",
+		timeout=300,
+		enqueue_after_commit=True,
+		invoice=doc.name,
+		payment_entry=payment_doc.name if payment_doc else None,
+		source=source,
+		notification_log=log_name,
+	)
+	return {
+		"sent": False,
+		"queued": True,
+		"recipient": recipient["email"],
+		"notification_log": log_name,
+		"receipt": True,
+	}
+
+
+def send_parent_payment_receipt_job(invoice: str, *, payment_entry=None, source: str | None = None, notification_log: str | None = None):
+	doc = frappe.get_doc("Sales Invoice", invoice)
+	if int(doc.get("docstatus") or 0) != 1:
+		_mark_notification_failed(notification_log, "Invoice is no longer submitted.")
 		return {
 			"sent": False,
 			"skipped": True,
-			"reason": "Invoice is not fully paid.",
-			"outstanding_amount": outstanding,
-			"payable_amount": payable_amount,
+			"reason": "Invoice is no longer submitted.",
+			"notification_log": notification_log,
+			"receipt": True,
 		}
-
-	if _paid_receipt_already_logged(doc.name):
-		return {"sent": False, "skipped": True, "duplicate": True, "reason": "Receipt already sent for this invoice."}
-
-	return send_parent_payment_receipt(doc, payment_entry=payment_entry, source=source, amounts=amounts)
+	return send_parent_payment_receipt(
+		doc,
+		payment_entry=payment_entry,
+		source=source,
+		notification_log=notification_log,
+	)
 
 
 def send_parent_payment_receipt(invoice_doc, *, payment_entry=None, source: str | None = None, amounts=None, notification_log: str | None = None):
@@ -285,6 +351,29 @@ def send_parent_payment_receipt(invoice_doc, *, payment_entry=None, source: str 
 			"notification_log": log_name,
 			"receipt": True,
 		}
+
+
+def _prepare_paid_receipt(invoice_doc):
+	doc = frappe.get_doc("Sales Invoice", invoice_doc) if isinstance(invoice_doc, str) else invoice_doc
+	if not doc or int(doc.get("docstatus") or 0) != 1:
+		return doc, None, {"sent": False, "skipped": True, "reason": "Invoice is not submitted."}
+
+	amounts = _invoice_notification_amounts(doc)
+	outstanding = _invoice_outstanding_amount(doc)
+	payable_amount = flt(amounts.get("payable_amount"))
+	if outstanding > 0.005 and payable_amount > 0.005:
+		return doc, amounts, {
+			"sent": False,
+			"skipped": True,
+			"reason": "Invoice is not fully paid.",
+			"outstanding_amount": outstanding,
+			"payable_amount": payable_amount,
+		}
+
+	if _paid_receipt_already_logged(doc.name):
+		return doc, amounts, {"sent": False, "skipped": True, "duplicate": True, "reason": "Receipt already sent for this invoice."}
+
+	return doc, amounts, None
 
 
 def get_invoice_notification_summary(invoice: str):

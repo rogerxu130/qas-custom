@@ -20,9 +20,12 @@ from qas_custom.modules.billing.store_credit import (
 	apply_store_credit_to_unpaid_invoices,
 	cancel_store_credit_journal_entries,
 	create_store_credit_entry,
+	get_store_credit_bonus_for_source,
 	get_invoice_payable_amount,
 	get_invoice_store_credit_applied,
 	get_store_credit_summary,
+	grant_store_credit_bonus_for_amount,
+	grant_store_credit_bonus_for_payment_entry,
 	sync_invoice_store_credit_snapshot,
 )
 from qas_custom.modules.billing.invoice_settings import (
@@ -45,6 +48,7 @@ from qas_custom.modules.makeup.commands import (
     submit_parent_leave_request_core,
 )
 from qas_custom.modules.notifications import (
+	enqueue_parent_invoice_paid_receipt,
 	enqueue_parent_invoice_notification,
 	get_invoice_notification_summary,
 	maybe_send_parent_invoice_paid_receipt,
@@ -681,6 +685,7 @@ def delete_school_admin_setup_record_data(record_type=None, name=None):
 
 def adjust_school_admin_store_credit_data(parent=None, customer=None, amount=0, reason=None, notes=None):
 	_require_school_admin()
+	amount = flt(amount)
 	entry = adjust_store_credit(
 		parent=parent,
 		customer=customer,
@@ -688,8 +693,17 @@ def adjust_school_admin_store_credit_data(parent=None, customer=None, amount=0, 
 		reason=reason,
 		notes=notes,
 	)
+	promotion_bonus = None
 	auto_application = None
-	if flt(amount) > 0:
+	if amount > 0:
+		promotion_bonus = grant_store_credit_bonus_for_amount(
+			parent=entry.parent,
+			customer=entry.customer,
+			amount=amount,
+			scope="Top-up",
+			source_doctype="QAS Store Credit Ledger",
+			source_document=entry.name,
+		)
 		auto_application = apply_store_credit_to_unpaid_invoices(parent=entry.parent, customer=entry.customer)
 	frappe.db.commit()
 	if auto_application and auto_application.get("invoices"):
@@ -705,6 +719,7 @@ def adjust_school_admin_store_credit_data(parent=None, customer=None, amount=0, 
 		frappe.db.commit()
 	return {
 		"entry": entry.as_dict(),
+		"promotion_bonus": promotion_bonus,
 		"store_credit": get_store_credit_summary(parent=entry.parent, customer=entry.customer, limit=50),
 		"auto_application": auto_application,
 	}
@@ -1026,6 +1041,7 @@ def mark_school_admin_invoice_paid_data(invoice=None, payload=None):
 		reference_no=payload.get("reference_no"),
 		notes=payload.get("notes"),
 	)
+	promotion_bonus = grant_store_credit_bonus_for_payment_entry(payment_entry)
 	_add_comment(
 		"Sales Invoice",
 		doc.name,
@@ -1034,11 +1050,14 @@ def mark_school_admin_invoice_paid_data(invoice=None, payload=None):
 	sync_invoice_store_credit_snapshot(doc.name)
 	frappe.db.commit()
 	doc = frappe.get_doc("Sales Invoice", invoice)
-	receipt_notification = _maybe_send_paid_receipt(doc, payment_entry=payment_entry, source="mark_paid")
+	receipt_notification = _enqueue_paid_receipt(doc, payment_entry=payment_entry, source="mark_paid")
 	frappe.db.commit()
 	payload = _build_invoice_payload(frappe.get_doc("Sales Invoice", invoice))
 	payload["receipt_notification"] = receipt_notification
 	payload["payment_entry"] = payment_entry.name
+	payload["promotion_bonus"] = promotion_bonus or {
+		"entry": get_store_credit_bonus_for_source("Payment Entry", payment_entry.name)
+	}
 	return payload
 
 
@@ -4044,6 +4063,14 @@ def _enqueue_invoice_notification(doc, event="approved", store_credit_applied=No
 
 def _maybe_send_paid_receipt(doc, *, payment_entry=None, source=None):
 	return maybe_send_parent_invoice_paid_receipt(
+		doc,
+		payment_entry=payment_entry,
+		source=source,
+	)
+
+
+def _enqueue_paid_receipt(doc, *, payment_entry=None, source=None):
+	return enqueue_parent_invoice_paid_receipt(
 		doc,
 		payment_entry=payment_entry,
 		source=source,

@@ -149,6 +149,9 @@ doc_events = {
 		"on_update": "qas_custom.modules.notifications.guard.purge_legacy_invoice_email_queue",
 		"on_change": "qas_custom.modules.notifications.guard.purge_legacy_invoice_email_queue",
 	},
+	"Payment Entry": {
+		"on_submit": "qas_custom.modules.billing.store_credit.grant_store_credit_bonus_on_payment_entry_submit",
+	},
 	"Student": {
 		"validate": "qas_custom.services.display_labels.sync_student_code",
 	},
