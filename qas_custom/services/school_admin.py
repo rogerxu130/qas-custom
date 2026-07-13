@@ -77,6 +77,7 @@ ACTIVE_TERM_STATUSES = ["Upcoming", "Active"]
 ACTIVE_TIMESLOT_STATUSES = ["Active"]
 COURSE_LABEL_FIELDS = ["name", "course_name", "course_name_zh"]
 DEFAULT_COURSE_INVOICE_ITEM = "Tuition Fee"
+MANUAL_INVOICE_ITEM = "Other"
 BULK_INVOICE_SUBMIT_JOB_TTL_SECONDS = 86400
 PARENT_EDIT_FIELDS = ["parent_name", "mobile_number", "phone", "email", "email_id", "address", "status", "customer"]
 STUDENT_EDIT_FIELDS = ["student_name", "first_name", "last_name", "date_of_birth", "dob", "gender", "status", "guardian", "parent"]
@@ -485,10 +486,19 @@ def get_school_admin_invoice_items_data(query=None, limit=120):
 		limit=_limit(limit, default=120, max_value=500),
 		ignore_permissions=True,
 	)
-	items = []
+	items = [{
+		"value": MANUAL_INVOICE_ITEM,
+		"label": MANUAL_INVOICE_ITEM,
+		"name": MANUAL_INVOICE_ITEM,
+		"item_code": MANUAL_INVOICE_ITEM,
+		"item_name": MANUAL_INVOICE_ITEM,
+		"doctype": "Item",
+	}]
 	for row in rows:
 		item = _normalize_row_payload("Item", row)
 		value = item.get("name") or item.get("item_code")
+		if value == MANUAL_INVOICE_ITEM:
+			continue
 		label = item.get("item_name") or item.get("item_code") or value
 		if item.get("item_code") and item.get("item_code") != label:
 			label = f"{label} · {item.get('item_code')}"
@@ -3841,6 +3851,8 @@ def _apply_invoice_items(invoice, items):
 		item_code = row.get("item_code") or row.get("item")
 		if not item_code:
 			frappe.throw(_("Invoice item code is required."))
+		if item_code == MANUAL_INVOICE_ITEM:
+			item_code = _ensure_school_admin_invoice_item(MANUAL_INVOICE_ITEM)
 		item = invoice.append(
 			"items",
 			{
