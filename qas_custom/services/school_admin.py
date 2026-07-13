@@ -915,7 +915,7 @@ def create_school_admin_manual_invoice_data(payload=None):
 	apply_invoice_payment_snapshot(invoice)
 	_apply_invoice_items(invoice, items)
 	_sync_invoice_student_summary(invoice)
-	invoice.insert(ignore_permissions=True)
+	_run_school_admin_invoice_mutation(lambda: invoice.insert(ignore_permissions=True))
 	_add_comment("Sales Invoice", invoice.name, "Manual invoice created by School Admin.")
 	frappe.db.commit()
 	return _build_invoice_payload(invoice)
@@ -954,7 +954,7 @@ def update_school_admin_draft_invoice_data(invoice=None, payload=None):
 	if "items" in payload:
 		_apply_invoice_items(doc, payload.get("items") or [])
 	_sync_invoice_student_summary(doc)
-	doc.save(ignore_permissions=True)
+	_run_school_admin_invoice_mutation(lambda: doc.save(ignore_permissions=True))
 	_add_comment("Sales Invoice", doc.name, "Draft invoice updated by School Admin.")
 	frappe.db.commit()
 	return _build_invoice_payload(doc)
@@ -982,10 +982,14 @@ def submit_school_admin_invoice_data(invoice=None, enqueue_notification=False, s
 	doc = frappe.get_doc("Sales Invoice", invoice)
 	if cint(doc.docstatus) != 0:
 		frappe.throw(_("Only draft invoices can be submitted."))
-	if apply_invoice_payment_snapshot(doc):
-		doc.save(ignore_permissions=True)
-	doc.flags.ignore_permissions = True
-	doc.submit()
+
+	def submit_invoice():
+		if apply_invoice_payment_snapshot(doc):
+			doc.save(ignore_permissions=True)
+		doc.flags.ignore_permissions = True
+		doc.submit()
+
+	_run_school_admin_invoice_mutation(submit_invoice)
 	_add_comment("Sales Invoice", doc.name, "Invoice approved and submitted by School Admin.")
 	application = apply_store_credit_to_invoice(doc)
 	if flt(application.get("applied")) > 0:
@@ -1019,7 +1023,7 @@ def resend_school_admin_invoice_data(invoice=None):
 		frappe.throw(_("Invoice is required."))
 	doc = frappe.get_doc("Sales Invoice", invoice)
 	if apply_invoice_payment_snapshot(doc):
-		doc.save(ignore_permissions=True)
+		_run_school_admin_invoice_mutation(lambda: doc.save(ignore_permissions=True))
 	sync_invoice_store_credit_snapshot(doc)
 	doc = frappe.get_doc("Sales Invoice", invoice)
 	frappe.db.commit()
@@ -1878,9 +1882,9 @@ def _create_term_enrollment_invoice(enrollment, start_session):
 	_sync_invoice_student_summary(invoice)
 	apply_invoice_payment_snapshot(invoice)
 	if created:
-		invoice.insert(ignore_permissions=True)
+		_run_school_admin_invoice_mutation(lambda: invoice.insert(ignore_permissions=True))
 	else:
-		invoice.save(ignore_permissions=True)
+		_run_school_admin_invoice_mutation(lambda: invoice.save(ignore_permissions=True))
 	invoice.flags.qas_was_created = created
 	return invoice
 
@@ -2150,20 +2154,25 @@ def create_school_admin_enrollment_invoice_data(enrollment=None, payload=None):
 	if not doc.get("weekly_timeslot"):
 		frappe.throw(_("Weekly timeslot is required before creating an invoice."))
 	term_doc = frappe.get_doc("Term", doc.term)
+	persisted_start_session = doc.get("start_course_session")
+	requested_start_session = payload.get("start_course_session")
+	if requested_start_session and requested_start_session != persisted_start_session:
+		frappe.throw(_("Start session has changed. Save the enrollment or create attendance before creating an invoice."))
+	if not persisted_start_session:
+		frappe.throw(_("Start session is required. Save the enrollment or create attendance before creating an invoice."))
 	start_session = _validate_enrollment_start_session(
-		payload.get("start_course_session") or doc.get("start_course_session"),
+		persisted_start_session,
 		doc.weekly_timeslot,
 		term_doc,
 	)
 	timeslot_course = frappe.db.get_value("Weekly Timeslot", doc.weekly_timeslot, "course")
-	_set_if_field(doc, "start_course_session", start_session)
 	_set_if_field(doc, "course", doc.get("course") or timeslot_course)
 	if not doc.get("enrollment_date"):
 		start_date = frappe.db.get_value("Course Sessions", start_session, "session_date")
 		_set_if_field(doc, "enrollment_date", start_date or term_doc.get("start_date") or today())
-	doc.save(ignore_permissions=True)
 
 	invoice = _create_term_enrollment_invoice(doc, start_session)
+	_set_if_field(doc, "start_course_session", start_session)
 	_set_if_field(doc, "invoice", invoice.name)
 	_set_if_field(doc, "invoice_status", "Draft")
 	_set_if_field(doc, "invoice_amount", invoice.get("grand_total"))
@@ -4070,6 +4079,15 @@ def _mark_draft_invoice_cancelled(doc, reason):
 		frappe.db.set_value("Sales Invoice", doc.name, "cancellation_reason", reason, update_modified=False)
 
 
+def _run_school_admin_invoice_mutation(callback):
+	original_user = frappe.session.user or "Administrator"
+	try:
+		frappe.set_user("Administrator")
+		return callback()
+	finally:
+		frappe.set_user(original_user)
+
+
 def _cancel_submitted_invoice_as_admin(invoice):
 	if not payment_mutations_enabled():
 		frappe.throw(_(payment_block_reason()))
@@ -4546,13 +4564,12 @@ def _create_invoices_for_enrollment_names(enrollment_names, payload=None):
 				term_doc,
 			)
 			timeslot_course = frappe.db.get_value("Weekly Timeslot", doc.weekly_timeslot, "course")
-			_set_if_field(doc, "start_course_session", start_session)
 			_set_if_field(doc, "course", doc.get("course") or timeslot_course)
 			if not doc.get("enrollment_date"):
 				start_date = frappe.db.get_value("Course Sessions", start_session, "session_date")
 				_set_if_field(doc, "enrollment_date", start_date or term_doc.get("start_date") or today())
-			doc.save(ignore_permissions=True)
 			invoice = _create_term_enrollment_invoice(doc, start_session)
+			_set_if_field(doc, "start_course_session", start_session)
 			_set_if_field(doc, "invoice", invoice.name)
 			_set_if_field(doc, "invoice_status", "Draft")
 			_set_if_field(doc, "invoice_amount", invoice.get("grand_total"))
