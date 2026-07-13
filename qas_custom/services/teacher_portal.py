@@ -96,16 +96,20 @@ def get_teacher_session_detail_data(course_session=None):
     timeslot = _get_timeslot(session.get("weekly_timeslot"))
     attendance_rows = _get_attendance_rows([session["name"]])
     student_map = _get_student_map([row.get("student") for row in attendance_rows if row.get("student")])
+    parent_map = _get_parent_contact_map([_student_parent_id(student) for student in student_map.values()])
 
     students = []
     for row in sorted(attendance_rows, key=lambda item: item.get("creation") or ""):
         student_id = row.get("student")
         student = student_map.get(student_id, {})
+        parent = parent_map.get(_student_parent_id(student)) or {}
         students.append(
             {
                 "row_id": row.get("name"),
                 "student": student_id,
                 "student_name": get_student_display_name(student) or student_id,
+                "parent_name": parent.get("parent_name") or "",
+                "parent_phone": parent.get("parent_phone") or "",
                 "enrollment_type": row.get("enrollment_type"),
                 "status": row.get("status"),
                 "comments": row.get("comments") or "",
@@ -532,7 +536,31 @@ def _get_student_map(student_ids: list[str]):
         for row in frappe.get_all(
             "Student",
             filters={"name": ["in", student_ids]},
-            fields=_safe_fields("Student", ["name", "student_name", "student_code"]),
+            fields=_safe_fields("Student", ["name", "student_name", "student_code", "guardian", "parent"]),
+        )
+    }
+
+
+def _student_parent_id(student):
+    return student.get("guardian") or student.get("parent")
+
+
+def _get_parent_contact_map(parent_ids: list[str]):
+    parent_ids = sorted({parent_id for parent_id in parent_ids if parent_id})
+    if not parent_ids:
+        return {}
+
+    fields = _safe_fields("Parent", ["name", "parent_name", "mobile_number", "phone"])
+    return {
+        row["name"]: {
+            "parent_name": row.get("parent_name") or row.get("name"),
+            "parent_phone": row.get("mobile_number") or row.get("phone") or "",
+        }
+        for row in frappe.get_all(
+            "Parent",
+            filters={"name": ["in", parent_ids]},
+            fields=fields,
+            limit_page_length=0,
         )
     }
 
