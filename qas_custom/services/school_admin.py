@@ -3629,11 +3629,120 @@ def _search_enrollments(query, limit):
 def _search_invoices(query, limit):
 	if not _doctype_available("Sales Invoice"):
 		return []
+	invoice_names = _search_invoice_direct_names(query, limit)
+	parent_ids, customer_ids, student_ids = _search_invoice_family_ids(query, limit)
+	invoice_names.update(
+		_search_invoice_names_for_family(
+			parent_ids=parent_ids,
+			customer_ids=customer_ids,
+			student_ids=student_ids,
+			limit=limit,
+		)
+	)
+	return _get_invoice_rows(names=invoice_names, limit=limit)
+
+
+def _search_invoice_direct_names(query, limit):
 	fields = _safe_fields(
 		"Sales Invoice",
-		["name", "customer", "posting_date", "due_date", "status", "docstatus", "grand_total", "outstanding_amount"],
+		[
+			"name",
+			"customer",
+			"parent",
+			"student",
+			"primary_student",
+			"posting_date",
+			"due_date",
+			"status",
+			"docstatus",
+			"grand_total",
+			"outstanding_amount",
+		],
 	)
-	return _search_doctype("Sales Invoice", query, fields, ["name", "customer", "status"], limit)
+	rows = _search_doctype(
+		"Sales Invoice",
+		query,
+		fields,
+		["name", "customer", "parent", "student", "primary_student", "status"],
+		limit,
+	)
+	return {row.get("name") for row in rows if row.get("name")}
+
+
+def _search_invoice_family_ids(query, limit):
+	parent_rows = _search_doctype(
+		"Parent",
+		query,
+		_safe_fields("Parent", ["name", "customer"]),
+		["name", "parent_name", "email", "email_id", "contact_email"],
+		limit,
+	)
+	customer_rows = _search_doctype(
+		"Customer",
+		query,
+		_safe_fields("Customer", ["name"]),
+		["name", "customer_name", "email", "email_id", "contact_email"],
+		limit,
+	)
+	student_rows = _search_doctype(
+		"Student",
+		query,
+		_safe_fields("Student", ["name", "guardian", "parent"]),
+		["name", "student_name"],
+		limit,
+	)
+
+	parent_ids = {row.get("name") for row in parent_rows if row.get("name")}
+	customer_ids = {row.get("customer") for row in parent_rows if row.get("customer")}
+	customer_ids.update(row.get("name") for row in customer_rows if row.get("name"))
+	student_ids = {row.get("name") for row in student_rows if row.get("name")}
+	parent_field = _student_parent_field()
+	if parent_field:
+		parent_ids.update(row.get(parent_field) for row in student_rows if row.get(parent_field))
+
+	if _doctype_available("Parent") and _has_field("Parent", "customer"):
+		if parent_ids:
+			rows = _get_invoice_search_parent_rows(
+				filters={"name": ["in", sorted(parent_ids)]},
+				fields=["name", "customer"],
+			)
+			customer_ids.update(row.customer for row in rows if row.customer)
+		if customer_ids:
+			rows = _get_invoice_search_parent_rows(
+				filters={"customer": ["in", sorted(customer_ids)]},
+				fields=["name"],
+			)
+			parent_ids.update(row.name for row in rows if row.name)
+
+	return parent_ids, customer_ids, student_ids
+
+
+def _get_invoice_search_parent_rows(filters, fields):
+	try:
+		return frappe.get_all("Parent", filters=filters, fields=fields, limit_page_length=0)
+	except Exception:
+		return []
+
+
+def _search_invoice_names_for_family(parent_ids=None, customer_ids=None, student_ids=None, limit=50):
+	invoice_names = set()
+	or_filters = []
+	if customer_ids:
+		or_filters.append(["Sales Invoice", "customer", "in", sorted(customer_ids)])
+	if parent_ids and _has_field("Sales Invoice", "parent"):
+		or_filters.append(["Sales Invoice", "parent", "in", sorted(parent_ids)])
+	if or_filters:
+		rows = frappe.get_all(
+			"Sales Invoice",
+			or_filters=or_filters,
+			fields=["name"],
+			order_by="modified desc",
+			limit=limit,
+		)
+		invoice_names.update(row.name for row in rows if row.name)
+	if student_ids:
+		invoice_names.update(_invoice_names_for_students(sorted(student_ids)))
+	return invoice_names
 
 
 def _search_doctype(doctype, query, fields, search_fields, limit):
@@ -3861,10 +3970,15 @@ def _inquiry_order_by(queue):
 	return "current_appointment_date asc, current_appointment_time asc, modified desc"
 
 
-def _get_invoice_rows(status=None, customer=None, parent=None, students=None, source=None, limit=80):
+def _get_invoice_rows(status=None, customer=None, parent=None, students=None, source=None, names=None, limit=80):
 	if not _doctype_available("Sales Invoice"):
 		return []
 	filters = {}
+	if names is not None:
+		names = sorted({name for name in names if name})
+		if not names:
+			return []
+		filters["name"] = ["in", names]
 	if status:
 		_apply_invoice_status_filter(filters, status)
 	if customer:
@@ -3875,6 +3989,10 @@ def _get_invoice_rows(status=None, customer=None, parent=None, students=None, so
 		invoice_names = _invoice_names_for_students(students)
 		if not invoice_names:
 			return []
+		if names is not None:
+			invoice_names = set(names).intersection(invoice_names)
+			if not invoice_names:
+				return []
 		filters["name"] = ["in", sorted(invoice_names)]
 	if source:
 		_apply_invoice_source_filter(filters, source)
