@@ -9,6 +9,13 @@
  "field_order": [
   "inquiry_type",
   "source",
+  "webhook_source",
+  "external_submission_id",
+  "external_form_id",
+  "external_serial_number",
+  "external_submitted_at",
+  "source_url",
+  "raw_webhook_payload",
   "status",
   "campus",
   "party_section",
@@ -55,6 +62,51 @@
    "in_standard_filter": 1,
    "label": "Source",
    "reqd": 1
+  },
+  {
+   "fieldname": "webhook_source",
+   "fieldtype": "Data",
+   "label": "Webhook Source",
+   "read_only": 1
+  },
+  {
+   "fieldname": "external_submission_id",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "External Submission ID",
+   "read_only": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "external_form_id",
+   "fieldtype": "Data",
+   "label": "External Form ID",
+   "read_only": 1
+  },
+  {
+   "fieldname": "external_serial_number",
+   "fieldtype": "Data",
+   "label": "External Serial Number",
+   "read_only": 1
+  },
+  {
+   "fieldname": "external_submitted_at",
+   "fieldtype": "Datetime",
+   "label": "External Submitted At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "source_url",
+   "fieldtype": "Data",
+   "label": "Source URL",
+   "read_only": 1
+  },
+  {
+   "fieldname": "raw_webhook_payload",
+   "fieldtype": "Code",
+   "label": "Raw Webhook Payload",
+   "options": "JSON",
+   "read_only": 1
   },
   {
    "default": "New",

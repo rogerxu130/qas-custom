@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime, timedelta
+from hmac import compare_digest
 
 import frappe
 from frappe import _
@@ -55,7 +56,20 @@ def create_inquiry_webhook_data(payload=None):
 	payload = _get_payload(payload)
 	_validate_webhook_token(payload)
 	normalized = _normalize_webhook_payload(payload)
-	return create_inquiry_core(normalized, source=normalized.get("source") or "Webhook", actor=None)
+	external_submission_id = normalized.get("external_submission_id")
+	if not external_submission_id:
+		frappe.throw(_("External submission ID is required."))
+
+	existing = _get_existing_webhook_inquiry(external_submission_id)
+	if existing:
+		return _build_webhook_response(existing, status="duplicate", duplicate=True)
+
+	normalized["skip_confirmation"] = True
+	normalized["require_bookable_session"] = True
+	normalized["raw_webhook_payload"] = payload
+	detail = create_inquiry_core(normalized, source=normalized.get("source") or "Webhook", actor=None)
+	inquiry_id = (detail.get("inquiry") or {}).get("id")
+	return _build_webhook_response(inquiry_id, status="created", duplicate=False)
 
 
 def get_inquiry_data(inquiry=None):
@@ -156,6 +170,13 @@ def create_inquiry_core(payload: dict, source="Manual", actor=None):
 	inquiry_doc = frappe.new_doc("Inquiry")
 	inquiry_doc.inquiry_type = inquiry_type
 	inquiry_doc.source = source or payload.get("source") or "Manual"
+	_set_if_field(inquiry_doc, "webhook_source", payload.get("webhook_source") or payload.get("source"))
+	_set_if_field(inquiry_doc, "external_submission_id", payload.get("external_submission_id"))
+	_set_if_field(inquiry_doc, "external_form_id", payload.get("form_id"))
+	_set_if_field(inquiry_doc, "external_serial_number", payload.get("serial_number"))
+	_set_if_field(inquiry_doc, "external_submitted_at", _parse_datetime_value(payload.get("submitted_at")))
+	_set_if_field(inquiry_doc, "source_url", payload.get("source_url"))
+	_set_if_field(inquiry_doc, "raw_webhook_payload", _safe_json_dumps(payload.get("raw_webhook_payload")))
 	inquiry_doc.status = _get_initial_inquiry_status(session_context or appointment_context, review_reason)
 	inquiry_doc.campus = (
 		session_context.get("campus")
@@ -176,7 +197,13 @@ def create_inquiry_core(payload: dict, source="Manual", actor=None):
 		if session_context
 		else _resolve_course(payload.get("preferred_course") or payload.get("course"))
 	)
-	inquiry_doc.course_session = session_context["session"].get("name") if session_context else payload.get("course_session")
+	inquiry_doc.course_session = (
+		session_context["session"].get("name")
+		if session_context
+		else None
+		if review_reason
+		else payload.get("course_session")
+	)
 	inquiry_doc.submitted_form_name = payload.get("submitted_form_name")
 	inquiry_doc.submitted_student_name = payload.get("submitted_student_name") or payload.get("student_name")
 	inquiry_doc.submitted_student_dob = payload.get("submitted_student_dob") or payload.get("date_of_birth")
@@ -195,7 +222,13 @@ def create_inquiry_core(payload: dict, source="Manual", actor=None):
 			inquiry_doc.current_appointment_date = current_date
 			inquiry_doc.current_appointment_time = current_time
 		inquiry_doc.review_reason = review_reason
-	inquiry_doc.confirmation_status = "Pending" if session_context or (appointment_context and not review_reason) else "Not Required"
+	inquiry_doc.confirmation_status = (
+		"Not Required"
+		if payload.get("skip_confirmation")
+		else "Pending"
+		if session_context or (appointment_context and not review_reason)
+		else "Not Required"
+	)
 	inquiry_doc.reminder_status = "Not Required"
 	inquiry_doc.flags.ignore_permissions = True
 	inquiry_doc.insert()
@@ -320,6 +353,29 @@ def build_inquiry_summary(inquiry_doc_or_name):
 	return _build_inquiry_payload(inquiry_doc)
 
 
+def _build_webhook_response(inquiry: str, status: str, duplicate: bool):
+	detail = build_inquiry_detail(inquiry)
+	inquiry_payload = detail.get("inquiry") or {}
+	review_reason = inquiry_payload.get("review_reason") or ""
+	return {
+		"status": status,
+		"duplicate": duplicate,
+		"inquiry": inquiry_payload.get("id"),
+		"inquiry_status": inquiry_payload.get("status"),
+		"course_session": inquiry_payload.get("course_session"),
+		"review_required": inquiry_payload.get("status") == NEEDS_REVIEW_STATUS,
+		"review_reason": review_reason,
+	}
+
+
+def _get_existing_webhook_inquiry(external_submission_id: str | None):
+	if not external_submission_id:
+		return None
+	if not frappe.get_meta("Inquiry").has_field("external_submission_id"):
+		return None
+	return frappe.db.get_value("Inquiry", {"external_submission_id": external_submission_id}, "name")
+
+
 def _require_admin():
 	if frappe.session.user == "Guest":
 		frappe.throw(_("Login required."), frappe.PermissionError)
@@ -331,6 +387,21 @@ def _require_admin():
 def _normalize_inquiry_payload(payload: dict):
 	payload = payload or {}
 	normalized = dict(payload)
+	submission = normalized.get("__submission")
+	if isinstance(submission, dict):
+		submission_aliases = {
+			"id": "submission_id",
+			"form_id": "form_id",
+			"serial_number": "serial_number",
+			"submission_time": "submitted_at",
+			"created_at": "created_at",
+			"updated_at": "updated_at",
+			"source_url": "source_url",
+		}
+		for source, target in submission_aliases.items():
+			if not normalized.get(target) and submission.get(source):
+				normalized[target] = submission.get(source)
+
 	aliases = {
 		"type": "inquiry_type",
 		"request_type": "inquiry_type",
@@ -388,12 +459,33 @@ def _normalize_inquiry_payload(payload: dict):
 
 	if normalized.get("inquiry_type"):
 		normalized["inquiry_type"] = _normalize_inquiry_type(normalized.get("inquiry_type"))
+	for fieldname in (
+		"form_id",
+		"submission_id",
+		"serial_number",
+		"submitted_at",
+		"created_at",
+		"updated_at",
+		"source_url",
+		"external_submission_id",
+	):
+		normalized[fieldname] = _normalize_scalar(normalized.get(fieldname))
+	if not normalized.get("submitted_at"):
+		normalized["submitted_at"] = normalized.get("created_at")
+	if not normalized.get("external_submission_id"):
+		form_id = normalized.get("form_id")
+		submission_id = normalized.get("submission_id")
+		if form_id and submission_id:
+			normalized["external_submission_id"] = f"fluent_form:{form_id}:{submission_id}"
 	return normalized
 
 
 def _normalize_webhook_payload(payload: dict):
 	normalized = _normalize_inquiry_payload(payload)
-	normalized["source"] = normalized.get("source") or "Webhook"
+	normalized["source"] = normalized.get("source") or (
+		"Fluent Form" if normalized.get("form_id") or normalized.get("submission_id") else "Webhook"
+	)
+	normalized["webhook_source"] = normalized.get("webhook_source") or normalized.get("source")
 	return normalized
 
 
@@ -458,9 +550,13 @@ def _validate_webhook_token(payload: dict):
 	request = getattr(frappe.local, "request", None)
 	header_token = None
 	if request:
-		header_token = request.headers.get("X-QAS-Webhook-Token") or request.headers.get("X-Inquiry-Webhook-Token")
+		header_token = (
+			request.headers.get("X-QAS-Webhook-Secret")
+			or request.headers.get("X-QAS-Webhook-Token")
+			or request.headers.get("X-Inquiry-Webhook-Token")
+		)
 	token = header_token or payload.get("webhook_token") or payload.get("token")
-	if token != expected:
+	if not token or not compare_digest(str(token), str(expected)):
 		frappe.throw(_("Invalid inquiry webhook token."), frappe.PermissionError)
 
 
@@ -615,7 +711,15 @@ def _resolve_trial_session_context(payload: dict, inquiry_type: str):
 	if inquiry_type != "Trial Lesson":
 		return None, None
 	if payload.get("course_session"):
-		return _get_session_context(payload.get("course_session")), None
+		try:
+			return _get_session_context(
+				payload.get("course_session"),
+				require_bookable=bool(payload.get("require_bookable_session")),
+			), None
+		except Exception as exc:
+			if payload.get("require_bookable_session") or payload.get("submitted_form_name"):
+				return None, _("Submitted Course Session cannot be booked: {0}").format(str(exc))
+			raise
 	if not (payload.get("submitted_form_name") or payload.get("submitted_class_session")):
 		return None, None
 
@@ -630,7 +734,10 @@ def _resolve_trial_session_context(payload: dict, inquiry_type: str):
 		payload["appointment_time"] = mapping.get("appointment_time")
 	if mapping.get("course_session"):
 		try:
-			return _get_session_context(mapping.get("course_session")), None
+			return _get_session_context(
+				mapping.get("course_session"),
+				require_bookable=bool(payload.get("require_bookable_session")),
+			), None
 		except Exception as exc:
 			return None, _("Matched Course Session cannot be booked: {0}").format(str(exc))
 	return None, mapping.get("reason") or _("Course Session could not be matched from the submitted trial form.")
@@ -672,7 +779,14 @@ def _map_trial_form_session(payload: dict):
 	form_name = payload.get("submitted_form_name")
 	class_session = payload.get("submitted_class_session")
 	trial_date = payload.get("submitted_trial_date") or payload.get("appointment_date")
-	campus, course_candidate = _derive_campus_and_course(form_name)
+	derived_campus, derived_course_candidate = _derive_campus_and_course(form_name)
+	campus = _resolve_campus(payload.get("campus")) or derived_campus
+	course_candidate = (
+		payload.get("preferred_course")
+		or payload.get("course")
+		or payload.get("class_type")
+		or derived_course_candidate
+	)
 	parsed_session = _parse_class_session(class_session)
 
 	result = {
@@ -691,30 +805,32 @@ def _map_trial_form_session(payload: dict):
 		return result
 
 	course = _resolve_course(course_candidate)
-	if course:
-		result["course"] = course
+	if not course:
+		result["reason"] = _("Course could not be uniquely matched from the submitted trial form.")
+		return result
+	result["course"] = course
+
+	if getdate(trial_date).strftime("%A") != parsed_session["day_of_week"]:
+		result["reason"] = _("Submitted trial date weekday does not match class session weekday.")
+		return result
 
 	timeslot_filters = {
 		"campus": campus,
 		"day_of_week": parsed_session["day_of_week"],
 		"start_time": parsed_session["start_time"],
+		"course": course,
 	}
-	if course:
-		timeslot_filters["course"] = course
+	if parsed_session.get("end_time"):
+		timeslot_filters["end_time"] = parsed_session.get("end_time")
+	if frappe.get_meta("Weekly Timeslot").has_field("status"):
+		timeslot_filters["status"] = "Active"
 	timeslots = frappe.get_all(
 		"Weekly Timeslot",
 		filters=timeslot_filters,
-		fields=["name", "course", "campus", "start_time", "end_time"],
+		fields=["name", "course", "campus", "start_time", "end_time", "status"],
 		order_by="modified desc",
+		limit_page_length=0,
 	)
-	if not timeslots and course:
-		timeslot_filters.pop("course")
-		timeslots = frappe.get_all(
-			"Weekly Timeslot",
-			filters=timeslot_filters,
-			fields=["name", "course", "campus", "start_time", "end_time"],
-			order_by="modified desc",
-		)
 	if not timeslots:
 		result["reason"] = _("No Weekly Timeslot matched the submitted campus, weekday, and time.")
 		return result
@@ -728,12 +844,19 @@ def _map_trial_form_session(payload: dict):
 		filters={"weekly_timeslot": timeslots[0].name, "session_date": trial_date},
 		fields=["name", "weekly_timeslot", "session_date", "status"],
 		order_by="modified desc",
+		limit_page_length=0,
 	)
 	if not sessions:
 		result["reason"] = _("No Course Session exists for the matched Weekly Timeslot and trial date.")
 		return result
 	if len(sessions) > 1:
 		result["reason"] = _("Multiple Course Sessions matched the submitted trial request.")
+		return result
+	if sessions[0].get("status") == "Cancelled":
+		result["reason"] = _("Matched Course Session is cancelled.")
+		return result
+	if _course_session_has_started(sessions[0], timeslots[0]):
+		result["reason"] = _("Matched Course Session has already started.")
 		return result
 
 	result["course_session"] = sessions[0].name
@@ -979,7 +1102,7 @@ def _parse_appointment_datetime(payload: dict):
 	return appointment_date, appointment_time
 
 
-def _get_session_context(course_session: str | None):
+def _get_session_context(course_session: str | None, require_bookable=False):
 	if not course_session:
 		frappe.throw(_("Course session is required."))
 	session = frappe.db.get_value(
@@ -1001,7 +1124,10 @@ def _get_session_context(course_session: str | None):
 	)
 	if not timeslot:
 		frappe.throw(_("Weekly timeslot was not found."))
-	_get_session_start(session, timeslot)
+	if require_bookable:
+		_validate_bookable_session(session, timeslot)
+	else:
+		_get_session_start(session, timeslot)
 	return {"session": session, "timeslot": timeslot, "campus": timeslot.get("campus")}
 
 
@@ -1009,6 +1135,21 @@ def _get_session_start(session, timeslot):
 	if not session.get("session_date") or not timeslot.get("start_time"):
 		frappe.throw(_("Course session is missing date or start time."))
 	return datetime.combine(getdate(session.get("session_date")), get_time(timeslot.get("start_time")))
+
+
+def _validate_bookable_session(session, timeslot):
+	if session.get("status") == "Cancelled":
+		frappe.throw(_("Course session is cancelled."))
+	if _course_session_has_started(session, timeslot):
+		frappe.throw(_("Course session has already started."))
+
+
+def _course_session_has_started(session, timeslot):
+	session_start = _get_session_start(session, timeslot)
+	current = now_datetime()
+	if getattr(current, "tzinfo", None):
+		current = current.replace(tzinfo=None)
+	return session_start <= current
 
 
 def _send_needs_review_alert(inquiry_doc, reason: str):
@@ -1073,6 +1214,10 @@ def _build_needs_review_email(inquiry_doc, reason: str):
 		_("Submitted form: {0}").format(inquiry_doc.submitted_form_name or "-"),
 		_("Submitted session: {0}").format(inquiry_doc.submitted_class_session or "-"),
 		_("Submitted trial date: {0}").format(inquiry_doc.submitted_trial_date or "-"),
+		_("External submission: {0}").format(inquiry_doc.get("external_submission_id") or "-"),
+		_("External form: {0}").format(inquiry_doc.get("external_form_id") or "-"),
+		_("External serial: {0}").format(inquiry_doc.get("external_serial_number") or "-"),
+		_("Source URL: {0}").format(inquiry_doc.get("source_url") or "-"),
 		_("Parent: {0}").format(inquiry_doc.parent or "-"),
 		_("Student: {0}").format(inquiry_doc.student or "-"),
 		_("Contact: {0} / {1} / {2}").format(
@@ -1090,6 +1235,12 @@ def _build_inquiry_payload(doc):
 		"inquiry_id": doc.name,
 		"inquiry_type": doc.inquiry_type,
 		"source": doc.source,
+		"webhook_source": doc.get("webhook_source"),
+		"external_submission_id": doc.get("external_submission_id"),
+		"external_form_id": doc.get("external_form_id"),
+		"external_serial_number": doc.get("external_serial_number"),
+		"external_submitted_at": _as_string(doc.get("external_submitted_at")),
+		"source_url": doc.get("source_url"),
 		"status": doc.status,
 		"campus": doc.campus,
 		"parent": doc.parent,
@@ -1148,6 +1299,52 @@ def _get_note_payloads(inquiry):
 def _validate_exists(doctype: str, name: str, message):
 	if not frappe.db.exists(doctype, name):
 		frappe.throw(message)
+
+
+def _set_if_field(doc, fieldname: str, value):
+	if value in (None, ""):
+		return
+	if doc.meta.has_field(fieldname):
+		doc.set(fieldname, value)
+
+
+def _safe_json_dumps(value):
+	if value is None:
+		return None
+	try:
+		return json.dumps(value, ensure_ascii=False, default=str, sort_keys=True)
+	except TypeError:
+		return json.dumps(str(value), ensure_ascii=False)
+
+
+def _parse_datetime_value(value):
+	if not value:
+		return None
+	if hasattr(value, "year") and hasattr(value, "month") and hasattr(value, "hour"):
+		return value.replace(tzinfo=None) if getattr(value, "tzinfo", None) else value
+
+	value = str(value).strip()
+	if not value:
+		return None
+	for fmt in (
+		"%Y-%m-%d %H:%M:%S",
+		"%Y-%m-%d %H:%M",
+		"%Y-%m-%dT%H:%M:%S",
+		"%Y-%m-%dT%H:%M",
+		"%m/%d/%Y %H:%M:%S",
+		"%m/%d/%Y %H:%M",
+		"%d/%m/%Y %H:%M:%S",
+		"%d/%m/%Y %H:%M",
+	):
+		try:
+			return datetime.strptime(value, fmt)
+		except ValueError:
+			pass
+	try:
+		parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+		return parsed.replace(tzinfo=None) if getattr(parsed, "tzinfo", None) else parsed
+	except ValueError:
+		return None
 
 
 def _get_payload(payload=None):
