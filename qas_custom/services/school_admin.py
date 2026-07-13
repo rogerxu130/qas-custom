@@ -483,6 +483,7 @@ def get_school_admin_invoice_items_data(query=None, limit=120):
 		fields=fields,
 		order_by="name asc",
 		limit=_limit(limit, default=120, max_value=500),
+		ignore_permissions=True,
 	)
 	items = []
 	for row in rows:
