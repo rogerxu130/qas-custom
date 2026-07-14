@@ -57,7 +57,7 @@ from qas_custom.modules.notifications import (
 	send_parent_invoice_notification,
 )
 from qas_custom.modules.notifications.guard import disable_sales_invoice_auto_notifications
-from qas_custom.services.class_attendance import create_attendance_entry, get_attendance_entries
+from qas_custom.services.class_attendance import ATTENDANCE_DOCTYPE, create_attendance_entry, get_attendance_entries
 from qas_custom.services.display_labels import get_course_session_snapshot_label, get_makeup_voucher_label, get_student_display_code, get_student_display_name, get_student_parent_name
 from qas_custom.utils.environment import payment_block_reason, payment_mutations_enabled
 from qas_custom.services.inquiry import (
@@ -4819,14 +4819,33 @@ def _get_course_session_rows(
 		limit=limit,
 	)
 	timeslot_map = _get_timeslot_map([row.weekly_timeslot for row in rows if row.get("weekly_timeslot")])
+	student_counts = _get_course_session_student_counts([row.get("name") for row in rows])
 	items = []
 	for row in rows:
 		item = _normalize_row_payload("Course Sessions", row)
 		item["weekly_timeslot_detail"] = timeslot_map.get(row.weekly_timeslot)
+		item["student_count"] = student_counts.get(row.get("name"), 0)
 		if item.get("weekly_timeslot_detail"):
 			_attach_course_label(item, item["weekly_timeslot_detail"].get("course"), item["weekly_timeslot_detail"])
 		items.append(item)
 	return items
+
+
+def _get_course_session_student_counts(course_sessions):
+	course_sessions = sorted({course_session for course_session in course_sessions if course_session})
+	if not course_sessions or not _doctype_available(ATTENDANCE_DOCTYPE):
+		return {}
+	filters = {"course_session": ["in", course_sessions]}
+	if _has_field(ATTENDANCE_DOCTYPE, "status"):
+		filters["status"] = ["!=", "Cancelled"]
+	rows = frappe.get_all(
+		ATTENDANCE_DOCTYPE,
+		filters=filters,
+		fields=["course_session", "count(name) as student_count"],
+		group_by="course_session",
+		limit_page_length=0,
+	)
+	return {row.get("course_session"): cint(row.get("student_count")) for row in rows}
 
 
 def _apply_weekly_timeslot_payload(doc, payload):
