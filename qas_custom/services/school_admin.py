@@ -4820,11 +4820,13 @@ def _get_course_session_rows(
 	)
 	timeslot_map = _get_timeslot_map([row.weekly_timeslot for row in rows if row.get("weekly_timeslot")])
 	student_counts = _get_course_session_student_counts([row.get("name") for row in rows])
+	trial_counts = _get_course_session_trial_counts([row.get("name") for row in rows])
 	items = []
 	for row in rows:
 		item = _normalize_row_payload("Course Sessions", row)
 		item["weekly_timeslot_detail"] = timeslot_map.get(row.weekly_timeslot)
 		item["student_count"] = student_counts.get(row.get("name"), 0)
+		item["trial_count"] = trial_counts.get(row.get("name"), 0)
 		if item.get("weekly_timeslot_detail"):
 			_attach_course_label(item, item["weekly_timeslot_detail"].get("course"), item["weekly_timeslot_detail"])
 		items.append(item)
@@ -4846,6 +4848,26 @@ def _get_course_session_student_counts(course_sessions):
 		limit_page_length=0,
 	)
 	return {row.get("course_session"): cint(row.get("student_count")) for row in rows}
+
+
+def _get_course_session_trial_counts(course_sessions):
+	course_sessions = sorted({course_session for course_session in course_sessions if course_session})
+	if not course_sessions or not _doctype_available(ATTENDANCE_DOCTYPE) or not _has_field(ATTENDANCE_DOCTYPE, "source_doctype"):
+		return {}
+	filters = {
+		"course_session": ["in", course_sessions],
+		"source_doctype": "Inquiry",
+	}
+	if _has_field(ATTENDANCE_DOCTYPE, "status"):
+		filters["status"] = ["!=", "Cancelled"]
+	rows = frappe.get_all(
+		ATTENDANCE_DOCTYPE,
+		filters=filters,
+		fields=["course_session", "count(name) as trial_count"],
+		group_by="course_session",
+		limit_page_length=0,
+	)
+	return {row.get("course_session"): cint(row.get("trial_count")) for row in rows}
 
 
 def _apply_weekly_timeslot_payload(doc, payload):
