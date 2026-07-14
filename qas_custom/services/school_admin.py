@@ -3965,7 +3965,7 @@ def _get_latest_inquiry_note(inquiry):
 
 
 def _inquiry_order_by(queue):
-	if queue == "post_visit":
+	if not queue or queue == "post_visit":
 		return "current_appointment_date desc, modified desc"
 	return "current_appointment_date asc, current_appointment_time asc, modified desc"
 
