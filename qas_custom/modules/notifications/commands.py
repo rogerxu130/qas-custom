@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from hashlib import sha256
+
 import frappe
 from frappe import _
 from frappe.utils import cint, escape_html, flt, formatdate, now_datetime
@@ -698,11 +700,15 @@ def _session_staff_teacher_email(teacher):
 
 
 def _session_staff_notification_event_key(event: str, course_session: str, student: str, source_document: str):
-	if event == "leave_requested":
-		return "{0}leave:{1}".format(SESSION_STAFF_NOTIFICATION_EVENT_PREFIX, source_document)
-	if event == "makeup_booked":
-		return "{0}makeup:{1}:{2}:{3}".format(SESSION_STAFF_NOTIFICATION_EVENT_PREFIX, source_document, course_session, student)
-	return "{0}trial:{1}:{2}".format(SESSION_STAFF_NOTIFICATION_EVENT_PREFIX, source_document, course_session)
+	event_labels = {
+		"leave_requested": "leave",
+		"makeup_booked": "makeup",
+		"trial_added": "trial",
+	}
+	event_label = event_labels.get(event, event)
+	identity = "\x1f".join((event, source_document or "", course_session or "", student or ""))
+	digest = sha256(identity.encode()).hexdigest()[:24]
+	return "{0}{1}:{2}".format(SESSION_STAFF_NOTIFICATION_EVENT_PREFIX, event_label, digest)
 
 
 def _session_staff_notification_already_logged(event_key, document_type, document_name, subject):

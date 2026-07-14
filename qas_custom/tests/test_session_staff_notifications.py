@@ -9,19 +9,28 @@ from qas_custom.modules.notifications.commands import (
 
 
 class TestSessionStaffNotifications(TestCase):
-	def test_event_keys_are_stable_and_specific_to_the_source_event(self):
+	def test_event_keys_are_stable_short_and_specific_to_the_source_event(self):
+		leave_key = _session_staff_notification_event_key("leave_requested", "CS-001", "STU-001", "LR-001")
+		makeup_key = _session_staff_notification_event_key("makeup_booked", "CS-001", "STU-001", "MV-001")
+		trial_key = _session_staff_notification_event_key("trial_added", "CS-001", "STU-001", "INQ-001")
+
 		self.assertEqual(
-			_session_staff_notification_event_key("leave_requested", "CS-001", "STU-001", "LR-001"),
-			"session_staff:leave:LR-001",
-		)
-		self.assertEqual(
+			makeup_key,
 			_session_staff_notification_event_key("makeup_booked", "CS-001", "STU-001", "MV-001"),
-			"session_staff:makeup:MV-001:CS-001:STU-001",
 		)
-		self.assertEqual(
-			_session_staff_notification_event_key("trial_added", "CS-001", "STU-001", "INQ-001"),
-			"session_staff:trial:INQ-001:CS-001",
+		self.assertTrue(leave_key.startswith("session_staff:leave:"))
+		self.assertTrue(makeup_key.startswith("session_staff:makeup:"))
+		self.assertTrue(trial_key.startswith("session_staff:trial:"))
+		self.assertEqual(len({leave_key, makeup_key, trial_key}), 3)
+		self.assertLessEqual(max(len(leave_key), len(makeup_key), len(trial_key)), 140)
+
+		long_makeup_key = _session_staff_notification_event_key(
+			"makeup_booked",
+			"New Test Term-Anime Art - Intermediate-Indooroopilly-Thursday-13:00:00-Roger Xu-2026-08-06",
+			"Isabella 1-2018-05-31",
+			"MV-Anime Art - Intermediate-Isabella 1-2018-05-31-2026-07-14-0074",
 		)
+		self.assertLessEqual(len(long_makeup_key), 140)
 
 	def test_trial_email_includes_session_details_and_escapes_student_name(self):
 		message = _session_staff_notification_email_message(
