@@ -750,10 +750,12 @@ def get_school_admin_inquiries_data(
 	from_date=None,
 	to_date=None,
 	queue=None,
+	query=None,
 	limit=80,
 ):
 	_require_school_admin()
 	filters = {}
+	query = str(query or "").strip()
 	if status:
 		filters["status"] = status
 	elif queue == "post_visit":
@@ -772,6 +774,19 @@ def get_school_admin_inquiries_data(
 		filters["current_appointment_date"] = [">=", getdate(from_date)]
 	elif to_date:
 		filters["current_appointment_date"] = ["<=", getdate(to_date)]
+	search_fields = _safe_fields(
+		"Inquiry",
+		[
+			"name",
+			"parent",
+			"student",
+			"contact_name",
+			"contact_phone",
+			"contact_email",
+			"submitted_student_name",
+		],
+	)
+	or_filters = [["Inquiry", fieldname, "like", f"%{query}%"] for fieldname in search_fields] if query else None
 
 	fields = _safe_fields(
 		"Inquiry",
@@ -785,6 +800,7 @@ def get_school_admin_inquiries_data(
 			"contact_name",
 			"contact_phone",
 			"contact_email",
+			"submitted_student_name",
 			"preferred_course",
 			"course_session",
 			"current_appointment_date",
@@ -797,6 +813,7 @@ def get_school_admin_inquiries_data(
 	rows = frappe.get_all(
 		"Inquiry",
 		filters=filters,
+		or_filters=or_filters,
 		fields=fields,
 		order_by=_inquiry_order_by(queue),
 		limit=_limit(limit, default=80, max_value=200),

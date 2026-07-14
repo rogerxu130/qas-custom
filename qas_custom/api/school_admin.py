@@ -389,7 +389,7 @@ def school_admin_adjust_store_credit(parent=None, customer=None, amount=0, reaso
 
 
 @frappe.whitelist()
-def school_admin_get_inquiries(status=None, inquiry_type=None, campus=None, from_date=None, to_date=None, queue=None, limit=80):
+def school_admin_get_inquiries(status=None, inquiry_type=None, campus=None, from_date=None, to_date=None, queue=None, query=None, limit=80):
 	return get_school_admin_inquiries_data(
 		status=status,
 		inquiry_type=inquiry_type,
@@ -397,6 +397,7 @@ def school_admin_get_inquiries(status=None, inquiry_type=None, campus=None, from
 		from_date=from_date,
 		to_date=to_date,
 		queue=queue,
+		query=query,
 		limit=limit,
 	)
 
