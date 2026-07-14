@@ -154,7 +154,7 @@ def _filter_parent_visible_attendance_rows(attendance_rows):
 
     visible = []
     for row in attendance_rows:
-        if row.get("status") == "Cancelled":
+        if row.get("status") in {"Cancelled", "Leave"}:
             continue
         if row.get("source_doctype") == "Enrollment" and row.get("source_document") not in active_enrollments:
             continue
