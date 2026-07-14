@@ -2468,10 +2468,14 @@ def get_school_admin_course_session_data(course_session=None):
 		frappe.throw(_("Course session is required."))
 	doc = frappe.get_doc("Course Sessions", course_session)
 	payload = _document_payload(doc)
-	payload["attendance"] = _get_school_admin_attendance_rows(course_session)
 	if payload.get("weekly_timeslot"):
 		payload["weekly_timeslot_detail"] = _get_timeslot_summary(payload.get("weekly_timeslot"))
-	_timeslot_teacher = (payload.get("weekly_timeslot_detail") or {}).get("teacher")
+	payload["attendance"] = _get_school_admin_attendance_rows(
+		course_session,
+		term=(payload.get("weekly_timeslot_detail") or {}).get("term"),
+	)
+	if payload.get("weekly_timeslot"):
+		_timeslot_teacher = (payload.get("weekly_timeslot_detail") or {}).get("teacher")
 	payload["teacher"] = payload.get("teacher_override") or _timeslot_teacher
 	payload["teacher_assignment_source"] = "Session override" if payload.get("teacher_override") else "Weekly timeslot"
 	return payload
@@ -2634,20 +2638,25 @@ def _validate_course_session_attendance_status(status):
 		frappe.throw(_("Invalid attendance status: {0}").format(status))
 
 
-def _get_school_admin_attendance_rows(course_session):
+def _get_school_admin_attendance_rows(course_session, term=None):
 	rows = [_docdict(row) for row in get_attendance_entries([course_session])]
 	family_map = _get_attendance_family_map([row.get("student") for row in rows])
 	outstanding_map = _get_family_outstanding_invoice_map(family_map.values())
+	term_invoice_map = _get_family_current_term_invoice_map(family_map.values(), term)
 	for row in rows:
 		student = row.get("student")
 		family = family_map.get(student) or {}
 		outstanding = outstanding_map.get(family.get("parent")) or {}
+		term_invoice = term_invoice_map.get(family.get("parent")) or {}
 		row["student_display"] = get_student_display_name(student) or student
 		row["student_code"] = get_student_display_code(student) or student
 		row["parent_name"] = family.get("parent_name") or ""
 		row["parent_phone"] = family.get("parent_phone") or ""
 		row["has_outstanding_invoice"] = bool(outstanding.get("amount"))
 		row["outstanding_amount"] = flt(outstanding.get("amount") or 0)
+		row["has_current_term_invoice"] = bool(term_invoice.get("has_invoice"))
+		row["has_current_term_outstanding_invoice"] = bool(term_invoice.get("outstanding_amount"))
+		row["current_term_outstanding_amount"] = flt(term_invoice.get("outstanding_amount") or 0)
 		row["attendance_type"] = row.get("enrollment_type") or _infer_attendance_type(row)
 		row["source_label"] = _attendance_source_label(row)
 	return rows
@@ -2751,6 +2760,85 @@ def _get_family_outstanding_invoice_map(families):
 		for parent in target_parents:
 			if parent:
 				summary[parent]["amount"] += payable
+	return summary
+
+
+def _get_family_current_term_invoice_map(families, term):
+	if not term or not _doctype_available("Sales Invoice"):
+		return {}
+	parent_ids = sorted({family.get("parent") for family in families if family and family.get("parent")})
+	customers = sorted({family.get("customer") for family in families if family and family.get("customer")})
+	if not parent_ids and not customers:
+		return {}
+
+	invoice_names = set()
+	if _has_field("Sales Invoice", "term"):
+		invoice_names.update(
+			frappe.get_all(
+				"Sales Invoice",
+				filters={"term": term, "docstatus": 1},
+				pluck="name",
+				limit_page_length=0,
+			)
+		)
+	if _doctype_available("Sales Invoice Item") and _has_field("Sales Invoice Item", "term"):
+		item_filters = {"term": term}
+		if frappe.db.has_column("Sales Invoice Item", "parenttype"):
+			item_filters["parenttype"] = "Sales Invoice"
+		invoice_names.update(
+			frappe.get_all(
+				"Sales Invoice Item",
+				filters=item_filters,
+				pluck="parent",
+				limit_page_length=0,
+			)
+		)
+	if not invoice_names:
+		return {}
+
+	customer_parent_map = defaultdict(set)
+	for family in families:
+		if family and family.get("customer") and family.get("parent"):
+			customer_parent_map[family.get("customer")].add(family.get("parent"))
+
+	fields = _safe_fields(
+		"Sales Invoice",
+		["name", "customer", "parent", "docstatus", "grand_total", "rounded_total", "outstanding_amount"],
+	)
+	invoice_rows = []
+	if parent_ids and _has_field("Sales Invoice", "parent"):
+		invoice_rows.extend(
+			frappe.get_all(
+				"Sales Invoice",
+				filters={"name": ["in", sorted(invoice_names)], "parent": ["in", parent_ids], "docstatus": 1},
+				fields=fields,
+				limit_page_length=0,
+			)
+		)
+	if customers:
+		invoice_rows.extend(
+			frappe.get_all(
+				"Sales Invoice",
+				filters={"name": ["in", sorted(invoice_names)], "customer": ["in", customers], "docstatus": 1},
+				fields=fields,
+				limit_page_length=0,
+			)
+		)
+
+	summary = defaultdict(lambda: {"has_invoice": False, "outstanding_amount": 0})
+	seen_invoices = set()
+	for row in invoice_rows:
+		invoice = row.get("name")
+		if not invoice or invoice in seen_invoices:
+			continue
+		seen_invoices.add(invoice)
+		target_parents = {row.get("parent")} if row.get("parent") else customer_parent_map.get(row.get("customer"), set())
+		payable = flt(_invoice_credit_payload(row).get("payable_amount") or 0)
+		for parent in target_parents:
+			if not parent:
+				continue
+			summary[parent]["has_invoice"] = True
+			summary[parent]["outstanding_amount"] += payable
 	return summary
 
 
