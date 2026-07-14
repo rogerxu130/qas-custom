@@ -16,6 +16,7 @@ from qas_custom.services.display_labels import get_makeup_voucher_label, get_stu
 
 
 SPECIAL_ENROLLMENT_TYPES = {"Trial", "Makeup", "Pay-as-you-go"}
+NON_ATTENDING_ATTENDANCE_STATUSES = {"Cancelled", "Leave"}
 TEACHER_BLOCKED_ATTENDANCE_STATUSES = {"Cancelled", "Leave"}
 MAX_PHOTO_UPLOADS = 12
 PHOTO_POST_PREVIEW_LIMIT = 6
@@ -82,7 +83,8 @@ def get_teacher_sessions_data(from_date=None, to_date=None):
             continue
 
         attendance_rows = attendance_by_session.get(session["name"], [])
-        special_counts = _count_special_students(attendance_rows)
+        visible_attendance_rows = _visible_attendance_rows(attendance_rows)
+        special_counts = _count_special_students(visible_attendance_rows)
         items.append(
             {
                 "id": session["name"],
@@ -94,7 +96,8 @@ def get_teacher_sessions_data(from_date=None, to_date=None):
                 "campus": timeslot.get("campus"),
                 "classroom": timeslot.get("classroom"),
                 "status": session.get("status"),
-                "student_count": len(attendance_rows),
+                "student_count": len(visible_attendance_rows),
+                "leave_count": _count_leave_rows(attendance_rows),
                 "special_students": special_counts,
             }
         )
@@ -110,7 +113,8 @@ def get_teacher_session_detail_data(course_session=None):
 
     session = _get_owned_session(course_session, teacher.name)
     timeslot = _get_timeslot(session.get("weekly_timeslot"))
-    attendance_rows = _get_attendance_rows([session["name"]])
+    all_attendance_rows = _get_attendance_rows([session["name"]])
+    attendance_rows = _visible_attendance_rows(all_attendance_rows)
     student_map = _get_student_map([row.get("student") for row in attendance_rows if row.get("student")])
     parent_map = _get_parent_contact_map([_student_parent_id(student) for student in student_map.values()])
 
@@ -147,6 +151,8 @@ def get_teacher_session_detail_data(course_session=None):
             "campus": timeslot.get("campus") if timeslot else None,
             "classroom": timeslot.get("classroom") if timeslot else None,
             "status": session.get("status"),
+            "student_count": len(attendance_rows),
+            "leave_count": _count_leave_rows(all_attendance_rows),
         },
         "students": students,
         "homeworks": _get_homework_rows(session["name"]),
@@ -557,6 +563,19 @@ def _get_attendance_by_session(session_ids: list[str]):
     for row in _get_attendance_rows(session_ids):
         grouped[row.get("course_session")].append(row)
     return grouped
+
+
+def _is_visible_attendance_row(row):
+    status = (row.get("status") or "").strip()
+    return status not in NON_ATTENDING_ATTENDANCE_STATUSES
+
+
+def _visible_attendance_rows(attendance_rows: list[dict]):
+    return [row for row in attendance_rows if _is_visible_attendance_row(row)]
+
+
+def _count_leave_rows(attendance_rows: list[dict]):
+    return sum(1 for row in attendance_rows if (row.get("status") or "").strip() == "Leave")
 
 
 def _get_student_map(student_ids: list[str]):

@@ -81,6 +81,7 @@ COURSE_LABEL_FIELDS = ["name", "course_name", "course_name_zh"]
 DEFAULT_COURSE_INVOICE_ITEM = "Tuition Fee"
 MANUAL_INVOICE_ITEM = "Other"
 BULK_INVOICE_SUBMIT_JOB_TTL_SECONDS = 86400
+NON_ATTENDING_ATTENDANCE_STATUSES = {"Cancelled", "Leave"}
 PARENT_EDIT_FIELDS = ["parent_name", "mobile_number", "phone", "email", "email_id", "address", "status", "customer"]
 STUDENT_EDIT_FIELDS = ["student_name", "first_name", "last_name", "date_of_birth", "dob", "gender", "status", "guardian", "parent"]
 COURSE_EDIT_FIELDS = [
@@ -2493,10 +2494,15 @@ def get_school_admin_course_session_data(course_session=None):
 	payload = _document_payload(doc)
 	if payload.get("weekly_timeslot"):
 		payload["weekly_timeslot_detail"] = _get_timeslot_summary(payload.get("weekly_timeslot"))
-	payload["attendance"] = _get_school_admin_attendance_rows(
+	attendance_rows = _get_school_admin_attendance_rows(
 		course_session,
 		term=(payload.get("weekly_timeslot_detail") or {}).get("term"),
 	)
+	visible_attendance_rows = _visible_course_session_attendance_rows(attendance_rows)
+	payload["attendance"] = visible_attendance_rows
+	payload["student_count"] = len(visible_attendance_rows)
+	payload["trial_count"] = sum(1 for row in visible_attendance_rows if row.get("source_doctype") == "Inquiry")
+	payload["leave_count"] = _count_leave_attendance_rows(attendance_rows)
 	if payload.get("weekly_timeslot"):
 		_timeslot_teacher = (payload.get("weekly_timeslot_detail") or {}).get("teacher")
 	payload["teacher"] = payload.get("teacher_override") or _timeslot_teacher
@@ -2683,6 +2689,19 @@ def _get_school_admin_attendance_rows(course_session, term=None):
 		row["attendance_type"] = row.get("enrollment_type") or _infer_attendance_type(row)
 		row["source_label"] = _attendance_source_label(row)
 	return rows
+
+
+def _is_visible_course_session_attendance_row(row):
+	status = (row.get("status") or "").strip()
+	return status not in NON_ATTENDING_ATTENDANCE_STATUSES
+
+
+def _visible_course_session_attendance_rows(rows):
+	return [row for row in rows if _is_visible_course_session_attendance_row(row)]
+
+
+def _count_leave_attendance_rows(rows):
+	return sum(1 for row in rows if (row.get("status") or "").strip() == "Leave")
 
 
 def _get_attendance_family_map(student_ids):
@@ -5021,6 +5040,7 @@ def _get_course_session_rows(
 	timeslot_map = _get_timeslot_map([row.weekly_timeslot for row in rows if row.get("weekly_timeslot")])
 	student_counts = _get_course_session_student_counts([row.get("name") for row in rows])
 	trial_counts = _get_course_session_trial_counts([row.get("name") for row in rows])
+	leave_counts = _get_course_session_leave_counts([row.get("name") for row in rows])
 	items = []
 	for row in rows:
 		item = _normalize_row_payload("Course Sessions", row)
@@ -5030,6 +5050,7 @@ def _get_course_session_rows(
 		item["teacher_assignment_source"] = "Session override" if item.get("teacher_override") else "Weekly timeslot"
 		item["student_count"] = student_counts.get(row.get("name"), 0)
 		item["trial_count"] = trial_counts.get(row.get("name"), 0)
+		item["leave_count"] = leave_counts.get(row.get("name"), 0)
 		if item.get("weekly_timeslot_detail"):
 			_attach_course_label(item, item["weekly_timeslot_detail"].get("course"), item["weekly_timeslot_detail"])
 		items.append(item)
@@ -5042,7 +5063,7 @@ def _get_course_session_student_counts(course_sessions):
 		return {}
 	filters = {"course_session": ["in", course_sessions]}
 	if _has_field(ATTENDANCE_DOCTYPE, "status"):
-		filters["status"] = ["!=", "Cancelled"]
+		filters["status"] = ["not in", sorted(NON_ATTENDING_ATTENDANCE_STATUSES)]
 	rows = frappe.get_all(
 		ATTENDANCE_DOCTYPE,
 		filters=filters,
@@ -5062,7 +5083,7 @@ def _get_course_session_trial_counts(course_sessions):
 		"source_doctype": "Inquiry",
 	}
 	if _has_field(ATTENDANCE_DOCTYPE, "status"):
-		filters["status"] = ["!=", "Cancelled"]
+		filters["status"] = ["not in", sorted(NON_ATTENDING_ATTENDANCE_STATUSES)]
 	rows = frappe.get_all(
 		ATTENDANCE_DOCTYPE,
 		filters=filters,
@@ -5071,6 +5092,24 @@ def _get_course_session_trial_counts(course_sessions):
 		limit_page_length=0,
 	)
 	return {row.get("course_session"): cint(row.get("trial_count")) for row in rows}
+
+
+def _get_course_session_leave_counts(course_sessions):
+	course_sessions = sorted({course_session for course_session in course_sessions if course_session})
+	if not course_sessions or not _doctype_available(ATTENDANCE_DOCTYPE) or not _has_field(ATTENDANCE_DOCTYPE, "status"):
+		return {}
+	filters = {
+		"course_session": ["in", course_sessions],
+		"status": "Leave",
+	}
+	rows = frappe.get_all(
+		ATTENDANCE_DOCTYPE,
+		filters=filters,
+		fields=["course_session", "count(name) as leave_count"],
+		group_by="course_session",
+		limit_page_length=0,
+	)
+	return {row.get("course_session"): cint(row.get("leave_count")) for row in rows}
 
 
 def _apply_weekly_timeslot_payload(doc, payload):
