@@ -69,6 +69,7 @@ from qas_custom.services.inquiry import (
 	send_trial_class_reminder_core,
 )
 from qas_custom.services.teacher_revenue_share import get_teacher_revenue_share_session_rows
+from qas_custom.services.teacher_directory import get_active_teacher_directory_data
 
 
 ADMIN_ROLES = {"School Admin", "System Manager"}
@@ -139,6 +140,11 @@ def get_school_admin_me_data():
 def get_school_admin_csrf_token_data():
 	_require_school_admin()
 	return {"csrf_token": frappe.sessions.get_csrf_token()}
+
+
+def get_school_admin_teacher_directory_data(query=None, limit=300):
+	_require_school_admin()
+	return get_active_teacher_directory_data(query=query, limit=limit)
 
 
 def get_school_admin_dashboard_data():

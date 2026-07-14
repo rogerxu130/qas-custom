@@ -10,6 +10,7 @@ from qas_custom.services.campus_admin import (
 	get_campus_admin_inquiries_data,
 	get_campus_admin_inquiry_data,
 	get_campus_admin_me_data,
+	get_campus_admin_teacher_directory_data,
 	mark_campus_admin_inquiry_cancelled_data,
 	mark_campus_admin_inquiry_completed_data,
 	mark_campus_admin_inquiry_follow_up_data,
@@ -28,6 +29,11 @@ def campus_admin_get_me():
 @frappe.whitelist()
 def campus_admin_get_csrf_token():
 	return get_campus_admin_csrf_token_data()
+
+
+@frappe.whitelist()
+def campus_admin_get_teacher_directory(query=None, limit=300):
+	return get_campus_admin_teacher_directory_data(query=query, limit=limit)
 
 
 @frappe.whitelist()

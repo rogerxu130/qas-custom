@@ -89,6 +89,7 @@ from qas_custom.services.school_admin import (
 	get_school_admin_teacher_revenue_share_sessions_data,
 	get_school_admin_term_data,
 	get_school_admin_terms_data,
+	get_school_admin_teacher_directory_data,
 	get_school_admin_vouchers_data,
 	get_school_admin_weekly_timeslot_data,
 	get_school_admin_weekly_timeslots_data,
@@ -129,6 +130,11 @@ def school_admin_get_me():
 @frappe.whitelist()
 def school_admin_get_csrf_token():
 	return get_school_admin_csrf_token_data()
+
+
+@frappe.whitelist()
+def school_admin_get_teacher_directory(query=None, limit=300):
+	return get_school_admin_teacher_directory_data(query=query, limit=limit)
 
 
 @frappe.whitelist()
