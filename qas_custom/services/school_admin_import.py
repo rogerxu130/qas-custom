@@ -38,6 +38,13 @@ ENROLLMENT_CANCELLATION_IMPORT_TYPE = "Enrollment Cancellation"
 ENROLLMENT_CANCELLATION_ALLOWED_STATUSES = {"Planned", "Active"}
 ENROLLMENT_CHANGE_REPORT_TYPE = "Enrollment Change"
 INVOICE_ENROLLMENT_RESET_REPORT_TYPE = "Invoice Enrollment Reset"
+INVOICE_ENROLLMENT_RESET_MODE_CHANGE = "change"
+INVOICE_ENROLLMENT_RESET_MODE_WITHDRAW = "withdraw"
+INVOICE_ENROLLMENT_RESET_MODES = {
+	INVOICE_ENROLLMENT_RESET_MODE_CHANGE,
+	INVOICE_ENROLLMENT_RESET_MODE_WITHDRAW,
+}
+INVOICE_ENROLLMENT_RESET_PREVIEW_TTL_SECONDS = 15 * 60
 ENROLLMENT_CHANGE_CANCEL_ENROLLMENT = "cancel_enrollment"
 ENROLLMENT_CHANGE_RESET_FOR_CLASS_CHANGE = "reset_for_class_change"
 ENROLLMENT_CHANGE_REISSUE_INVOICE_ONLY = "reissue_invoice_only"
@@ -422,7 +429,10 @@ def run_enrollment_change_data(payload=None):
 def preview_invoice_enrollment_reset_data(payload=None):
 	_require_school_admin()
 	operation = _build_invoice_enrollment_reset_operation(payload)
-	return _preview_invoice_enrollment_reset(operation)
+	preview = _preview_invoice_enrollment_reset(operation)
+	if preview.get("ok"):
+		preview["preview_fingerprint"] = _store_invoice_enrollment_reset_preview(operation.get("row") or {}, preview)
+	return preview
 
 
 def run_invoice_enrollment_reset_data(payload=None):
@@ -431,6 +441,25 @@ def run_invoice_enrollment_reset_data(payload=None):
 	operation = _build_invoice_enrollment_reset_operation(payload)
 	preview = _preview_invoice_enrollment_reset(operation)
 	source_reference = operation.get("row", {}).get("invoice")
+	row = operation.get("row") or {}
+	if not preview.get("blocking_error_count"):
+		preview_error = _validate_invoice_enrollment_reset_preview(row, preview)
+		if preview_error:
+			preview["errors"].append(_invoice_enrollment_reset_issue(row, "preview", preview_error))
+		if (
+			row.get("mode") == INVOICE_ENROLLMENT_RESET_MODE_WITHDRAW
+			and (preview.get("input") or {}).get("enrollment_count", 0) > 1
+			and not row.get("confirm_multiple_withdrawal")
+		):
+			preview["errors"].append(_invoice_enrollment_reset_issue(
+				row,
+				"confirm_multiple_withdrawal",
+				_("Confirm withdrawal of all {0} linked enrollments before continuing.").format(
+					(preview.get("input") or {}).get("enrollment_count", 0)
+				),
+			))
+		preview["blocking_error_count"] = len(preview.get("errors") or [])
+		preview["ok"] = preview["blocking_error_count"] == 0
 	if preview.get("blocking_error_count"):
 		result = {
 			"ok": False,
@@ -468,6 +497,7 @@ def run_invoice_enrollment_reset_data(payload=None):
 			result["invoice_message"] = run_result.get("invoice_message")
 			result["message"] = run_result.get("message")
 			frappe.db.commit()
+			frappe.cache().delete_value(_invoice_enrollment_reset_preview_cache_key(row.get("preview_fingerprint")))
 		except Exception as exc:
 			frappe.db.rollback(save_point=savepoint)
 			row = operation.get("row") or {}
@@ -960,6 +990,9 @@ def _build_invoice_enrollment_reset_operation(payload=None):
 		"invoice": _normalize_spaces(payload.get("invoice")),
 		"reason": _normalize_spaces(payload.get("reason")),
 		"effective_date": _parse_date(payload.get("effective_date")) or today(),
+		"mode": _normalize_spaces(payload.get("mode") or INVOICE_ENROLLMENT_RESET_MODE_CHANGE).lower(),
+		"preview_fingerprint": _normalize_spaces(payload.get("preview_fingerprint")),
+		"confirm_multiple_withdrawal": cint(payload.get("confirm_multiple_withdrawal")),
 		"errors": [],
 	}
 	if not row["invoice"]:
@@ -968,7 +1001,73 @@ def _build_invoice_enrollment_reset_operation(payload=None):
 		row["errors"].append(_field_error("invoice", _("Sales Invoice {0} was not found.").format(row["invoice"])))
 	if not row["reason"]:
 		row["errors"].append(_field_error("reason", _("Reason is required for audit trail.")))
+	if row["mode"] not in INVOICE_ENROLLMENT_RESET_MODES:
+		row["errors"].append(_field_error("mode", _("Invoice reset mode must be Change or Withdraw.")))
 	return {"row": row}
+
+
+def _store_invoice_enrollment_reset_preview(row, preview):
+	fingerprint = frappe.generate_hash(length=32)
+	frappe.cache().set_value(
+		_invoice_enrollment_reset_preview_cache_key(fingerprint),
+		{
+			"viewer_user": frappe.session.user,
+			"snapshot": _invoice_enrollment_reset_preview_snapshot(row, preview),
+		},
+		expires_in_sec=INVOICE_ENROLLMENT_RESET_PREVIEW_TTL_SECONDS,
+	)
+	return fingerprint
+
+
+def _validate_invoice_enrollment_reset_preview(row, preview):
+	fingerprint = row.get("preview_fingerprint")
+	if not fingerprint:
+		return _("Run a fresh invoice reset preview before executing this action.")
+	cached_preview = frappe.cache().get_value(_invoice_enrollment_reset_preview_cache_key(fingerprint))
+	if not cached_preview or cached_preview.get("viewer_user") != frappe.session.user:
+		return _("This invoice reset preview has expired. Run preview again before executing.")
+	if cached_preview.get("snapshot") != _invoice_enrollment_reset_preview_snapshot(row, preview):
+		return _("The invoice or linked enrollments changed after preview. Run preview again before executing.")
+	return ""
+
+
+def _invoice_enrollment_reset_preview_cache_key(fingerprint):
+	return f"qas:invoice-enrollment-reset-preview:{fingerprint}"
+
+
+def _invoice_enrollment_reset_preview_snapshot(row, preview):
+	return {
+		"invoice": row.get("invoice"),
+		"reason": row.get("reason"),
+		"effective_date": str(row.get("effective_date") or ""),
+		"invoice_status": preview.get("invoice_status"),
+		"invoice_action": preview.get("invoice_action"),
+		"enrollments": [
+			{
+				"enrollment": item.get("enrollment"),
+				"enrollment_status": item.get("enrollment_status"),
+				"skipped": bool(item.get("skipped")),
+				"attendance_to_cancel": (item.get("counts") or {}).get("attendance_to_cancel", 0),
+			}
+			for item in preview.get("parents") or []
+		],
+	}
+
+
+def _invoice_enrollment_reset_action_label(mode):
+	return "Withdraw enrollment(s)" if mode == INVOICE_ENROLLMENT_RESET_MODE_WITHDRAW else "Change enrollment"
+
+
+def _invoice_enrollment_reset_target_status(mode):
+	return "Cancelled" if mode == INVOICE_ENROLLMENT_RESET_MODE_WITHDRAW else "Planned"
+
+
+def _invoice_enrollment_reset_pending_count_key(mode):
+	return "enrollments_to_withdraw" if mode == INVOICE_ENROLLMENT_RESET_MODE_WITHDRAW else "enrollments_to_reset_for_change"
+
+
+def _invoice_enrollment_reset_completed_count_key(mode):
+	return "enrollments_withdrawn" if mode == INVOICE_ENROLLMENT_RESET_MODE_WITHDRAW else "enrollments_reset_for_change"
 
 
 def _preview_invoice_enrollment_reset(operation):
@@ -979,9 +1078,10 @@ def _preview_invoice_enrollment_reset(operation):
 		"invoice": row.get("invoice"),
 		"invoice_count": 1 if row.get("invoice") else 0,
 		"enrollment_count": 0,
+		"student_count": 0,
 		"manual_action_count": 0,
-		"action": "reset_invoice_for_class_change",
-		"action_label": "Reset invoice for class change",
+		"action": row.get("mode") or INVOICE_ENROLLMENT_RESET_MODE_CHANGE,
+		"action_label": _invoice_enrollment_reset_action_label(row.get("mode")),
 	}
 	for error in row.get("errors") or []:
 		result["errors"].append({"row": row.get("row_number"), **error})
@@ -997,6 +1097,7 @@ def _preview_invoice_enrollment_reset(operation):
 		result["invoice_action_detail"] = preview.get("invoice_action_detail")
 		result["message"] = preview.get("message")
 		result["input"]["enrollment_count"] = preview.get("enrollment_count") or 0
+		result["input"]["student_count"] = preview.get("student_count") or 0
 
 	result["input"]["manual_action_count"] = _manual_action_count(result.get("parents") or [])
 	result["blocking_error_count"] = len(result["errors"])
@@ -1025,6 +1126,10 @@ def _preview_invoice_enrollment_reset_row(row):
 
 	parent_rows = []
 	included_count = 0
+	included_students = set()
+	mode = row.get("mode") or INVOICE_ENROLLMENT_RESET_MODE_CHANGE
+	pending_count_key = _invoice_enrollment_reset_pending_count_key(mode)
+	target_status = _invoice_enrollment_reset_target_status(mode)
 	for index, enrollment in enumerate(enrollment_names, start=1):
 		child_row = {**row, "row_number": index, "enrollment": enrollment}
 		if not frappe.db.exists("Enrollment", enrollment):
@@ -1059,7 +1164,9 @@ def _preview_invoice_enrollment_reset_row(row):
 			continue
 
 		included_count += 1
-		row_counts["enrollments_to_reset_for_change"] += 1
+		if doc.get("student"):
+			included_students.add(doc.get("student"))
+		row_counts[pending_count_key] += 1
 		historical_count = _count_historical_enrollment_attendance(enrollment)
 		row_errors = []
 		if historical_count:
@@ -1082,7 +1189,7 @@ def _preview_invoice_enrollment_reset_row(row):
 			enrollment_doc=doc,
 			invoice_action=invoice_action,
 			errors=row_errors,
-			message=_("Enrollment will be reset to Planned with the selected invoice."),
+			message=_("Enrollment will be {0} with the selected invoice.").format(target_status),
 		))
 		_accumulate_counts(counts, row_counts)
 
@@ -1095,17 +1202,22 @@ def _preview_invoice_enrollment_reset_row(row):
 		"invoice_action": _invoice_action_label(invoice_action.get("action")),
 		"invoice_action_detail": invoice_action,
 		"enrollment_count": included_count,
+		"student_count": len(included_students),
 		"parents": parent_rows,
 		"counts": counts,
 		"errors": errors,
 		"warnings": warnings,
-		"message": _("Invoice reset preview is ready."),
+		"message": _("Invoice reset preview is ready. Choose Change or Withdraw after reviewing the affected enrollments."),
 	}
 
 
 def _run_invoice_enrollment_reset_operation(row, preview):
 	invoice_action = preview.get("invoice_action_detail") or {}
 	reason = row.get("reason") or "School Admin invoice reset"
+	mode = row.get("mode") or INVOICE_ENROLLMENT_RESET_MODE_CHANGE
+	target_status = _invoice_enrollment_reset_target_status(mode)
+	pending_count_key = _invoice_enrollment_reset_pending_count_key(mode)
+	completed_count_key = _invoice_enrollment_reset_completed_count_key(mode)
 	invoice_result = _apply_enrollment_change_invoice_action(invoice_action, reason)
 	result = {
 		"invoice": row.get("invoice"),
@@ -1127,37 +1239,38 @@ def _run_invoice_enrollment_reset_operation(row, preview):
 		enrollment = preview_row.get("enrollment")
 		doc = frappe.get_doc("Enrollment", enrollment)
 		status_before = doc.get("status")
-		doc.status = "Planned"
+		doc.status = target_status
 		doc.save(ignore_permissions=True)
 		attendance_cancelled = _cancel_future_enrollment_attendance_for_import(
 			enrollment,
 			effective_date=row.get("effective_date"),
 		)
 		snapshot_cleared = _clear_enrollment_change_invoice_snapshot(enrollment, row.get("invoice"), reason)
-		_decrement_count(result["counts"], "enrollments_to_reset_for_change")
+		_decrement_count(result["counts"], pending_count_key)
 		_decrement_count(result["counts"], "attendance_to_cancel", attendance_cancelled)
 		if snapshot_cleared:
 			result["counts"]["invoice_snapshots_cleared"] += snapshot_cleared
-		result["counts"]["enrollments_reset_for_change"] += 1
+		result["counts"][completed_count_key] += 1
 		if attendance_cancelled:
 			result["counts"]["attendance_cancelled"] += attendance_cancelled
 		_school_admin_add_comment(
 			"Enrollment",
 			enrollment,
-			_("Enrollment reset to Planned by School Admin invoice reset from {0}. Invoice: {1}. Reason: {2}").format(
+			_("Enrollment set to {0} by School Admin invoice reset from {1}. Invoice: {2}. Reason: {3}").format(
+				target_status,
 				row.get("effective_date"),
 				row.get("invoice"),
 				reason,
 			),
 		)
-		message_parts = [_("Enrollment reset to Planned.")]
+		message_parts = [_("Enrollment set to {0}.").format(target_status)]
 		if attendance_cancelled:
 			message_parts.append(_("{0} future attendance rows cancelled.").format(attendance_cancelled))
 		if invoice_result.get("message"):
 			message_parts.append(invoice_result.get("message"))
 		result["parents"].append({
 			**preview_row,
-			"status": "Planned",
+			"status": target_status,
 			"operation_status": "Completed",
 			"enrollment_status_before": status_before,
 			"attendance_cancelled": attendance_cancelled,
@@ -1166,13 +1279,13 @@ def _run_invoice_enrollment_reset_operation(row, preview):
 			"invoice_status": result.get("invoice_status"),
 			"message": " ".join(str(part) for part in message_parts if part),
 			"counts": {
-				"enrollments_reset_for_change": 1,
+				completed_count_key: 1,
 				"attendance_cancelled": attendance_cancelled,
 				"invoice_snapshots_cleared": snapshot_cleared,
 			},
 		})
 
-	result["message"] = _invoice_enrollment_reset_run_message(result, invoice_result)
+	result["message"] = _invoice_enrollment_reset_run_message(result, invoice_result, mode)
 	return result
 
 
@@ -1225,7 +1338,7 @@ def _invoice_enrollment_reset_payload(row, counts, invoice_doc=None, enrollment_
 		"enrollment": enrollment_doc.name if enrollment_doc else row.get("enrollment"),
 		"enrollment_status": enrollment_doc.get("status") if enrollment_doc else "",
 		"status": "Skipped" if skipped else (enrollment_doc.get("status") if enrollment_doc else ""),
-		"operation_action": "Reset invoice for class change",
+		"operation_action": _invoice_enrollment_reset_action_label(row.get("mode")),
 		"operation_status": "Skipped" if skipped else ("Blocked" if errors else "Ready"),
 		"effective_date": row.get("effective_date"),
 		"reason": row.get("reason"),
@@ -1247,7 +1360,7 @@ def _invoice_enrollment_reset_error_payload(row, exc):
 	return {
 		"row": row.get("row_number"),
 		"invoice": row.get("invoice"),
-		"operation_action": "Reset invoice for class change",
+		"operation_action": _invoice_enrollment_reset_action_label(row.get("mode")),
 		"operation_status": "Error",
 		"status": "Error",
 		"message": str(exc),
@@ -1289,12 +1402,12 @@ def _invoice_reset_enrollment_names(invoice_doc):
 	return _unique(names)
 
 
-def _invoice_enrollment_reset_run_message(result, invoice_result):
-	pieces = [_("Invoice enrollment reset complete.")]
-	reset_count = (result.get("counts") or {}).get("enrollments_reset_for_change") or 0
+def _invoice_enrollment_reset_run_message(result, invoice_result, mode):
+	pieces = [_("Enrollment withdrawal complete.") if mode == INVOICE_ENROLLMENT_RESET_MODE_WITHDRAW else _("Invoice enrollment reset complete.")]
+	completed_count = (result.get("counts") or {}).get(_invoice_enrollment_reset_completed_count_key(mode)) or 0
 	attendance_count = (result.get("counts") or {}).get("attendance_cancelled") or 0
-	if reset_count:
-		pieces.append(_("{0} enrollment(s) reset to Planned.").format(reset_count))
+	if completed_count:
+		pieces.append(_("{0} enrollment(s) set to {1}.").format(completed_count, _invoice_enrollment_reset_target_status(mode)))
 	if attendance_count:
 		pieces.append(_("{0} future attendance row(s) cancelled.").format(attendance_count))
 	if invoice_result.get("message"):
@@ -1303,7 +1416,8 @@ def _invoice_enrollment_reset_run_message(result, invoice_result):
 
 
 def _invoice_enrollment_reset_success_count(result):
-	return (result.get("counts") or {}).get("enrollments_reset_for_change") or 0
+	counts = result.get("counts") or {}
+	return (counts.get("enrollments_reset_for_change") or 0) + (counts.get("enrollments_withdrawn") or 0)
 
 
 def _invoice_links_enrollment(invoice_doc, enrollment):
