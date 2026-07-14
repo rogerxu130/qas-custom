@@ -535,7 +535,9 @@ def enqueue_session_staff_notification(
 		queue="short",
 		timeout=300,
 		enqueue_after_commit=True,
-		event=event,
+		# `event` is reserved by frappe.enqueue for queue metadata, so use a
+		# distinct keyword for the notification's business event.
+		notification_event=event,
 		course_session=course_session,
 		student=student,
 		source_doctype=source_doctype,
@@ -551,7 +553,7 @@ def enqueue_session_staff_notification(
 
 
 def send_session_staff_notification_job(
-	event: str,
+	notification_event: str,
 	*,
 	course_session: str,
 	student: str,
@@ -559,12 +561,12 @@ def send_session_staff_notification_job(
 	source_document: str,
 	notification_log: str | None = None,
 ):
-	if not _session_staff_notification_is_current(event, course_session, student, source_document):
+	if not _session_staff_notification_is_current(notification_event, course_session, student, source_document):
 		reason = "The source event is no longer eligible for notification."
 		_mark_notification_failed(notification_log, reason)
 		return {"sent": False, "skipped": True, "reason": reason, "notification_log": notification_log}
 	return send_session_staff_notification(
-		event,
+		notification_event,
 		course_session=course_session,
 		student=student,
 		source_doctype=source_doctype,
