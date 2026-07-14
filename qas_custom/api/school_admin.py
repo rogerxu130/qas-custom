@@ -110,12 +110,14 @@ from qas_custom.services.school_admin import (
 	transfer_school_admin_enrollment_data,
 	copy_school_admin_term_data,
 	update_school_admin_attendance_data,
+	update_school_admin_course_session_teacher_data,
 	update_school_admin_draft_invoice_data,
 	update_school_admin_enrollment_data,
 	update_school_admin_inquiry_status_data,
 	update_school_admin_invoice_settings_data,
 	update_school_admin_voucher_data,
 	update_school_admin_weekly_timeslot_data,
+	change_school_admin_weekly_timeslot_teacher_data,
 )
 
 
@@ -711,6 +713,24 @@ def school_admin_get_course_sessions(
 @frappe.whitelist()
 def school_admin_get_course_session(course_session=None):
 	return get_school_admin_course_session_data(course_session=course_session)
+
+
+@frappe.whitelist()
+def school_admin_update_course_session_teacher(course_session=None, teacher=None, reset_override=0):
+	return update_school_admin_course_session_teacher_data(
+		course_session=course_session,
+		teacher=teacher,
+		reset_override=reset_override,
+	)
+
+
+@frappe.whitelist()
+def school_admin_change_weekly_timeslot_teacher(weekly_timeslot=None, teacher=None, effective_date=None):
+	return change_school_admin_weekly_timeslot_teacher_data(
+		weekly_timeslot=weekly_timeslot,
+		teacher=teacher,
+		effective_date=effective_date,
+	)
 
 
 @frappe.whitelist()

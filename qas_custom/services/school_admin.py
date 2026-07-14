@@ -2390,6 +2390,8 @@ def update_school_admin_weekly_timeslot_data(weekly_timeslot=None, payload=None)
 		frappe.throw(_("Weekly timeslot is required."))
 	payload = _get_payload(payload)
 	doc = frappe.get_doc("Weekly Timeslot", weekly_timeslot)
+	if "teacher" in payload and payload.get("teacher") != doc.get("teacher") and _weekly_timeslot_has_course_sessions(doc.name):
+		frappe.throw(_("Use Change weekly teacher from the Classes workspace after sessions have been created."))
 	previous_day_of_week = doc.get("day_of_week")
 	_apply_weekly_timeslot_payload(doc, payload)
 	doc.save(ignore_permissions=True)
@@ -2469,7 +2471,93 @@ def get_school_admin_course_session_data(course_session=None):
 	payload["attendance"] = _get_school_admin_attendance_rows(course_session)
 	if payload.get("weekly_timeslot"):
 		payload["weekly_timeslot_detail"] = _get_timeslot_summary(payload.get("weekly_timeslot"))
+	_timeslot_teacher = (payload.get("weekly_timeslot_detail") or {}).get("teacher")
+	payload["teacher"] = payload.get("teacher_override") or _timeslot_teacher
+	payload["teacher_assignment_source"] = "Session override" if payload.get("teacher_override") else "Weekly timeslot"
 	return payload
+
+
+def update_school_admin_course_session_teacher_data(course_session=None, teacher=None, reset_override=0):
+	_require_school_admin()
+	if not course_session:
+		frappe.throw(_("Course session is required."))
+	doc = frappe.get_doc("Course Sessions", course_session)
+	if doc.get("status") != "Scheduled":
+		frappe.throw(_("Only scheduled course sessions can have their teacher changed."))
+	if cint(reset_override):
+		teacher = None
+	else:
+		_assert_active_teacher(teacher)
+	_set_if_field(doc, "teacher_override", teacher)
+	doc.save(ignore_permissions=True)
+	_add_comment(
+		"Course Sessions",
+		doc.name,
+		"Teacher override reset to weekly timeslot." if not teacher else _("Teacher override changed to {0}.").format(teacher),
+	)
+	frappe.db.commit()
+	return get_school_admin_course_session_data(doc.name)
+
+
+def change_school_admin_weekly_timeslot_teacher_data(weekly_timeslot=None, teacher=None, effective_date=None):
+	_require_school_admin()
+	if not weekly_timeslot:
+		frappe.throw(_("Weekly timeslot is required."))
+	if not effective_date:
+		frappe.throw(_("Effective date is required."))
+	effective_date = getdate(effective_date)
+	if effective_date < getdate(today()):
+		frappe.throw(_("Effective date cannot be before today."))
+	_assert_active_teacher(teacher)
+
+	doc = frappe.get_doc("Weekly Timeslot", weekly_timeslot)
+	previous_teacher = doc.get("teacher")
+	if teacher == previous_teacher:
+		frappe.throw(_("Choose a different teacher."))
+
+	sessions = frappe.get_all(
+		"Course Sessions",
+		filters={"weekly_timeslot": doc.name, "session_date": ["<", effective_date]},
+		fields=["name", "teacher_override"],
+		limit_page_length=0,
+	)
+	preserved_count = 0
+	for session in sessions:
+		if session.get("teacher_override"):
+			continue
+		frappe.db.set_value("Course Sessions", session.name, "teacher_override", previous_teacher, update_modified=True)
+		preserved_count += 1
+
+	future_override_count = frappe.db.count(
+		"Course Sessions",
+		filters={
+			"weekly_timeslot": doc.name,
+			"session_date": [">=", effective_date],
+			"teacher_override": ["!=", ""],
+		},
+	)
+	doc.teacher = teacher
+	doc.save(ignore_permissions=True)
+	_add_comment(
+		"Weekly Timeslot",
+		doc.name,
+		_("Teacher changed from {0} to {1} effective {2}. Preserved {3} earlier session(s).").format(
+			previous_teacher,
+			teacher,
+			effective_date,
+			preserved_count,
+		),
+	)
+	frappe.db.commit()
+	result = get_school_admin_weekly_timeslot_data(doc.name)
+	result["teacher_reassignment"] = {
+		"previous_teacher": previous_teacher,
+		"teacher": teacher,
+		"effective_date": str(effective_date),
+		"preserved_session_count": preserved_count,
+		"future_override_count": future_override_count,
+	}
+	return result
 
 
 def update_school_admin_attendance_data(attendance_entry=None, status=None, comments=None):
@@ -4805,6 +4893,7 @@ def _get_course_session_rows(
 			"weekly_timeslot",
 			"session_date",
 			"status",
+			"teacher_override",
 			"revenue_share_override",
 			"revenue_share_teacher",
 			"revenue_share_percent",
@@ -4825,6 +4914,9 @@ def _get_course_session_rows(
 	for row in rows:
 		item = _normalize_row_payload("Course Sessions", row)
 		item["weekly_timeslot_detail"] = timeslot_map.get(row.weekly_timeslot)
+		timeslot_teacher = (item.get("weekly_timeslot_detail") or {}).get("teacher")
+		item["teacher"] = item.get("teacher_override") or timeslot_teacher
+		item["teacher_assignment_source"] = "Session override" if item.get("teacher_override") else "Weekly timeslot"
 		item["student_count"] = student_counts.get(row.get("name"), 0)
 		item["trial_count"] = trial_counts.get(row.get("name"), 0)
 		if item.get("weekly_timeslot_detail"):
@@ -4891,6 +4983,17 @@ def _apply_weekly_timeslot_payload(doc, payload):
 	if "end_time" not in payload and (not doc.get("end_time") or "course" in payload or "start_time" in payload):
 		_apply_course_duration_end_time(doc)
 	_validate_weekly_timeslot_room_conflict(doc)
+
+
+def _weekly_timeslot_has_course_sessions(weekly_timeslot):
+	return bool(weekly_timeslot and frappe.db.exists("Course Sessions", {"weekly_timeslot": weekly_timeslot}))
+
+
+def _assert_active_teacher(teacher):
+	if not teacher or not frappe.db.exists("Teacher", teacher):
+		frappe.throw(_("An active teacher is required."))
+	if _has_field("Teacher", "status") and frappe.db.get_value("Teacher", teacher, "status") != "Active":
+		frappe.throw(_("Only active teachers can be assigned to classes."))
 
 
 def validate_weekly_timeslot_document(doc, method=None):

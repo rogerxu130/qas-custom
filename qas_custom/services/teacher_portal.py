@@ -44,25 +44,41 @@ def get_teacher_sessions_data(from_date=None, to_date=None):
     end_date = getdate(to_date or add_days(start_date, 14))
 
     timeslot_rows = _get_teacher_timeslots(teacher.name)
-    if not timeslot_rows:
-        return {"items": []}
-
     timeslot_map = {row["name"]: row for row in timeslot_rows}
-    session_rows = frappe.get_all(
-        "Course Sessions",
-        filters={
-            "weekly_timeslot": ["in", list(timeslot_map.keys())],
-            "session_date": ["between", [start_date, end_date]],
-        },
-        fields=["name", "weekly_timeslot", "session_date", "status"],
-        order_by="session_date asc, modified asc",
+    session_fields = ["name", "weekly_timeslot", "session_date", "status", "teacher_override"]
+    session_rows = []
+    if timeslot_map:
+        session_rows.extend(
+            frappe.get_all(
+                "Course Sessions",
+                filters={
+                    "weekly_timeslot": ["in", list(timeslot_map.keys())],
+                    "session_date": ["between", [start_date, end_date]],
+                },
+                fields=session_fields,
+                order_by="session_date asc, modified asc",
+            )
+        )
+    session_rows.extend(
+        frappe.get_all(
+            "Course Sessions",
+            filters={
+                "teacher_override": teacher.name,
+                "session_date": ["between", [start_date, end_date]],
+            },
+            fields=session_fields,
+            order_by="session_date asc, modified asc",
+        )
     )
+    session_rows = list({row["name"]: row for row in session_rows}.values())
+    override_timeslots = _get_timeslot_map([row.get("weekly_timeslot") for row in session_rows])
+    timeslot_map.update(override_timeslots)
 
     attendance_by_session = _get_attendance_by_session([row["name"] for row in session_rows])
     items = []
     for session in session_rows:
         timeslot = timeslot_map.get(session.get("weekly_timeslot"))
-        if not timeslot:
+        if not timeslot or _resolved_session_teacher(session, timeslot) != teacher.name:
             continue
 
         attendance_rows = attendance_by_session.get(session["name"], [])
@@ -480,18 +496,35 @@ def _get_timeslot(timeslot_name: str | None):
     )
 
 
+def _get_timeslot_map(timeslot_names):
+    timeslot_names = sorted({name for name in timeslot_names if name})
+    if not timeslot_names:
+        return {}
+    rows = frappe.get_all(
+        "Weekly Timeslot",
+        filters={"name": ["in", timeslot_names]},
+        fields=["name", "course", "campus", "classroom", "teacher", "day_of_week", "start_time", "end_time"],
+        limit_page_length=0,
+    )
+    return {row.get("name"): row for row in rows}
+
+
+def _resolved_session_teacher(session, timeslot):
+    return session.get("teacher_override") or (timeslot or {}).get("teacher")
+
+
 def _get_owned_session(course_session: str, teacher_name: str):
     session = frappe.db.get_value(
         "Course Sessions",
         course_session,
-        ["name", "weekly_timeslot", "session_date", "status"],
+        ["name", "weekly_timeslot", "session_date", "status", "teacher_override"],
         as_dict=True,
     )
     if not session:
         frappe.throw(_("Course session was not found."))
 
     timeslot = _get_timeslot(session.get("weekly_timeslot"))
-    if not timeslot or timeslot.get("teacher") != teacher_name:
+    if not timeslot or _resolved_session_teacher(session, timeslot) != teacher_name:
         frappe.throw(_("You do not have access to this course session."), frappe.PermissionError)
 
     return session
