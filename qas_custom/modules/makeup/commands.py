@@ -7,6 +7,7 @@ from frappe.utils import add_days, get_time, getdate, now_datetime, today
 
 from qas_custom.modules.course_schedule.queries import get_teacher_name_map, get_weekly_timeslot_map
 from qas_custom.modules.attendance.commands import update_attendance_status
+from qas_custom.modules.notifications.commands import enqueue_session_staff_notification
 from qas_custom.services.class_attendance import ATTENDANCE_DOCTYPE, create_attendance_entry
 from qas_custom.services.display_labels import get_makeup_voucher_label, sync_makeup_voucher_label
 
@@ -41,6 +42,13 @@ def submit_parent_leave_request_core(parent, students: list[dict], student: str,
 	result = process_leave_request(leave_request)
 	voucher_id = result.get("makeup_voucher") or _get_voucher_for_leave_request(leave_request)
 	voucher_label = sync_makeup_voucher_label(voucher_id)
+	notification = enqueue_session_staff_notification(
+		"leave_requested",
+		course_session=session_doc.name,
+		student=selected_student,
+		source_doctype="Leave Request",
+		source_document=leave_request.name,
+	)
 
 	return {
 		"leave_request": leave_request.name,
@@ -58,6 +66,7 @@ def submit_parent_leave_request_core(parent, students: list[dict], student: str,
 			"classroom": timeslot.classroom,
 			"attendance_status": "Leave",
 		},
+		"notification": notification,
 	}
 
 
@@ -133,10 +142,18 @@ def redeem_parent_voucher_core(
 			session_id=session_id,
 			student=used_student,
 		)
+		notification = enqueue_session_staff_notification(
+			"makeup_booked",
+			course_session=session_id,
+			student=used_student,
+			source_doctype="Makeup Voucher",
+			source_document=voucher.name,
+		)
 		return {
 			"voucher": _build_makeup_voucher_payload(voucher),
 			"attendance_entry": attendance_entry,
 			"session": _build_redeem_session_payload(session_id),
+			"notification": notification,
 		}
 
 	_validate_voucher_available_for_redeem(voucher)
@@ -156,11 +173,19 @@ def redeem_parent_voucher_core(
 	if frappe.db.has_column("Makeup Voucher", "voucher_label"):
 		voucher.voucher_label = get_makeup_voucher_label({**voucher.as_dict(), "voucher_label": None})
 	voucher.save(ignore_permissions=True)
+	notification = enqueue_session_staff_notification(
+		"makeup_booked",
+		course_session=session_id,
+		student=selected_student,
+		source_doctype="Makeup Voucher",
+		source_document=voucher.name,
+	)
 
 	return {
 		"voucher": _build_makeup_voucher_payload(voucher),
 		"attendance_entry": attendance_entry,
 		"session": _build_redeem_session_payload(session_id),
+		"notification": notification,
 	}
 
 

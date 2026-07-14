@@ -13,6 +13,8 @@ from qas_custom.utils.environment import email_block_reason, outbound_email_enab
 
 
 TRIAL_CLASS_REMINDER_EVENT_PREFIX = "trial_class_reminder:"
+SESSION_STAFF_NOTIFICATION_EVENT_PREFIX = "session_staff:"
+SESSION_STAFF_NOTIFICATION_EVENTS = {"leave_requested", "makeup_booked", "trial_added"}
 
 
 def send_parent_invoice_notification(
@@ -479,6 +481,319 @@ def get_trial_class_reminder_summary(inquiry: str):
 		limit_page_length=1,
 	)
 	return _notification_payload(rows[0]) if rows else None
+
+
+def enqueue_session_staff_notification(
+	event: str,
+	*,
+	course_session: str,
+	student: str,
+	source_doctype: str,
+	source_document: str,
+):
+	"""Queue one idempotent operational email after the source transaction commits."""
+	try:
+		context = _session_staff_notification_context(event, course_session, student)
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "QAS session staff notification context failed: {0}".format(source_document))
+		return {"queued": False, "reason": "Notification context could not be prepared."}
+
+	event_key = _session_staff_notification_event_key(event, course_session, student, source_document)
+	subject = _session_staff_notification_subject(context)
+	message = _session_staff_notification_email_message(context)
+	if _session_staff_notification_already_logged(event_key, source_doctype, source_document, subject):
+		return {"queued": False, "skipped": True, "reason": "Notification already recorded."}
+
+	recipient = {"email": ", ".join(context["recipients"])}
+	log_name = _create_notification_log(
+		event_key=event_key,
+		recipient=recipient,
+		subject=subject,
+		message=message,
+		document_type=source_doctype,
+		document_name=source_document,
+	)
+	if not context["recipients"]:
+		reason = "No recipient email found for the session teacher or school."
+		_mark_notification_failed(log_name, reason)
+		return {"queued": False, "skipped": True, "reason": reason, "notification_log": log_name}
+
+	_mark_notification_queued(log_name)
+	if not outbound_email_enabled():
+		reason = email_block_reason()
+		_mark_notification_failed(log_name, reason)
+		return {
+			"queued": False,
+			"skipped": True,
+			"reason": reason,
+			"notification_log": log_name,
+			"recipients": context["recipients"],
+		}
+
+	frappe.enqueue(
+		"qas_custom.modules.notifications.commands.send_session_staff_notification_job",
+		queue="short",
+		timeout=300,
+		enqueue_after_commit=True,
+		event=event,
+		course_session=course_session,
+		student=student,
+		source_doctype=source_doctype,
+		source_document=source_document,
+		notification_log=log_name,
+	)
+	return {
+		"queued": True,
+		"notification_log": log_name,
+		"recipients": context["recipients"],
+		"missing_recipients": context["missing_recipients"],
+	}
+
+
+def send_session_staff_notification_job(
+	event: str,
+	*,
+	course_session: str,
+	student: str,
+	source_doctype: str,
+	source_document: str,
+	notification_log: str | None = None,
+):
+	if not _session_staff_notification_is_current(event, course_session, student, source_document):
+		reason = "The source event is no longer eligible for notification."
+		_mark_notification_failed(notification_log, reason)
+		return {"sent": False, "skipped": True, "reason": reason, "notification_log": notification_log}
+	return send_session_staff_notification(
+		event,
+		course_session=course_session,
+		student=student,
+		source_doctype=source_doctype,
+		source_document=source_document,
+		notification_log=notification_log,
+	)
+
+
+def send_session_staff_notification(
+	event: str,
+	*,
+	course_session: str,
+	student: str,
+	source_doctype: str,
+	source_document: str,
+	notification_log: str | None = None,
+):
+	try:
+		context = _session_staff_notification_context(event, course_session, student)
+		subject = _session_staff_notification_subject(context)
+		message = _session_staff_notification_email_message(context)
+		if not context["recipients"]:
+			reason = "No recipient email found for the session teacher or school."
+			_mark_notification_failed(notification_log, reason)
+			return {"sent": False, "skipped": True, "reason": reason, "notification_log": notification_log}
+
+		kwargs = {
+			"action": "session_staff_{0}".format(event),
+			"recipients": context["recipients"],
+			"subject": subject,
+			"message": message,
+			"reference_doctype": source_doctype,
+			"reference_name": source_document,
+			"delayed": False,
+		}
+		if context.get("school_email"):
+			kwargs["reply_to"] = context["school_email"]
+		mail_result = sendmail_or_skip(**kwargs)
+		if mail_result and mail_result.get("skipped"):
+			reason = mail_result.get("reason") or email_block_reason()
+			_mark_notification_failed(notification_log, reason)
+			return {"sent": False, "skipped": True, "reason": reason, "notification_log": notification_log}
+
+		_mark_notification_sent(notification_log)
+		return {
+			"sent": True,
+			"notification_log": notification_log,
+			"recipients": context["recipients"],
+			"missing_recipients": context["missing_recipients"],
+		}
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "QAS session staff notification failed: {0}".format(source_document))
+		_mark_notification_failed(notification_log, "Email send failed.")
+		return {"sent": False, "reason": "Email send failed.", "notification_log": notification_log}
+
+
+def _session_staff_notification_context(event: str, course_session: str, student: str):
+	if event not in SESSION_STAFF_NOTIFICATION_EVENTS:
+		frappe.throw(_("Unsupported session staff notification event."))
+	session = frappe.db.get_value(
+		"Course Sessions",
+		course_session,
+		["name", "weekly_timeslot", "session_date", "teacher_override"],
+		as_dict=True,
+	)
+	if not session or not session.get("weekly_timeslot"):
+		frappe.throw(_("Course session was not found or is missing a weekly timeslot."))
+	timeslot = frappe.db.get_value(
+		"Weekly Timeslot",
+		session.weekly_timeslot,
+		["name", "course", "campus", "classroom", "teacher", "day_of_week", "start_time", "end_time"],
+		as_dict=True,
+	)
+	if not timeslot:
+		frappe.throw(_("Weekly timeslot was not found."))
+
+	teacher_name = session.get("teacher_override") or timeslot.get("teacher")
+	teacher = frappe.db.get_value(
+		"Teacher",
+		teacher_name,
+		["name", "teacher_name", "email", "user"],
+		as_dict=True,
+	) if teacher_name else None
+	teacher_email = _session_staff_teacher_email(teacher)
+	student_row = frappe.db.get_value("Student", student, ["name", "student_name"], as_dict=True) or {}
+	settings = get_invoice_settings()
+	school_email = (settings.get("school_email") or "").strip().lower()
+	recipients = [teacher_email] if teacher_email else []
+	if event != "trial_added" and school_email:
+		recipients.append(school_email)
+	recipients = list(dict.fromkeys(email for email in recipients if email))
+	missing_recipients = []
+	if not teacher_email:
+		missing_recipients.append("teacher email")
+	if event != "trial_added" and not school_email:
+		missing_recipients.append("school email")
+
+	return {
+		"event": event,
+		"course_session": course_session,
+		"student": student,
+		"student_name": student_row.get("student_name") or student,
+		"course": timeslot.get("course") or "Class",
+		"campus": timeslot.get("campus") or "Not assigned",
+		"classroom": timeslot.get("classroom") or "Not assigned",
+		"date_display": formatdate(session.get("session_date"), "d MMMM yyyy") if session.get("session_date") else "Not assigned",
+		"day_of_week": timeslot.get("day_of_week") or "",
+		"start_time": _session_staff_time(timeslot.get("start_time")),
+		"end_time": _session_staff_time(timeslot.get("end_time")),
+		"teacher_name": (teacher or {}).get("teacher_name") or teacher_name or "Unassigned",
+		"school_name": settings.get("school_name") or "Queensland Art School",
+		"school_email": school_email,
+		"recipients": recipients,
+		"missing_recipients": missing_recipients,
+	}
+
+
+def _session_staff_teacher_email(teacher):
+	if not teacher:
+		return ""
+	for fieldname in ["email", "email_id", "contact_email"]:
+		value = teacher.get(fieldname)
+		if value:
+			return str(value).strip().lower()
+	user = teacher.get("user")
+	if user and frappe.db.exists("User", user):
+		return (frappe.db.get_value("User", user, "email") or user or "").strip().lower()
+	return ""
+
+
+def _session_staff_notification_event_key(event: str, course_session: str, student: str, source_document: str):
+	if event == "leave_requested":
+		return "{0}leave:{1}".format(SESSION_STAFF_NOTIFICATION_EVENT_PREFIX, source_document)
+	if event == "makeup_booked":
+		return "{0}makeup:{1}:{2}:{3}".format(SESSION_STAFF_NOTIFICATION_EVENT_PREFIX, source_document, course_session, student)
+	return "{0}trial:{1}:{2}".format(SESSION_STAFF_NOTIFICATION_EVENT_PREFIX, source_document, course_session)
+
+
+def _session_staff_notification_already_logged(event_key, document_type, document_name, subject):
+	if not _notification_log_available():
+		return False
+	meta = frappe.get_meta("Notification Log")
+	if meta.has_field("event_key"):
+		return bool(frappe.db.exists("Notification Log", {"event_key": event_key}))
+	return bool(frappe.db.exists("Notification Log", {"document_type": document_type, "document_name": document_name, "subject": subject}))
+
+
+def _session_staff_notification_is_current(event, course_session, student, source_document):
+	if event == "leave_requested":
+		row = frappe.db.get_value("Leave Request", source_document, ["status", "course_session", "student"], as_dict=True)
+		return bool(row and row.get("status") == "Approved" and row.get("course_session") == course_session and row.get("student") == student)
+	if event == "makeup_booked":
+		row = frappe.db.get_value("Makeup Voucher", source_document, ["status", "used_on_session", "student", "used_by_student"], as_dict=True)
+		return bool(
+			row
+			and row.get("status") == "Used"
+			and row.get("used_on_session") == course_session
+			and (row.get("used_by_student") or row.get("student")) == student
+		)
+	if event == "trial_added":
+		row = frappe.db.get_value("Inquiry", source_document, ["inquiry_type", "status", "course_session", "student"], as_dict=True)
+		return bool(
+			row
+			and row.get("inquiry_type") == "Trial Lesson"
+			and row.get("status") != "Cancelled"
+			and row.get("course_session") == course_session
+			and row.get("student") == student
+		)
+	return False
+
+
+def _session_staff_notification_subject(context):
+	prefixes = {
+		"leave_requested": "Leave request",
+		"makeup_booked": "Makeup class booked",
+		"trial_added": "Trial student added",
+	}
+	return _("{0}: {1} - {2}").format(prefixes[context["event"]], context["student_name"], context["date_display"])
+
+
+def _session_staff_notification_email_message(context):
+	def value(key):
+		return escape_html(str(context.get(key) or ""))
+
+	intro = {
+		"leave_requested": "A parent has requested leave for this student.",
+		"makeup_booked": "This student has been booked into your session as a makeup class.",
+		"trial_added": "This session now has a trial student.",
+	}[context["event"]]
+	return """
+		<div style="margin:0;padding:0;background:#f8fafc;font-family:Arial,sans-serif;color:#172033;">
+			<div style="max-width:640px;margin:0 auto;padding:24px;">
+				<div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;">
+					<div style="padding:22px 24px;background:#172033;color:#ffffff;">
+						<p style="margin:0 0 6px;font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:#f7b6a4;">{school_name}</p>
+						<h1 style="margin:0;font-size:24px;line-height:1.3;">{title}</h1>
+					</div>
+					<div style="padding:24px;">
+						<p style="margin:0 0 18px;font-size:16px;line-height:1.5;">{intro}</p>
+						<table style="width:100%;border-collapse:collapse;">
+							<tr><td style="padding:9px 0;color:#64748b;">Student</td><td style="padding:9px 0;text-align:right;font-weight:700;">{student_name}</td></tr>
+							<tr><td style="padding:9px 0;color:#64748b;">Course</td><td style="padding:9px 0;text-align:right;font-weight:700;">{course}</td></tr>
+							<tr><td style="padding:9px 0;color:#64748b;">Campus</td><td style="padding:9px 0;text-align:right;font-weight:700;">{campus}</td></tr>
+							<tr><td style="padding:9px 0;color:#64748b;">Classroom</td><td style="padding:9px 0;text-align:right;font-weight:700;">{classroom}</td></tr>
+							<tr><td style="padding:9px 0;color:#64748b;">Date</td><td style="padding:9px 0;text-align:right;font-weight:700;">{day_of_week} {date_display}</td></tr>
+							<tr><td style="padding:9px 0;color:#64748b;">Time</td><td style="padding:9px 0;text-align:right;font-weight:700;">{start_time} - {end_time}</td></tr>
+						</table>
+					</div>
+				</div>
+			</div>
+		</div>
+	""".format(
+		school_name=value("school_name"),
+		title=escape_html(_session_staff_notification_subject(context)),
+		intro=escape_html(intro),
+		student_name=value("student_name"),
+		course=value("course"),
+		campus=value("campus"),
+		classroom=value("classroom"),
+		day_of_week=value("day_of_week"),
+		date_display=value("date_display"),
+		start_time=value("start_time"),
+		end_time=value("end_time"),
+	)
+
+
+def _session_staff_time(value):
+	text = str(value or "").strip()
+	return text[:5] if len(text) >= 5 else text
 
 
 def _trial_class_reminder_context(inquiry_doc):
