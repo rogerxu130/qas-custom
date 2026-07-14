@@ -8,12 +8,13 @@ from frappe.utils import add_days, get_time, getdate, now_datetime, today
 from qas_custom.modules.course_schedule.queries import get_teacher_name_map, get_weekly_timeslot_map
 from qas_custom.modules.attendance.commands import update_attendance_status
 from qas_custom.modules.notifications.commands import enqueue_session_staff_notification
-from qas_custom.services.class_attendance import ATTENDANCE_DOCTYPE, create_attendance_entry
+from qas_custom.services.class_attendance import ATTENDANCE_DOCTYPE, DEFAULT_ATTENDANCE_STATUS, create_attendance_entry
 from qas_custom.services.display_labels import get_makeup_voucher_label, sync_makeup_voucher_label
 
 
 MAKEUP_ENROLLMENT_TYPE = "Makeup"
 DEFAULT_VOUCHER_EXPIRY_DAYS = 90
+REDEEMABLE_EXISTING_ATTENDANCE_STATUSES = {"Cancelled", "Leave"}
 
 
 def submit_parent_leave_request_core(parent, students: list[dict], student: str, course_session: str):
@@ -137,7 +138,8 @@ def redeem_parent_voucher_core(
 
 	if voucher.get("status") == "Used" and voucher.get("used_on_session") == session_id:
 		used_student = _get_voucher_used_by_student(voucher) or selected_student
-		attendance_entry = create_makeup_attendance_entry(
+		existing = _get_attendance_entry_used_by_voucher(voucher, session_id, used_student)
+		attendance_entry = existing.get("name") if existing else create_makeup_attendance_entry(
 			voucher=voucher,
 			session_id=session_id,
 			student=used_student,
@@ -159,11 +161,10 @@ def redeem_parent_voucher_core(
 	_validate_voucher_available_for_redeem(voucher)
 	_validate_session_can_redeem_voucher(voucher, session_id, selected_student)
 
-	attendance_entry = create_makeup_attendance_entry(
+	attendance_entry = redeem_voucher_attendance_entry(
 		voucher=voucher,
 		session_id=session_id,
 		student=selected_student,
-		prevent_student_duplicate=True,
 	)
 
 	voucher.status = "Used"
@@ -172,6 +173,7 @@ def redeem_parent_voucher_core(
 	_set_voucher_used_by_student(voucher, selected_student)
 	if frappe.db.has_column("Makeup Voucher", "voucher_label"):
 		voucher.voucher_label = get_makeup_voucher_label({**voucher.as_dict(), "voucher_label": None})
+	voucher.flags.skip_makeup_attendance_sync = True
 	voucher.save(ignore_permissions=True)
 	notification = enqueue_session_staff_notification(
 		"makeup_booked",
@@ -202,13 +204,31 @@ def create_makeup_attendance_entry(voucher, session_id: str, student: str, preve
 	)
 
 
+def redeem_voucher_attendance_entry(voucher, session_id: str, student: str):
+	reusable_row = _get_reusable_attendance_row_for_voucher(student, session_id)
+	if reusable_row:
+		return _restore_attendance_row_from_voucher(voucher, reusable_row)
+
+	return create_makeup_attendance_entry(
+		voucher=voucher,
+		session_id=session_id,
+		student=student,
+		prevent_student_duplicate=True,
+	)
+
+
 def sync_makeup_voucher_attendance_after_save(doc, method=None):
+	if getattr(doc, "flags", None) and doc.flags.get("skip_makeup_attendance_sync"):
+		return None
 	if doc.get("status") != "Used" or not doc.get("used_on_session"):
 		return None
 	student = _get_voucher_used_by_student(doc) or doc.get("student")
 	if not student:
 		return None
-	return create_makeup_attendance_entry(
+	existing = _get_attendance_entry_used_by_voucher(doc, doc.used_on_session, student)
+	if existing:
+		return existing.get("name")
+	return redeem_voucher_attendance_entry(
 		voucher=doc,
 		session_id=doc.used_on_session,
 		student=student,
@@ -297,10 +317,7 @@ def _get_redeemable_makeup_sessions(voucher, student: str | None = None):
 		timeslot = timeslot_map.get(session.get("weekly_timeslot"))
 		if not timeslot or not _course_accepts_makeup_voucher(timeslot.get("course"), voucher.get("course")):
 			continue
-		if frappe.db.exists(
-			ATTENDANCE_DOCTYPE,
-			{"course_session": session["name"], "student": redeem_student},
-		):
+		if not _student_session_can_redeem_voucher(redeem_student, session["name"]):
 			continue
 
 		sessions.append(
@@ -326,6 +343,108 @@ def _validate_session_can_redeem_voucher(voucher, session_id: str, student: str)
 	}
 	if session_id not in available_session_ids:
 		frappe.throw("This class session is not available for this makeup voucher.")
+
+
+def _student_session_can_redeem_voucher(student: str | None, session_id: str):
+	if not student or not session_id:
+		return False
+	rows = _get_student_session_attendance_rows(student, session_id)
+	if not rows:
+		return True
+	return all((row.get("status") or "") in REDEEMABLE_EXISTING_ATTENDANCE_STATUSES for row in rows)
+
+
+def _get_reusable_attendance_row_for_voucher(student: str, session_id: str):
+	rows = _get_student_session_attendance_rows(student, session_id)
+	if not rows:
+		return None
+	if not all((row.get("status") or "") in REDEEMABLE_EXISTING_ATTENDANCE_STATUSES for row in rows):
+		return None
+
+	def priority(row):
+		status_priority = 0 if row.get("status") == "Leave" else 1
+		source_priority = 0 if row.get("source_doctype") == "Enrollment" else 1
+		return (status_priority, source_priority, str(row.get("creation") or ""))
+
+	return sorted(rows, key=priority)[0]
+
+
+def _get_student_session_attendance_rows(student: str, session_id: str):
+	return frappe.get_all(
+		ATTENDANCE_DOCTYPE,
+		filters={
+			"course_session": session_id,
+			"student": student,
+		},
+		fields=[
+			"name",
+			"course_session",
+			"student",
+			"enrollment_type",
+			"status",
+			"source_doctype",
+			"source_document",
+			"makeup_voucher",
+			"creation",
+		],
+		order_by="creation asc",
+	)
+
+
+def _restore_attendance_row_from_voucher(voucher, attendance_row):
+	label = get_makeup_voucher_label(voucher)
+	result = update_attendance_status(
+		course_session=attendance_row.get("course_session"),
+		attendance_row=attendance_row.get("name"),
+		status=DEFAULT_ATTENDANCE_STATUS,
+		actor=frappe.session.user,
+		comment=f"Restored from Makeup Voucher {label}",
+	)
+	attendance_entry = result.get("attendance_entry") or attendance_row.get("name")
+	if frappe.db.has_column(ATTENDANCE_DOCTYPE, "makeup_voucher"):
+		frappe.db.set_value(
+			ATTENDANCE_DOCTYPE,
+			attendance_entry,
+			"makeup_voucher",
+			voucher.name,
+			update_modified=True,
+		)
+	return attendance_entry
+
+
+def _get_attendance_entry_used_by_voucher(voucher, session_id: str, student: str | None = None):
+	voucher_name = voucher if isinstance(voucher, str) else voucher.name
+	base_filters = {"course_session": session_id}
+	if student:
+		base_filters["student"] = student
+
+	source_rows = frappe.get_all(
+		ATTENDANCE_DOCTYPE,
+		filters={
+			**base_filters,
+			"source_doctype": "Makeup Voucher",
+			"source_document": voucher_name,
+		},
+		fields=["name"],
+		order_by="modified desc",
+		limit=1,
+	)
+	if source_rows:
+		return source_rows[0]
+
+	if not frappe.db.has_column(ATTENDANCE_DOCTYPE, "makeup_voucher"):
+		return None
+	voucher_rows = frappe.get_all(
+		ATTENDANCE_DOCTYPE,
+		filters={
+			**base_filters,
+			"makeup_voucher": voucher_name,
+		},
+		fields=["name"],
+		order_by="modified desc",
+		limit=1,
+	)
+	return voucher_rows[0] if voucher_rows else None
 
 
 def _course_accepts_makeup_voucher(target_course: str | None, voucher_course: str | None):
