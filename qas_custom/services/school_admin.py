@@ -2453,7 +2453,7 @@ def get_school_admin_course_sessions_data(
 			to_date=to_date,
 			include_inactive_terms=include_inactive_terms,
 			include_inactive_timeslots=include_inactive_timeslots,
-			limit=_limit(limit, default=160, max_value=600),
+			limit=_limit(limit, default=160, max_value=3000),
 		)
 	}
 
