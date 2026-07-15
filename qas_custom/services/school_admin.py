@@ -82,6 +82,7 @@ DEFAULT_COURSE_INVOICE_ITEM = "Tuition Fee"
 MANUAL_INVOICE_ITEM = "Other"
 BULK_INVOICE_SUBMIT_JOB_TTL_SECONDS = 86400
 NON_ATTENDING_ATTENDANCE_STATUSES = {"Cancelled", "Leave"}
+SCHOOL_ADMIN_LEAVE_ATTENDANCE_STATUSES = ("To be started", "Absent")
 PARENT_EDIT_FIELDS = ["parent_name", "mobile_number", "phone", "email", "email_id", "address", "status", "customer"]
 STUDENT_EDIT_FIELDS = ["student_name", "first_name", "last_name", "date_of_birth", "dob", "gender", "status", "guardian", "parent"]
 COURSE_EDIT_FIELDS = [
@@ -2944,13 +2945,23 @@ def get_school_admin_leave_options_data(parent=None, student=None):
 def submit_school_admin_leave_request_data(parent=None, student=None, course_session=None, reason=None):
     _require_school_admin()
     reason = _school_admin_required_reason(reason)
+    if not course_session:
+        frappe.throw(_("Course session is required."))
     parent_doc, students = _get_school_admin_family_context(parent=parent, student=student)
     _assert_student_in_family(student, students)
+    eligible_sessions = _get_school_admin_leave_sessions(student, course_session=course_session)
+    if not eligible_sessions:
+        frappe.throw(_("This class session is not eligible for School Admin leave in the current active term."))
+    selected_session = eligible_sessions[0]
     result = submit_parent_leave_request_core(
         parent=parent_doc,
         students=students,
         student=student,
         course_session=course_session,
+        allowed_attendance_statuses=SCHOOL_ADMIN_LEAVE_ATTENDANCE_STATUSES,
+        allow_started_session=True,
+        notify_staff=not selected_session.get("is_past"),
+        attendance_entry=selected_session.get("attendance_entry"),
     )
     _audit_school_admin_leave_result(result, reason)
     frappe.db.commit()
@@ -3032,46 +3043,112 @@ def _school_admin_required_reason(reason):
     return reason
 
 
-def _get_school_admin_leave_sessions(student):
-    if not _doctype_available("Class Attendance Entry") or not _doctype_available("Course Sessions"):
+def _get_school_admin_leave_sessions(student, course_session=None):
+    required_doctypes = ("Class Attendance Entry", "Course Sessions", "Enrollment", "Term")
+    if any(not _doctype_available(doctype) for doctype in required_doctypes):
         return []
     fields = _safe_fields(
         "Class Attendance Entry",
         ["name", "course_session", "student", "status", "enrollment_type", "source_doctype", "source_document"],
     )
+    attendance_filters = {
+        "student": student,
+        "status": ["in", list(SCHOOL_ADMIN_LEAVE_ATTENDANCE_STATUSES)],
+        "source_doctype": "Enrollment",
+    }
+    if course_session:
+        attendance_filters["course_session"] = course_session
     attendance_rows = frappe.get_all(
         "Class Attendance Entry",
-        filters={"student": student, "status": "To be started"},
+        filters=attendance_filters,
         fields=fields,
         limit_page_length=0,
     )
     if not attendance_rows:
         return []
-    attendance_rows = _school_admin_leave_visible_attendance(attendance_rows)
+
+    enrollment_names = sorted({row.get("source_document") for row in attendance_rows if row.get("source_document")})
+    enrollment_rows = frappe.get_all(
+        "Enrollment",
+        filters={"name": ["in", enrollment_names]},
+        fields=_safe_fields("Enrollment", ["name", "student", "term", "weekly_timeslot", "enrollment_type", "status"]),
+        limit_page_length=0,
+    ) if enrollment_names else []
+    term_names = sorted({row.get("term") for row in enrollment_rows if row.get("term")})
+    term_rows = frappe.get_all(
+        "Term",
+        filters={"name": ["in", term_names]},
+        fields=_safe_fields("Term", ["name", "term_name", "start_date", "end_date", "status"]),
+        limit_page_length=0,
+    ) if term_names else []
     session_ids = sorted({row.get("course_session") for row in attendance_rows if row.get("course_session")})
     if not session_ids:
         return []
     session_rows = frappe.get_all(
         "Course Sessions",
-        filters={"name": ["in", session_ids], "session_date": [">=", today()], "status": ["!=", "Cancelled"]},
+        filters={"name": ["in", session_ids]},
         fields=_safe_fields("Course Sessions", ["name", "weekly_timeslot", "session_date", "status"]),
         order_by="session_date asc, modified asc",
         limit_page_length=0,
     )
     timeslot_map = _get_timeslot_map([row.get("weekly_timeslot") for row in session_rows if row.get("weekly_timeslot")])
-    attendance_by_session = {row.get("course_session"): row for row in attendance_rows}
-    sessions = []
-    for session in session_rows:
-        session_id = session.get("name")
+    sessions = _build_school_admin_leave_session_options(
+        attendance_rows=attendance_rows,
+        enrollment_rows=enrollment_rows,
+        term_rows=term_rows,
+        session_rows=session_rows,
+        timeslot_map=timeslot_map,
+        current_datetime=now_datetime(),
+    )
+    return [
+        row for row in sessions
+        if not _school_admin_has_active_leave_or_voucher(student, row.get("session_id"))
+    ]
+
+
+def _build_school_admin_leave_session_options(
+    *,
+    attendance_rows,
+    enrollment_rows,
+    term_rows,
+    session_rows,
+    timeslot_map,
+    current_datetime,
+):
+    enrollment_map = {row.get("name"): row for row in enrollment_rows if row.get("name")}
+    term_map = {row.get("name"): row for row in term_rows if row.get("name")}
+    session_map = {row.get("name"): row for row in session_rows if row.get("name")}
+    options_by_session = {}
+
+    for attendance in attendance_rows:
+        if attendance.get("status") not in SCHOOL_ADMIN_LEAVE_ATTENDANCE_STATUSES:
+            continue
+        if attendance.get("source_doctype") != "Enrollment" or attendance.get("enrollment_type") == "Makeup":
+            continue
+        enrollment = enrollment_map.get(attendance.get("source_document"))
+        if not enrollment or enrollment.get("status") != "Active" or enrollment.get("enrollment_type") != "Full-Term":
+            continue
+        if enrollment.get("student") and attendance.get("student") != enrollment.get("student"):
+            continue
+        term = term_map.get(enrollment.get("term"))
+        if not term or term.get("status") != "Active" or not term.get("start_date") or not term.get("end_date"):
+            continue
+        session = session_map.get(attendance.get("course_session"))
+        if not session or session.get("status") == "Cancelled" or not session.get("session_date"):
+            continue
+        session_date = getdate(session.get("session_date"))
+        if session_date < getdate(term.get("start_date")) or session_date > getdate(term.get("end_date")):
+            continue
+        if enrollment.get("weekly_timeslot") and session.get("weekly_timeslot") != enrollment.get("weekly_timeslot"):
+            continue
         timeslot = timeslot_map.get(session.get("weekly_timeslot"))
-        if not session_id or not timeslot:
+        if not timeslot or not timeslot.get("start_time"):
             continue
-        if _school_admin_session_start(session, timeslot) <= now_datetime():
+        session_id = session.get("name")
+        if not session_id or session_id in options_by_session:
             continue
-        if _school_admin_has_active_leave_or_voucher(student, session_id):
-            continue
-        attendance = attendance_by_session.get(session_id) or {}
-        sessions.append({
+        session_start = _school_admin_session_start(session, timeslot)
+        options_by_session[session_id] = {
             "session_id": session_id,
             "course": timeslot.get("course"),
             "session_date": session.get("session_date"),
@@ -3083,33 +3160,16 @@ def _get_school_admin_leave_sessions(student):
             "teacher": timeslot.get("teacher"),
             "attendance_entry": attendance.get("name"),
             "attendance_status": attendance.get("status"),
-        })
+            "term": term.get("name"),
+            "term_label": term.get("term_name") or term.get("name"),
+            "is_past": session_start <= current_datetime,
+            "_session_start": session_start,
+        }
+
+    sessions = sorted(options_by_session.values(), key=lambda row: row.get("_session_start"))
+    for row in sessions:
+        row.pop("_session_start", None)
     return sessions
-
-
-def _school_admin_leave_visible_attendance(attendance_rows):
-    enrollment_names = sorted({
-        row.get("source_document")
-        for row in attendance_rows
-        if row.get("source_doctype") == "Enrollment" and row.get("source_document")
-    })
-    active_enrollments = set()
-    if enrollment_names and _doctype_available("Enrollment"):
-        active_enrollments = set(frappe.get_all(
-            "Enrollment",
-            filters={"name": ["in", enrollment_names], "status": "Active"},
-            pluck="name",
-            limit_page_length=0,
-        ))
-    visible = []
-    for row in attendance_rows:
-        enrollment_type = row.get("enrollment_type") or "Full-Term"
-        if enrollment_type == "Makeup":
-            continue
-        if row.get("source_doctype") == "Enrollment" and row.get("source_document") not in active_enrollments:
-            continue
-        visible.append(row)
-    return visible
 
 
 def _school_admin_session_start(session, timeslot):

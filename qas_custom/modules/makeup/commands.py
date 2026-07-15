@@ -15,9 +15,20 @@ from qas_custom.services.display_labels import get_makeup_voucher_label, sync_ma
 MAKEUP_ENROLLMENT_TYPE = "Makeup"
 DEFAULT_VOUCHER_EXPIRY_DAYS = 90
 REDEEMABLE_EXISTING_ATTENDANCE_STATUSES = {"Cancelled", "Leave"}
+DEFAULT_LEAVE_ATTENDANCE_STATUSES = {"To be started"}
 
 
-def submit_parent_leave_request_core(parent, students: list[dict], student: str, course_session: str):
+def submit_parent_leave_request_core(
+	parent,
+	students: list[dict],
+	student: str,
+	course_session: str,
+	*,
+	allowed_attendance_statuses=None,
+	allow_started_session: bool = False,
+	notify_staff: bool = True,
+	attendance_entry: str | None = None,
+):
 	if not student:
 		frappe.throw("Please select a student.")
 	if not course_session:
@@ -27,6 +38,9 @@ def submit_parent_leave_request_core(parent, students: list[dict], student: str,
 	session_doc, attendance_row, timeslot = _get_leave_session(
 		student=selected_student,
 		course_session=course_session,
+		allowed_attendance_statuses=allowed_attendance_statuses,
+		allow_started_session=allow_started_session,
+		attendance_entry=attendance_entry,
 	)
 	_validate_no_active_leave(student=selected_student, course_session=session_doc.name)
 
@@ -38,17 +52,17 @@ def submit_parent_leave_request_core(parent, students: list[dict], student: str,
 	leave_request.session_date = session_doc.session_date
 	leave_request.status = "Approved"
 	leave_request.flags.ignore_permissions = True
+	leave_request.flags.qas_leave_attendance_entry = attendance_row.name
 	leave_request.insert()
 	leave_request.reload()
-	result = process_leave_request(leave_request)
+	result = process_leave_request(leave_request, attendance_entry=attendance_row.name)
 	voucher_id = result.get("makeup_voucher") or _get_voucher_for_leave_request(leave_request)
 	voucher_label = sync_makeup_voucher_label(voucher_id)
-	notification = enqueue_session_staff_notification(
-		"leave_requested",
+	notification = _queue_leave_requested_notification(
+		notify_staff=notify_staff,
 		course_session=session_doc.name,
 		student=selected_student,
-		source_doctype="Leave Request",
-		source_document=leave_request.name,
+		leave_request=leave_request.name,
 	)
 
 	return {
@@ -71,11 +85,24 @@ def submit_parent_leave_request_core(parent, students: list[dict], student: str,
 	}
 
 
+def _queue_leave_requested_notification(*, notify_staff: bool, course_session: str, student: str, leave_request: str):
+	if not notify_staff:
+		return {"skipped": True, "reason": "retroactive_school_admin_leave"}
+	return enqueue_session_staff_notification(
+		"leave_requested",
+		course_session=course_session,
+		student=student,
+		source_doctype="Leave Request",
+		source_document=leave_request,
+	)
+
+
 def process_leave_request_after_insert(doc, method=None):
-	return process_leave_request(doc)
+	attendance_entry = doc.flags.get("qas_leave_attendance_entry") if getattr(doc, "flags", None) else None
+	return process_leave_request(doc, attendance_entry=attendance_entry)
 
 
-def process_leave_request(leave_request):
+def process_leave_request(leave_request, attendance_entry=None):
 	doc = frappe.get_doc("Leave Request", leave_request) if isinstance(leave_request, str) else leave_request
 	if not doc or doc.get("status") != "Approved":
 		return {"skipped": True, "reason": "Leave request is not approved."}
@@ -83,7 +110,7 @@ def process_leave_request(leave_request):
 		frappe.throw("Leave request requires a student and course session.")
 
 	_populate_leave_request_context(doc)
-	attendance_entry = _mark_leave_attendance(doc)
+	attendance_entry = _mark_leave_attendance(doc, attendance_entry=attendance_entry)
 	voucher = _ensure_leave_makeup_voucher(doc)
 	_set_leave_request_voucher(doc.name, voucher.name)
 	return {
@@ -535,18 +562,29 @@ def _build_redeem_session_payload(session_id: str):
 	}
 
 
-def _get_leave_session(student: str, course_session: str):
+def _get_leave_session(
+	student: str,
+	course_session: str,
+	*,
+	allowed_attendance_statuses=None,
+	allow_started_session: bool = False,
+	attendance_entry: str | None = None,
+):
 	session_doc = frappe.get_doc("Course Sessions", course_session)
+	allowed_statuses = set(allowed_attendance_statuses or DEFAULT_LEAVE_ATTENDANCE_STATUSES)
+	attendance_filters = {"course_session": course_session, "student": student}
+	if attendance_entry:
+		attendance_filters["name"] = attendance_entry
 	attendance_row = frappe.db.get_value(
 		ATTENDANCE_DOCTYPE,
-		{"course_session": course_session, "student": student},
+		attendance_filters,
 		["name", "status"],
 		as_dict=True,
 	)
 	if not attendance_row:
 		frappe.throw("This student is not listed in the selected class session.", frappe.PermissionError)
 
-	if attendance_row.status != "To be started":
+	if attendance_row.status not in allowed_statuses:
 		frappe.throw("This class session is not available for leave.")
 
 	if not session_doc.weekly_timeslot:
@@ -556,7 +594,7 @@ def _get_leave_session(student: str, course_session: str):
 	if not timeslot.course:
 		frappe.throw("The selected class session is missing a course.")
 
-	if _get_session_start(session_doc, timeslot) <= now_datetime():
+	if not allow_started_session and _get_session_start(session_doc, timeslot) <= now_datetime():
 		frappe.throw("This class has already started.")
 
 	return session_doc, attendance_row, timeslot
@@ -590,17 +628,29 @@ def _populate_leave_request_context(doc):
 	return doc
 
 
-def _mark_leave_attendance(doc):
-	attendance_entry = frappe.db.get_value(
-		ATTENDANCE_DOCTYPE,
-		{
-			"course_session": doc.course_session,
-			"student": doc.student,
-			"status": ["!=", "Cancelled"],
-		},
-		"name",
-		order_by="creation asc",
-	)
+def _mark_leave_attendance(doc, attendance_entry=None):
+	if attendance_entry:
+		attendance_entry = frappe.db.get_value(
+			ATTENDANCE_DOCTYPE,
+			{
+				"name": attendance_entry,
+				"course_session": doc.course_session,
+				"student": doc.student,
+				"status": ["!=", "Cancelled"],
+			},
+			"name",
+		)
+	else:
+		attendance_entry = frappe.db.get_value(
+			ATTENDANCE_DOCTYPE,
+			{
+				"course_session": doc.course_session,
+				"student": doc.student,
+				"status": ["!=", "Cancelled"],
+			},
+			"name",
+			order_by="creation asc",
+		)
 	if not attendance_entry:
 		frappe.throw("This student is not listed in the selected class session.")
 
