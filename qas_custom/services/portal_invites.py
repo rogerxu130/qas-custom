@@ -21,6 +21,7 @@ from qas_custom.utils.environment import sendmail_or_skip
 PORTAL_INVITE_EXPIRY_DAYS = 7
 PARENT_PORTAL_ROLE = "Parent"
 INVITE_LOG_DOCTYPE = "Parent Portal Invite Log"
+PARENT_PORTAL_INVITE_LOG_SOURCES = {"Manual", "Bulk Never Invited"}
 TEACHER_INVITE_COMMENT_MARKER = "Teacher Portal invite sent"
 TERM_PARENT_INVITE_JOB_TTL_SECONDS = 86400
 TERM_PARENT_INVITE_OPEN_ENROLLMENT_STATUSES = ["Planned", "Active"]
@@ -636,8 +637,9 @@ def _term_parent_status_matches(filter_status, row_status):
 
 
 def _term_parent_invite_source(term, mode):
-	label = TERM_PARENT_INVITE_STATUS_OPTIONS.get(mode, {}).get("label") or mode
-	return "Term {0} Parent Portal Invite: {1}".format(term, label)
+	# ``source`` is a Select field. Batch context belongs to the job status,
+	# not in this fixed-value audit field.
+	return "Bulk Never Invited"
 
 
 def _term_parent_invite_initial_status(job_id, term, mode, parents):
@@ -774,6 +776,12 @@ def _parent_invite_comment_history(parent):
 def _log_parent_portal_invite(parent_doc, user_name, email, invite, source):
 	if not frappe.db.exists("DocType", INVITE_LOG_DOCTYPE):
 		return
+	if source not in PARENT_PORTAL_INVITE_LOG_SOURCES:
+		frappe.log_error(
+			title="Parent Portal Invite Log Source Normalised",
+			message="Unsupported Parent Portal invite source: {0}".format(source),
+		)
+		source = "Bulk Never Invited"
 	frappe.get_doc({
 		"doctype": INVITE_LOG_DOCTYPE,
 		"parent": parent_doc.name,
