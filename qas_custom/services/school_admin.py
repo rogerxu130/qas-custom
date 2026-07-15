@@ -7,7 +7,8 @@ import re
 
 import frappe
 from frappe import _
-from frappe.utils import add_days, cint, flt, get_time, getdate, now_datetime, nowdate, today
+from frappe.sessions import clear_sessions
+from frappe.utils import add_days, cint, flt, get_time, getdate, now_datetime, nowdate, today, validate_email_address
 
 from qas_custom.services.billing_enrollment import (
 	convert_inquiry_to_full_term_core,
@@ -84,6 +85,10 @@ BULK_INVOICE_SUBMIT_JOB_TTL_SECONDS = 86400
 NON_ATTENDING_ATTENDANCE_STATUSES = {"Cancelled", "Leave"}
 SCHOOL_ADMIN_LEAVE_ATTENDANCE_STATUSES = ("To be started", "Absent")
 PARENT_EDIT_FIELDS = ["parent_name", "mobile_number", "phone", "email", "email_id", "address", "status", "customer"]
+PARENT_UPDATE_FIELDS = ["parent_name", "mobile_number", "phone", "address", "status", "customer"]
+PARENT_EMAIL_FIELDS = ("email", "email_id", "contact_email")
+PARENT_PORTAL_INVITE_LOG_DOCTYPE = "Parent Portal Invite Log"
+PARENT_PORTAL_RESET_TOKEN_DOCTYPE = "Portal Password Reset Token"
 STUDENT_EDIT_FIELDS = ["student_name", "first_name", "last_name", "date_of_birth", "dob", "gender", "status", "guardian", "parent"]
 COURSE_EDIT_FIELDS = [
 	"course_name",
@@ -344,12 +349,149 @@ def update_school_admin_parent_data(parent=None, payload=None):
 	if not parent:
 		frappe.throw(_("Parent is required."))
 	doc = frappe.get_doc("Parent", parent)
-	_apply_master_payload(doc, _get_payload(payload), PARENT_EDIT_FIELDS)
+	_apply_master_payload(doc, _get_payload(payload), PARENT_UPDATE_FIELDS)
 	_validate_required(doc, ["parent_name"])
 	doc.save(ignore_permissions=True)
 	_add_comment("Parent", doc.name, _("Parent updated by School Admin."))
 	frappe.db.commit()
 	return get_school_admin_family_data(parent=doc.name)
+
+
+def correct_school_admin_parent_email_data(parent=None, email=None):
+	"""Replace a Parent's email identity without reusing the old portal User."""
+	_require_school_admin()
+	if not parent:
+		frappe.throw(_("Parent is required."))
+	new_email = _normalise_parent_email(email)
+	parent_doc = frappe.get_doc("Parent", parent)
+	old_email = _parent_current_email(parent_doc)
+	if new_email == old_email:
+		frappe.throw(_("The corrected email must be different from the current email."))
+	_conflicting_parent_email_identity(parent_doc, new_email)
+	old_user = parent_doc.get("linked_user") if _has_field("Parent", "linked_user") else None
+	if old_user and not frappe.db.exists("User", old_user):
+		old_user = None
+	try:
+		_set_parent_email_fields(parent_doc, new_email)
+		_update_parent_customer_email(parent_doc, new_email)
+		_update_parent_primary_contact_email(parent_doc, new_email)
+		if old_user:
+			_revoke_parent_portal_user(old_user)
+		_invalidate_parent_portal_invites(parent_doc.name)
+		_set_if_field(parent_doc, "linked_user", _create_replacement_parent_portal_user(new_email, parent_doc.get("parent_name") or parent_doc.name))
+		parent_doc.save(ignore_permissions=True)
+		_add_comment("Parent", parent_doc.name, _("Parent email corrected from {0} to {1} by {2}. The previous Parent Portal login and invitations were revoked.").format(old_email or _("(none)"), new_email, frappe.session.user))
+		frappe.db.commit()
+	except Exception:
+		frappe.db.rollback()
+		raise
+	return get_school_admin_family_data(parent=parent_doc.name)
+
+
+def _normalise_parent_email(email):
+	email = str(email or "").strip().lower()
+	if not email:
+		frappe.throw(_("A corrected email is required."))
+	try:
+		validate_email_address(email, throw=True)
+	except Exception:
+		frappe.throw(_("Enter a valid email address."))
+	return email
+
+
+def _parent_current_email(parent_doc):
+	for fieldname in PARENT_EMAIL_FIELDS:
+		if parent_doc.get(fieldname):
+			return str(parent_doc.get(fieldname)).strip().lower()
+	linked_user = parent_doc.get("linked_user")
+	if linked_user and frappe.db.exists("User", linked_user):
+		return (frappe.db.get_value("User", linked_user, "email") or "").strip().lower()
+	return ""
+
+
+def _conflicting_parent_email_identity(parent_doc, email):
+	for doctype, fields in (("Parent", PARENT_EMAIL_FIELDS), ("Customer", PARENT_EMAIL_FIELDS), ("Contact", PARENT_EMAIL_FIELDS)):
+		if not _doctype_available(doctype):
+			continue
+		for fieldname in fields:
+			if not _has_field(doctype, fieldname):
+				continue
+			for name in frappe.get_all(doctype, filters={fieldname: email}, pluck="name", limit_page_length=2):
+				if doctype != "Parent" or name != parent_doc.name:
+					frappe.throw(_("The corrected email is already used by {0} {1}. Resolve that record before changing this family.").format(doctype, name))
+	if frappe.db.exists("User", email) or frappe.db.get_value("User", {"email": email}, "name"):
+		frappe.throw(_("The corrected email already has a User account. Resolve that account before changing this family."))
+
+
+def _update_parent_customer_email(parent_doc, email):
+	customer = parent_doc.get("customer")
+	if not customer or not _doctype_available("Customer") or not frappe.db.exists("Customer", customer):
+		return
+	doc = frappe.get_doc("Customer", customer)
+	changed = False
+	for fieldname in PARENT_EMAIL_FIELDS:
+		if doc.meta.has_field(fieldname) and doc.get(fieldname) != email:
+			doc.set(fieldname, email)
+			changed = True
+	if changed:
+		doc.save(ignore_permissions=True)
+
+
+def _update_parent_primary_contact_email(parent_doc, email):
+	customer = parent_doc.get("customer")
+	if not customer or not _doctype_available("Contact") or not _doctype_available("Dynamic Link"):
+		return
+	names = frappe.get_all("Dynamic Link", filters={"link_doctype": "Customer", "link_name": customer, "parenttype": "Contact"}, pluck="parent", limit_page_length=20)
+	if not names:
+		return
+	order_by = "is_primary_contact desc, modified desc" if _has_field("Contact", "is_primary_contact") else "modified desc"
+	contacts = frappe.get_all("Contact", filters={"name": ["in", names]}, fields=_safe_fields("Contact", ["name", "is_primary_contact", "modified"]), order_by=order_by, limit_page_length=20)
+	if not contacts:
+		return
+	doc = frappe.get_doc("Contact", contacts[0].name)
+	changed = False
+	for fieldname in PARENT_EMAIL_FIELDS:
+		if doc.meta.has_field(fieldname) and doc.get(fieldname) != email:
+			doc.set(fieldname, email)
+			changed = True
+	if doc.meta.has_field("email_ids"):
+		rows = doc.get("email_ids") or []
+		row = next((item for item in rows if item.get("is_primary")), rows[0] if rows else None)
+		if row and row.get("email_id") != email:
+			row.email_id = email
+			changed = True
+	if changed:
+		doc.save(ignore_permissions=True)
+
+
+def _revoke_parent_portal_user(user_name):
+	doc = frappe.get_doc("User", user_name)
+	if doc.get("enabled"):
+		doc.enabled = 0
+		doc.flags.ignore_permissions = True
+		doc.save(ignore_permissions=True)
+	clear_sessions(user=user_name, force=True)
+	if _doctype_available(PARENT_PORTAL_RESET_TOKEN_DOCTYPE):
+		frappe.db.set_value(PARENT_PORTAL_RESET_TOKEN_DOCTYPE, {"user": user_name, "status": "Pending"}, "status", "Revoked", update_modified=False)
+
+
+def _invalidate_parent_portal_invites(parent):
+	if _doctype_available(PARENT_PORTAL_INVITE_LOG_DOCTYPE):
+		frappe.db.set_value(PARENT_PORTAL_INVITE_LOG_DOCTYPE, {"parent": parent, "status": "Sent"}, "status", "Invalidated", update_modified=False)
+
+
+def _create_replacement_parent_portal_user(email, parent_name):
+	doc = frappe.new_doc("User")
+	doc.email = email
+	doc.first_name = parent_name or email
+	doc.enabled = 1
+	doc.user_type = "Website User"
+	doc.send_welcome_email = 0
+	if frappe.db.exists("Role", "Parent"):
+		doc.append("roles", {"role": "Parent"})
+	doc.flags.ignore_permissions = True
+	doc.insert(ignore_permissions=True)
+	return doc.name
 
 
 def set_school_admin_parent_status_data(parent=None, status=None):
