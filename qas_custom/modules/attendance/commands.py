@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import frappe
 from frappe import _
-from frappe.utils import escape_html, now_datetime
+from frappe.utils import now_datetime
 
 from qas_custom.modules.common import set_if_field
 from qas_custom.modules.inquiry.commands import sync_trial_inquiry_from_attendance
@@ -11,7 +11,6 @@ from qas_custom.services.class_attendance import cancel_attendance_entries_by_so
 from qas_custom.services.class_attendance import create_attendance_entry, get_attendance_entry_by_source
 from qas_custom.services.class_attendance import ATTENDANCE_DOCTYPE
 from qas_custom.services.class_attendance import remove_attendance_entries_by_source
-from qas_custom.utils.environment import sendmail_or_skip
 
 
 DEFAULT_ATTENDANCE_STATUS = "To be started"
@@ -100,7 +99,6 @@ def update_attendance_status(course_session, attendance_row, status, actor=None,
 
 	row.save(ignore_permissions=True)
 
-	notify_parent_if_present(row, previous_status, status, actor)
 	sync_trial_inquiry_status_from_attendance(row, previous_status, status, actor, comment)
 
 	return {
@@ -134,53 +132,6 @@ def sync_trial_inquiry_status_from_attendance(row, previous_status, status, acto
 	)
 
 
-def notify_parent_if_present(row, previous_status, status, actor):
-	if status not in PRESENT_STATUSES or previous_status in PRESENT_STATUSES:
-		return
-
-	event_key = f"attendance_present:{row.name}"
-	if _notification_event_exists(event_key):
-		return
-
-	context = _get_attendance_context(row)
-	parent = context.get("parent")
-	if not parent:
-		return
-
-	parent_info = frappe.db.get_value("Parent", parent, ["name", "linked_user"], as_dict=True) or {}
-	recipient = _get_parent_email(parent_info.get("linked_user"))
-	if not recipient:
-		return
-
-	subject = _("Your child is present in class")
-	message = _build_present_message(context)
-	log_name = _create_notification_log(
-		event_key=event_key,
-		for_user=parent_info.get("linked_user"),
-		subject=subject,
-		message=message,
-		document_type="Course Sessions",
-		document_name=row.course_session,
-		from_user=actor,
-	)
-
-	try:
-		sendmail_or_skip(
-			action="attendance_present_notification",
-			recipients=[recipient],
-			subject=subject,
-			message=message,
-			delayed=False,
-		)
-	except Exception:
-		frappe.log_error(
-			title="QAS Attendance Present Notification Failed",
-			message=frappe.get_traceback(),
-			reference_doctype="Notification Log",
-			reference_name=log_name,
-		)
-
-
 def _validate_status(status):
 	if not status:
 		return
@@ -201,82 +152,3 @@ def _get_row_source(row, doctype):
 	if row.get("source_doctype") == doctype and row.get("source_document"):
 		return row.get("source_document")
 	return None
-
-
-def _get_attendance_context(row):
-	session_doc = frappe.get_doc("Course Sessions", row.course_session)
-	student = frappe.db.get_value("Student", row.get("student"), ["name", "student_name", "guardian"], as_dict=True) or {}
-	timeslot = {}
-	if session_doc.get("weekly_timeslot"):
-		timeslot = frappe.db.get_value(
-			"Weekly Timeslot",
-			session_doc.get("weekly_timeslot"),
-			["course", "campus", "teacher", "start_time", "end_time"],
-			as_dict=True,
-		) or {}
-	teacher_name = None
-	if timeslot.get("teacher"):
-		teacher_meta = frappe.get_meta("Teacher")
-		if teacher_meta.has_field("teacher_name"):
-			teacher_name = frappe.db.get_value("Teacher", timeslot.get("teacher"), "teacher_name")
-		teacher_name = teacher_name or timeslot.get("teacher")
-	return {
-		"student": student.get("name") or row.get("student"),
-		"student_name": student.get("student_name") or row.get("student"),
-		"parent": student.get("guardian"),
-		"course": timeslot.get("course"),
-		"campus": timeslot.get("campus"),
-		"teacher": teacher_name,
-		"session_date": session_doc.get("session_date"),
-		"start_time": timeslot.get("start_time"),
-	}
-
-
-def _build_present_message(context):
-	lines = [
-		_("Hello,"),
-		"",
-		_("{0} has been marked present in class.").format(escape_html(context.get("student_name") or "")),
-		"",
-		_("Course: {0}").format(escape_html(context.get("course") or "-")),
-		_("Date: {0}").format(escape_html(context.get("session_date") or "-")),
-		_("Time: {0}").format(escape_html(context.get("start_time") or "-")),
-		_("Campus: {0}").format(escape_html(context.get("campus") or "-")),
-	]
-	if context.get("teacher"):
-		lines.append(_("Teacher: {0}").format(escape_html(context.get("teacher"))))
-	lines.extend(["", _("Queensland Art School")])
-	return "<br>".join(lines)
-
-
-def _get_parent_email(linked_user):
-	if not linked_user:
-		return None
-	return frappe.db.get_value("User", linked_user, "email") or linked_user
-
-
-def _notification_event_exists(event_key):
-	if not frappe.db.exists("DocType", "Notification Log"):
-		return False
-	if frappe.get_meta("Notification Log").has_field("event_key"):
-		return bool(frappe.db.exists("Notification Log", {"event_key": event_key}))
-	return bool(frappe.db.exists("Notification Log", {"document_name": event_key}))
-
-
-def _create_notification_log(event_key, for_user, subject, message, document_type, document_name, from_user):
-	if not frappe.db.exists("DocType", "Notification Log"):
-		return None
-
-	log = frappe.new_doc("Notification Log")
-	log.subject = subject
-	log.for_user = for_user
-	log.type = "Alert"
-	log.email_content = message
-	log.document_type = document_type
-	log.document_name = document_name
-	log.from_user = from_user
-	if log.meta.has_field("event_key"):
-		log.event_key = event_key
-	log.flags.ignore_permissions = True
-	log.insert()
-	return log.name

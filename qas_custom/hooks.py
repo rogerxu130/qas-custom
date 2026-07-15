@@ -183,6 +183,11 @@ doc_events = {
 # ---------------
 
 scheduler_events = {
+	"cron": {
+		"0 * * * *": [
+			"qas_custom.tasks.teacher_schedule_reminders.send_teacher_next_day_schedule_reminders",
+		],
+	},
 	"hourly": [
 		"qas_custom.tasks.adhoc_booking_tasks.lock_due_adhoc_bookings",
 	],
