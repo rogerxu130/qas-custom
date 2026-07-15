@@ -410,6 +410,7 @@ def _parent_current_email(parent_doc):
 
 
 def _conflicting_parent_email_identity(parent_doc, email):
+	contact_names = set(_parent_customer_contact_names(parent_doc))
 	for doctype, fields in (("Parent", PARENT_EMAIL_FIELDS), ("Customer", PARENT_EMAIL_FIELDS), ("Contact", PARENT_EMAIL_FIELDS)):
 		if not _doctype_available(doctype):
 			continue
@@ -417,10 +418,33 @@ def _conflicting_parent_email_identity(parent_doc, email):
 			if not _has_field(doctype, fieldname):
 				continue
 			for name in frappe.get_all(doctype, filters={fieldname: email}, pluck="name", limit_page_length=2):
-				if doctype != "Parent" or name != parent_doc.name:
+				if _is_parent_email_identity_conflict(doctype, name, parent_doc, contact_names):
 					frappe.throw(_("The corrected email is already used by {0} {1}. Resolve that record before changing this family.").format(doctype, name))
 	if frappe.db.exists("User", email) or frappe.db.get_value("User", {"email": email}, "name"):
 		frappe.throw(_("The corrected email already has a User account. Resolve that account before changing this family."))
+
+
+def _is_parent_email_identity_conflict(doctype, name, parent_doc, contact_names):
+	"""The family owns its Parent, Customer, and Customer-linked Contact records."""
+	if doctype == "Parent":
+		return name != parent_doc.name
+	if doctype == "Customer":
+		return name != parent_doc.get("customer")
+	if doctype == "Contact":
+		return name not in contact_names
+	return True
+
+
+def _parent_customer_contact_names(parent_doc):
+	customer = parent_doc.get("customer")
+	if not customer or not _doctype_available("Dynamic Link"):
+		return []
+	return frappe.get_all(
+		"Dynamic Link",
+		filters={"link_doctype": "Customer", "link_name": customer, "parenttype": "Contact"},
+		pluck="parent",
+		limit_page_length=20,
+	)
 
 
 def _update_parent_customer_email(parent_doc, email):
@@ -441,7 +465,7 @@ def _update_parent_primary_contact_email(parent_doc, email):
 	customer = parent_doc.get("customer")
 	if not customer or not _doctype_available("Contact") or not _doctype_available("Dynamic Link"):
 		return
-	names = frappe.get_all("Dynamic Link", filters={"link_doctype": "Customer", "link_name": customer, "parenttype": "Contact"}, pluck="parent", limit_page_length=20)
+	names = _parent_customer_contact_names(parent_doc)
 	if not names:
 		return
 	order_by = "is_primary_contact desc, modified desc" if _has_field("Contact", "is_primary_contact") else "modified desc"

@@ -2,7 +2,7 @@ from unittest import TestCase
 from unittest.mock import patch
 
 from qas_custom.services.portal_invites import _parent_invite_log_history
-from qas_custom.services.school_admin import PARENT_UPDATE_FIELDS
+from qas_custom.services.school_admin import PARENT_UPDATE_FIELDS, _is_parent_email_identity_conflict
 
 
 class TestParentEmailCorrection(TestCase):
@@ -10,6 +10,12 @@ class TestParentEmailCorrection(TestCase):
 		self.assertNotIn("email", PARENT_UPDATE_FIELDS)
 		self.assertNotIn("email_id", PARENT_UPDATE_FIELDS)
 		self.assertNotIn("contact_email", PARENT_UPDATE_FIELDS)
+
+	def test_current_family_customer_and_contact_are_not_email_conflicts(self):
+		parent = type("Parent", (), {"name": "PARENT-0001", "get": lambda self, key: "CUST-0001" if key == "customer" else None})()
+		self.assertFalse(_is_parent_email_identity_conflict("Customer", "CUST-0001", parent, {"CONTACT-0001"}))
+		self.assertFalse(_is_parent_email_identity_conflict("Contact", "CONTACT-0001", parent, {"CONTACT-0001"}))
+		self.assertTrue(_is_parent_email_identity_conflict("Customer", "CUST-OTHER", parent, {"CONTACT-0001"}))
 
 	@patch("qas_custom.services.portal_invites.frappe")
 	def test_invite_history_only_counts_current_user_and_email(self, frappe_mock):
