@@ -1093,7 +1093,7 @@ def _invoice_notification_amounts(invoice_doc, *, store_credit_applied=None, pay
 def _invoice_pdf_html(context):
 	rows = "\n".join(_invoice_pdf_item_row(item) for item in context["items"])
 	if not rows:
-		rows = """<tr><td colspan="5" class="muted">Invoice details are included in this PDF.</td></tr>"""
+		rows = """<tr><td colspan="4" class="muted">Invoice details are included in this PDF.</td></tr>"""
 
 	payment_block = _invoice_pdf_payment_block(context)
 	invoice_message = _invoice_pdf_message(context.get("invoice_message"))
@@ -1157,8 +1157,7 @@ def _invoice_pdf_html(context):
 		<thead>
 			<tr>
 				<th>Student</th>
-				<th>Course</th>
-				<th class="right">Sessions</th>
+				<th>Description</th>
 				<th class="right">Unit price</th>
 				<th class="right">Amount</th>
 			</tr>
@@ -1195,14 +1194,12 @@ def _invoice_pdf_item_row(item):
 		<tr>
 			<td><strong>{student}</strong></td>
 			<td>{description}</td>
-			<td class="right">{sessions:g}</td>
 			<td class="right">AUD ${rate:.2f}</td>
 			<td class="right"><strong>AUD ${amount:.2f}</strong></td>
 		</tr>
 	""".format(
 		student=escape_html(item.get("student") or ""),
 		description=escape_html(item.get("description") or ""),
-		sessions=flt(item.get("sessions")),
 		rate=flt(item.get("rate")),
 		amount=flt(item.get("amount")),
 	)
@@ -1276,7 +1273,7 @@ def _invoice_email_message(invoice_doc, event, store_credit_applied, payable_amo
 	bank_details = _invoice_email_bank_details(context) if flt(context["payable_amount"]) > 0 else ""
 	rows = "\n".join(_invoice_email_item_row(item) for item in context["items"])
 	if not rows:
-		rows = """<tr><td colspan="4" style="padding:12px;color:#64748b;">Invoice details are included in the attached PDF.</td></tr>"""
+		rows = """<tr><td colspan="3" style="padding:12px;color:#64748b;">Invoice details are included in the attached PDF.</td></tr>"""
 
 	return """
 		<div style="margin:0;padding:0;background:#f8fafc;font-family:Arial,sans-serif;color:#172033;">
@@ -1315,8 +1312,7 @@ def _invoice_email_message(invoice_doc, event, store_credit_applied, payable_amo
 							<thead>
 								<tr style="background:#f1f5f9;">
 									<th align="left" style="padding:10px;font-size:12px;color:#64748b;">Student</th>
-									<th align="left" style="padding:10px;font-size:12px;color:#64748b;">Course</th>
-									<th align="right" style="padding:10px;font-size:12px;color:#64748b;">Sessions</th>
+									<th align="left" style="padding:10px;font-size:12px;color:#64748b;">Description</th>
 									<th align="right" style="padding:10px;font-size:12px;color:#64748b;">Amount</th>
 								</tr>
 							</thead>
@@ -1439,13 +1435,11 @@ def _invoice_email_item_row(item):
 		<tr>
 			<td style="padding:10px;border-top:1px solid #e5e7eb;font-weight:700;">{student}</td>
 			<td style="padding:10px;border-top:1px solid #e5e7eb;">{description}</td>
-			<td style="padding:10px;border-top:1px solid #e5e7eb;text-align:right;">{sessions:g}</td>
 			<td style="padding:10px;border-top:1px solid #e5e7eb;text-align:right;font-weight:700;">AUD ${amount:.2f}</td>
 		</tr>
 	""".format(
 		student=escape_html(item.get("student") or ""),
 		description=escape_html(item.get("description") or ""),
-		sessions=flt(item.get("sessions")),
 		amount=flt(item.get("amount")),
 	)
 
@@ -1499,7 +1493,7 @@ def _receipt_email_message(invoice_doc, amounts, payment_context):
 	greeting = _invoice_email_greeting(context)
 	rows = "\n".join(_invoice_email_item_row(item) for item in context["items"])
 	if not rows:
-		rows = """<tr><td colspan="4" style="padding:12px;color:#64748b;">Invoice details are included in the attached receipt PDF.</td></tr>"""
+		rows = """<tr><td colspan="3" style="padding:12px;color:#64748b;">Invoice details are included in the attached receipt PDF.</td></tr>"""
 
 	return """
 		<div style="margin:0;padding:0;background:#f8fafc;font-family:Arial,sans-serif;color:#172033;">
@@ -1528,8 +1522,7 @@ def _receipt_email_message(invoice_doc, amounts, payment_context):
 							<thead>
 								<tr style="background:#f1f5f9;">
 									<th align="left" style="padding:10px;font-size:12px;color:#64748b;">Student</th>
-									<th align="left" style="padding:10px;font-size:12px;color:#64748b;">Course</th>
-									<th align="right" style="padding:10px;font-size:12px;color:#64748b;">Sessions</th>
+									<th align="left" style="padding:10px;font-size:12px;color:#64748b;">Description</th>
 									<th align="right" style="padding:10px;font-size:12px;color:#64748b;">Amount</th>
 								</tr>
 							</thead>
@@ -1561,7 +1554,7 @@ def _receipt_pdf_html(context):
 	receipt = context["receipt"]
 	rows = "\n".join(_invoice_pdf_item_row(item) for item in context["items"])
 	if not rows:
-		rows = """<tr><td colspan="5" class="muted">Invoice details are included in this receipt PDF.</td></tr>"""
+		rows = """<tr><td colspan="4" class="muted">Invoice details are included in this receipt PDF.</td></tr>"""
 
 	return """
 <!doctype html>
@@ -1619,8 +1612,7 @@ def _receipt_pdf_html(context):
 		<thead>
 			<tr>
 				<th>Student</th>
-				<th>Course</th>
-				<th class="right">Sessions</th>
+				<th>Description</th>
 				<th class="right">Unit price</th>
 				<th class="right">Amount</th>
 			</tr>

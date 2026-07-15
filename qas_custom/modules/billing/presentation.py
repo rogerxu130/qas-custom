@@ -114,17 +114,10 @@ def build_parent_invoice_item(row):
 	student_label = student_display_name or get_student_parent_name(student) or student or "Student"
 	course = row.get("course") or row.get("item_name") or row.get("item_code") or "Course"
 	term = row.get("term") or ""
-	session_count = int(flt(row.get("session_count") or row.get("qty") or 0))
 	quantity = flt(row.get("qty") or 0)
 	rate = flt(row.get("rate") or 0)
 	amount = flt(row.get("amount") or quantity * rate)
-	schedule = invoice_item_schedule(row)
-
-	detail_parts = [_course_term_label(course, term)]
-	if schedule:
-		detail_parts.append(schedule)
-	if session_count:
-		detail_parts.append("1 session" if session_count == 1 else f"{session_count} sessions")
+	description = row.get("description") or row.get("item_name") or row.get("item_code") or course
 
 	return {
 		"item_code": row.get("item_code") if hasattr(row, "get") else None,
@@ -134,13 +127,10 @@ def build_parent_invoice_item(row):
 		"course": course,
 		"term": term,
 		"course_session": row.get("course_session") if hasattr(row, "get") else None,
-		"session_count": row.get("session_count") if hasattr(row, "get") else None,
 		"qas_line_type": row.get("qas_line_type") if hasattr(row, "get") else None,
-		"schedule": schedule,
-		"sessions": session_count or quantity,
 		"rate": rate,
 		"amount": amount,
-		"description": " - ".join(str(part) for part in detail_parts if part),
+		"description": description,
 	}
 
 
