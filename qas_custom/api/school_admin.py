@@ -31,6 +31,7 @@ from qas_custom.services.school_admin_import import (
 from qas_custom.services.school_admin import (
 	update_school_admin_student_data,
 	update_school_admin_parent_data,
+	correct_school_admin_parent_email_data,
 	update_school_admin_course_data,
 	set_school_admin_student_status_data,
 	set_school_admin_parent_status_data,
@@ -296,6 +297,11 @@ def school_admin_create_parent(payload=None):
 @frappe.whitelist()
 def school_admin_update_parent(parent=None, payload=None):
 	return update_school_admin_parent_data(parent=parent, payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_correct_parent_email(parent=None, email=None):
+	return correct_school_admin_parent_email_data(parent=parent, email=email)
 
 
 @frappe.whitelist()

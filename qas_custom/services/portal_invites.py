@@ -414,7 +414,7 @@ def get_parent_portal_invite_status(parent):
 	email = _parent_email(parent_doc)
 	linked_user = _parent_linked_user(parent_doc, email)
 	login_state = _parent_login_state(linked_user)
-	history = _parent_invite_history(parent_doc.get("name"))
+	history = _parent_invite_history(parent_doc.get("name"), linked_user=linked_user, email=email)
 
 	if login_state.get("has_logged_in"):
 		status = "logged_in"
@@ -815,27 +815,31 @@ def _parent_login_state(user_name):
 	}
 
 
-def _parent_invite_history(parent):
+def _parent_invite_history(parent, linked_user=None, email=None):
 	if not parent:
 		return {"invited": False, "invite_count": 0}
-	log_history = _parent_invite_log_history(parent)
-	if log_history.get("invited"):
-		return log_history
+	if frappe.db.exists("DocType", INVITE_LOG_DOCTYPE):
+		return _parent_invite_log_history(parent, linked_user=linked_user, email=email)
 	comment_history = _parent_invite_comment_history(parent)
 	if comment_history.get("invited"):
 		return comment_history
 	return {"invited": False, "invite_count": 0}
 
 
-def _parent_invite_log_history(parent):
+def _parent_invite_log_history(parent, linked_user=None, email=None):
 	if not frappe.db.exists("DocType", INVITE_LOG_DOCTYPE):
 		return {"invited": False, "invite_count": 0}
-	count = frappe.db.count(INVITE_LOG_DOCTYPE, {"parent": parent})
+	filters = {"parent": parent, "status": "Sent"}
+	if linked_user:
+		filters["user"] = linked_user
+	if email:
+		filters["email"] = str(email).strip().lower()
+	count = frappe.db.count(INVITE_LOG_DOCTYPE, filters)
 	if not count:
 		return {"invited": False, "invite_count": 0}
 	latest = frappe.get_all(
 		INVITE_LOG_DOCTYPE,
-		filters={"parent": parent},
+		filters=filters,
 		fields=["name", "sent_at"],
 		order_by="sent_at desc, creation desc",
 		limit=1,
