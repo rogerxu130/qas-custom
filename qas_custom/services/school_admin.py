@@ -2498,10 +2498,11 @@ def get_school_admin_course_session_data(course_session=None):
 		course_session,
 		term=(payload.get("weekly_timeslot_detail") or {}).get("term"),
 	)
-	visible_attendance_rows = _visible_course_session_attendance_rows(attendance_rows)
-	payload["attendance"] = visible_attendance_rows
-	payload["student_count"] = len(visible_attendance_rows)
-	payload["trial_count"] = sum(1 for row in visible_attendance_rows if row.get("source_doctype") == "Inquiry")
+	attending_attendance_rows = _visible_course_session_attendance_rows(attendance_rows)
+	roster_attendance_rows = _roster_course_session_attendance_rows(attendance_rows)
+	payload["attendance"] = roster_attendance_rows
+	payload["student_count"] = len(attending_attendance_rows)
+	payload["trial_count"] = sum(1 for row in attending_attendance_rows if row.get("source_doctype") == "Inquiry")
 	payload["leave_count"] = _count_leave_attendance_rows(attendance_rows)
 	if payload.get("weekly_timeslot"):
 		_timeslot_teacher = (payload.get("weekly_timeslot_detail") or {}).get("teacher")
@@ -2698,6 +2699,10 @@ def _is_visible_course_session_attendance_row(row):
 
 def _visible_course_session_attendance_rows(rows):
 	return [row for row in rows if _is_visible_course_session_attendance_row(row)]
+
+
+def _roster_course_session_attendance_rows(rows):
+	return [row for row in rows if (row.get("status") or "").strip() != "Cancelled"]
 
 
 def _count_leave_attendance_rows(rows):
