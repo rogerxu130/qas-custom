@@ -2702,7 +2702,7 @@ def _visible_course_session_attendance_rows(rows):
 
 
 def _roster_course_session_attendance_rows(rows):
-	return [row for row in rows if (row.get("status") or "").strip() != "Cancelled"]
+	return list(rows)
 
 
 def _count_leave_attendance_rows(rows):
