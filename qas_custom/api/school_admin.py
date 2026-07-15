@@ -51,6 +51,7 @@ from qas_custom.services.school_admin import (
 	activate_school_admin_enrollment_data,
 	bulk_school_admin_invoice_action_data,
 	cancel_school_admin_invoice_data,
+	reopen_school_admin_unpaid_invoice_data,
 	convert_school_admin_inquiry_data,
 	create_school_admin_enrollment_data,
 	create_school_admin_enrollment_attendance_data,
@@ -529,6 +530,11 @@ def school_admin_mark_invoice_paid(invoice=None, payload=None):
 @frappe.whitelist()
 def school_admin_cancel_invoice(invoice=None, reason=None):
 	return cancel_school_admin_invoice_data(invoice=invoice, reason=reason)
+
+
+@frappe.whitelist()
+def school_admin_reopen_unpaid_invoice(invoice=None, reason=None):
+	return reopen_school_admin_unpaid_invoice_data(invoice=invoice, reason=reason)
 
 
 @frappe.whitelist()

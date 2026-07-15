@@ -28,6 +28,7 @@ from qas_custom.modules.billing.store_credit import (
 	get_store_credit_summary,
 	grant_store_credit_bonus_for_amount,
 	grant_store_credit_bonus_for_payment_entry,
+	has_invoice_store_credit_journal_entry,
 	sync_invoice_store_credit_snapshot,
 )
 from qas_custom.modules.billing.invoice_settings import (
@@ -1302,6 +1303,66 @@ def cancel_school_admin_invoice_data(invoice=None, reason=None):
 	_clear_deleted_invoice_enrollment_snapshot(doc, action="cancelled")
 	frappe.db.commit()
 	return _build_invoice_payload(frappe.get_doc("Sales Invoice", invoice))
+
+
+def reopen_school_admin_unpaid_invoice_data(invoice=None, reason=None):
+	"""Cancel an unpaid invoice and return its amendment as the editable draft."""
+	_require_school_admin()
+	if not invoice:
+		frappe.throw(_("Invoice is required."))
+	reason = (reason or "").strip()
+	if not reason:
+		frappe.throw(_("A correction reason is required."))
+	if not payment_mutations_enabled():
+		frappe.throw(_(payment_block_reason()))
+
+	doc = frappe.get_doc("Sales Invoice", invoice)
+	if cint(doc.docstatus) == 2:
+		amendment = _invoice_amendment_for(doc.name)
+		if amendment:
+			payload = _build_invoice_payload(frappe.get_doc("Sales Invoice", amendment))
+			payload["already_reopened"] = True
+			payload["original_invoice"] = doc.name
+			return payload
+		frappe.throw(_("Cancelled invoices cannot be reopened. Create a replacement invoice instead."))
+	if cint(doc.docstatus) != 1:
+		frappe.throw(_("Only submitted invoices can be reopened for correction."))
+
+	_reopen_unpaid_invoice_safety_check(doc)
+	savepoint = "school_admin_reopen_invoice"
+	frappe.db.savepoint(savepoint)
+	try:
+		# Check again immediately before the cancellation so a late payment or credit
+		# application cannot be silently disconnected from the corrected invoice.
+		doc = frappe.get_doc("Sales Invoice", invoice)
+		_reopen_unpaid_invoice_safety_check(doc)
+		_cancel_submitted_invoice_as_admin(doc.name)
+		amendment = frappe.copy_doc(frappe.get_doc("Sales Invoice", doc.name))
+		amendment.amended_from = doc.name
+		if _has_field("Sales Invoice", "status"):
+			amendment.status = "Draft"
+		amendment.flags.ignore_permissions = True
+		_run_school_admin_invoice_mutation(lambda: amendment.insert(ignore_permissions=True))
+		_move_enrollment_invoice_snapshots_to_amendment(doc, amendment, reason)
+		_add_comment(
+			"Sales Invoice",
+			doc.name,
+			_("Invoice cancelled for correction. Amendment draft: {0}. Reason: {1}").format(amendment.name, reason),
+		)
+		_add_comment(
+			"Sales Invoice",
+			amendment.name,
+			_("Amendment draft created from cancelled invoice {0}. Reason: {1}").format(doc.name, reason),
+		)
+		frappe.db.commit()
+	except Exception:
+		frappe.db.rollback(save_point=savepoint)
+		raise
+
+	payload = _build_invoice_payload(frappe.get_doc("Sales Invoice", amendment.name))
+	payload["original_invoice"] = doc.name
+	payload["reopened"] = True
+	return payload
 
 
 def start_school_admin_bulk_invoice_submit_job_data(payload=None):
@@ -4782,6 +4843,64 @@ def _clear_deleted_invoice_enrollment_snapshot(doc, action="deleted"):
 			else:
 				message = _("Draft invoice {0} was deleted by School Admin.")
 			_add_comment("Enrollment", enrollment, message.format(doc.name))
+
+
+def _reopen_unpaid_invoice_safety_check(doc):
+	if cint(doc.docstatus) != 1:
+		frappe.throw(_("Only submitted invoices can be reopened for correction."))
+	paid_amount = _invoice_payment_amount(doc.name)
+	if paid_amount > 0.005:
+		frappe.throw(_("This invoice has payment entries applied and cannot be reopened. Cancel and reissue it instead."))
+	store_credit_applied = get_invoice_store_credit_applied(doc.name)
+	if store_credit_applied > 0.005 or has_invoice_store_credit_journal_entry(doc.name):
+		frappe.throw(_("This invoice has store credit applied and cannot be reopened. Cancel and reissue it instead."))
+
+
+def _invoice_amendment_for(invoice):
+	if not invoice or not _has_field("Sales Invoice", "amended_from"):
+		return None
+	return frappe.db.get_value(
+		"Sales Invoice",
+		{"amended_from": invoice},
+		"name",
+		order_by="creation desc",
+	)
+
+
+def _move_enrollment_invoice_snapshots_to_amendment(original, amendment, reason):
+	enrollment_names = set()
+	for candidate in [original.get("enrollment")]:
+		if candidate:
+			enrollment_names.add(candidate)
+	if original.get("source_doctype") == "Enrollment" and original.get("source_document"):
+		enrollment_names.add(original.get("source_document"))
+	for item in original.get("items", []):
+		if item.get("enrollment"):
+			enrollment_names.add(item.get("enrollment"))
+
+	for enrollment in sorted(enrollment_names):
+		if not frappe.db.exists("Enrollment", enrollment):
+			continue
+		current_invoice = frappe.db.get_value("Enrollment", enrollment, "invoice") if _has_field("Enrollment", "invoice") else None
+		if current_invoice and current_invoice != original.name:
+			continue
+		updates = {}
+		for fieldname, value in {
+			"invoice": amendment.name,
+			"invoice_status": "Draft",
+			"invoice_amount": amendment.get("grand_total"),
+		}.items():
+			if _has_field("Enrollment", fieldname):
+				updates[fieldname] = value
+		if updates:
+			frappe.db.set_value("Enrollment", enrollment, updates, update_modified=True)
+			_add_comment(
+				"Enrollment",
+				enrollment,
+				_("Invoice {0} was cancelled for correction and replaced with draft {1}. Reason: {2}").format(
+					original.name, amendment.name, reason
+				),
+			)
 
 
 def _reverse_invoice_store_credit_application(doc, reason):
