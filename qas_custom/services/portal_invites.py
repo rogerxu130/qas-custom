@@ -25,6 +25,7 @@ TEACHER_INVITE_COMMENT_MARKER = "Teacher Portal invite sent"
 TERM_PARENT_INVITE_JOB_TTL_SECONDS = 86400
 TERM_PARENT_INVITE_OPEN_ENROLLMENT_STATUSES = ["Planned", "Active"]
 TERM_PARENT_INVITE_MAX_RECIPIENTS = 1000
+PARENT_PORTAL_QUICK_GUIDE_URL = "https://drive.google.com/file/d/1Zcqctss-iaodYFSIUBrAsilbSoA8B4kA/view?usp=drive_link"
 TERM_PARENT_INVITE_STATUS_OPTIONS = {
 	"never_invited": {"label": _("Never invited"), "statuses": {"never_invited"}},
 	"invited_not_logged_in": {"label": _("Invited, not logged in"), "statuses": {"invited_not_logged_in"}},
@@ -810,23 +811,34 @@ def _create_invite_token(user_name, email, portal=PORTAL_PARENT):
 
 
 def _send_parent_portal_invite_email(parent_name, email, reset_link, expires_at, token_record):
-	subject = _("Welcome to Queensland Art School Parent Portal")
+	subject = _("Your QAS Parent Portal: leave, makeup classes and updates")
 	greeting = _("Hi {0},").format(parent_name) if parent_name else _("Hi,")
 	safe_greeting = escape_html(greeting)
 	safe_reset_link = escape_html(reset_link)
 	safe_expires_at = escape_html(str(expires_at))
+	safe_guide_link = escape_html(PARENT_PORTAL_QUICK_GUIDE_URL)
 	message = f"""
 		<div style="margin:0;padding:0;background:#f8fafc;font-family:Arial,sans-serif;color:#172033;">
 			<div style="max-width:640px;margin:0 auto;padding:24px;">
 				<div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;">
 					<div style="padding:22px 24px;background:#172033;color:#ffffff;">
 						<p style="margin:0 0 6px;font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:#f7b6a4;">Queensland Art School</p>
-						<h1 style="margin:0;font-size:24px;line-height:1.3;">Set up your Parent Portal</h1>
+						<h1 style="margin:0;font-size:24px;line-height:1.3;">Your Parent Portal is ready</h1>
 					</div>
 					<div style="padding:24px;">
 						<p style="margin:0 0 14px;font-size:16px;line-height:1.5;">{safe_greeting}</p>
-						<p style="margin:0 0 18px;font-size:16px;line-height:1.5;">Queensland Art School has created a Parent Portal account for your family. Please use the secure link below to choose your password and sign in.</p>
-						<p style="margin:0 0 22px;"><a href="{safe_reset_link}" style="display:inline-block;background:#e85f47;color:#ffffff;text-decoration:none;border-radius:10px;padding:12px 18px;font-weight:700;">Set password</a></p>
+						<p style="margin:0 0 16px;font-size:16px;line-height:1.5;">Queensland Art School has created a Parent Portal account for your family.</p>
+						<p style="margin:0 0 10px;font-size:16px;line-height:1.5;">You can use the portal to:</p>
+						<ul style="margin:0 0 18px 20px;padding:0;font-size:15px;line-height:1.55;color:#172033;">
+							<li style="margin:0 0 6px;">request leave when your child cannot attend class</li>
+							<li style="margin:0 0 6px;">use leave vouchers to book makeup classes</li>
+							<li style="margin:0 0 6px;">check your store credit balance</li>
+							<li style="margin:0 0 6px;">see class updates, homework, photos and videos</li>
+							<li style="margin:0;">review invoices and payment status when needed</li>
+						</ul>
+						<p style="margin:0 0 18px;font-size:16px;line-height:1.5;">Please use the secure link below to choose your password and sign in.</p>
+						<p style="margin:0 0 12px;"><a href="{safe_reset_link}" style="display:inline-block;background:#e85f47;color:#ffffff;text-decoration:none;border-radius:10px;padding:12px 18px;font-weight:700;">Set password</a></p>
+						<p style="margin:0 0 22px;"><a href="{safe_guide_link}" style="display:inline-block;background:#eef6ff;color:#2563eb;text-decoration:none;border-radius:10px;padding:11px 16px;font-weight:700;">View Parent Portal quick guide</a></p>
 						<p style="margin:0 0 10px;font-size:13px;line-height:1.5;color:#64748b;">This link expires at {safe_expires_at}.</p>
 						<p style="margin:0;font-size:13px;line-height:1.5;color:#64748b;">If the button does not work, copy this link into your browser:<br>{safe_reset_link}</p>
 					</div>
