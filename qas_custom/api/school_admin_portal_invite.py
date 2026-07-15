@@ -22,8 +22,8 @@ def school_admin_bulk_invite_parents_to_portal(payload=None):
 
 
 @frappe.whitelist()
-def school_admin_get_term_parent_invite_preview(term=None, status=None):
-	return get_term_parent_invite_preview_data(term=term, status=status)
+def school_admin_get_term_parent_invite_preview(term=None, status=None, scope=None):
+	return get_term_parent_invite_preview_data(term=term, status=status, scope=scope)
 
 
 @frappe.whitelist()

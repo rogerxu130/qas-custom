@@ -27,6 +27,11 @@ TERM_PARENT_INVITE_JOB_TTL_SECONDS = 86400
 TERM_PARENT_INVITE_OPEN_ENROLLMENT_STATUSES = ["Planned", "Active"]
 TERM_PARENT_INVITE_MAX_RECIPIENTS = 1000
 PARENT_PORTAL_QUICK_GUIDE_URL = "https://drive.google.com/file/d/1Zcqctss-iaodYFSIUBrAsilbSoA8B4kA/view?usp=drive_link"
+TERM_PARENT_INVITE_SCOPE_OPTIONS = {
+	"term": {"label": _("Selected term parents")},
+	"active_parents": {"label": _("All active/current parents")},
+	"all_parents": {"label": _("All parents")},
+}
 TERM_PARENT_INVITE_STATUS_OPTIONS = {
 	"never_invited": {"label": _("Never invited"), "statuses": {"never_invited"}},
 	"invited_not_logged_in": {"label": _("Invited, not logged in"), "statuses": {"invited_not_logged_in"}},
@@ -82,26 +87,28 @@ def bulk_invite_parents_to_portal_data(payload=None):
 	}
 
 
-def get_term_parent_invite_preview_data(term=None, status=None):
+def get_term_parent_invite_preview_data(term=None, status=None, scope=None):
 	_require_school_admin()
 	term = _clean_text(term)
 	status = _normalise_term_parent_invite_status(status)
-	if not term:
+	scope = _normalise_term_parent_invite_scope(scope)
+	if scope == "term" and not term:
 		frappe.throw(_("Term is required."))
-	if not frappe.db.exists("Term", term):
+	if scope == "term" and not frappe.db.exists("Term", term):
 		frappe.throw(_("Term was not found."))
-	return _build_term_parent_invite_preview(term, status)
+	return _build_term_parent_invite_preview(term, status, scope)
 
 
 def start_term_parent_invite_job_data(payload=None):
 	_require_school_admin()
 	payload = _get_payload(payload)
 	term = _clean_text(payload.get("term"))
+	scope = _normalise_term_parent_invite_scope(payload.get("scope"))
 	mode = _normalise_term_parent_invite_status(payload.get("mode") or payload.get("status") or "never_invited")
 	parents = _unique_clean_names(payload.get("parents") or [])
-	if not term:
+	if scope == "term" and not term:
 		frappe.throw(_("Term is required."))
-	if not frappe.db.exists("Term", term):
+	if scope == "term" and not frappe.db.exists("Term", term):
 		frappe.throw(_("Term was not found."))
 	if mode not in TERM_PARENT_INVITE_SEND_MODES:
 		frappe.throw(_("This invite status cannot be sent in bulk."))
@@ -110,13 +117,13 @@ def start_term_parent_invite_job_data(payload=None):
 	if len(parents) > TERM_PARENT_INVITE_MAX_RECIPIENTS:
 		frappe.throw(_("Parent Portal invite jobs are limited to {0} recipients.").format(TERM_PARENT_INVITE_MAX_RECIPIENTS))
 
-	term_parent_names = set(_term_parent_enrollment_groups(term).keys())
-	parents = [parent for parent in parents if parent in term_parent_names]
+	scope_parent_names = set(_scope_parent_names(term, scope))
+	parents = [parent for parent in parents if parent in scope_parent_names]
 	if not parents:
-		frappe.throw(_("No selected parents have open enrollments in this term."))
+		frappe.throw(_("No selected parents match this recipient group."))
 
 	job_id = frappe.generate_hash(length=16)
-	status = _term_parent_invite_initial_status(job_id, term, mode, parents)
+	status = _term_parent_invite_initial_status(job_id, term, mode, parents, scope)
 	_set_term_parent_invite_job_status(job_id, status)
 	frappe.enqueue(
 		"qas_custom.services.portal_invites.run_term_parent_invite_job",
@@ -126,6 +133,7 @@ def start_term_parent_invite_job_data(payload=None):
 		enqueue_after_commit=True,
 		qas_job_id=job_id,
 		term=term,
+		scope=scope,
 		mode=mode,
 		parents=parents,
 		requested_by=frappe.session.user,
@@ -144,17 +152,18 @@ def get_term_parent_invite_job_data(job_id=None):
 	return status
 
 
-def run_term_parent_invite_job(qas_job_id=None, term=None, mode=None, parents=None, requested_by=None):
+def run_term_parent_invite_job(qas_job_id=None, term=None, mode=None, parents=None, requested_by=None, scope=None):
 	job_id = _clean_text(qas_job_id)
 	term = _clean_text(term)
 	mode = _normalise_term_parent_invite_status(mode)
+	scope = _normalise_term_parent_invite_scope(scope)
 	parent_names = _unique_clean_names(parents or [])
 	if not job_id:
 		return
 	if requested_by:
 		frappe.set_user(requested_by)
 
-	status = _get_term_parent_invite_job_status(job_id) or _term_parent_invite_initial_status(job_id, term, mode, parent_names)
+	status = _get_term_parent_invite_job_status(job_id) or _term_parent_invite_initial_status(job_id, term, mode, parent_names, scope)
 	status.update({"status": "running", "started_at": now_datetime().isoformat(), "current_parent": None})
 	_set_term_parent_invite_job_status(job_id, status)
 	allowed_statuses = TERM_PARENT_INVITE_STATUS_OPTIONS[mode]["statuses"]
@@ -163,7 +172,7 @@ def run_term_parent_invite_job(qas_job_id=None, term=None, mode=None, parents=No
 		status["current_parent"] = parent
 		_set_term_parent_invite_job_status(job_id, status)
 		try:
-			result_row = _run_one_term_parent_invite(term, mode, parent, allowed_statuses)
+			result_row = _run_one_term_parent_invite(term, mode, parent, allowed_statuses, scope)
 			status["results"].append(result_row)
 			status["processed"] += 1
 			if result_row.get("sent"):
@@ -443,10 +452,16 @@ def get_parent_portal_invite_status(parent):
 	}
 
 
-def _build_term_parent_invite_preview(term, status_filter):
-	enrollment_groups = _term_parent_enrollment_groups(term)
-	parent_names = list(enrollment_groups.keys())
-	parent_docs = _term_parent_docs(parent_names)
+def _build_term_parent_invite_preview(term, status_filter, scope="term"):
+	scope = _normalise_term_parent_invite_scope(scope)
+	if scope == "term":
+		enrollment_groups = _term_parent_enrollment_groups(term)
+		parent_names = list(enrollment_groups.keys())
+		parent_docs = _term_parent_docs(parent_names)
+	else:
+		parent_docs = _scope_parent_docs(scope)
+		parent_names = list(parent_docs.keys())
+		enrollment_groups = _all_open_parent_enrollment_groups(parent_names)
 	student_labels = _student_label_map(
 		{row.get("student") for rows in enrollment_groups.values() for row in rows if row.get("student")}
 	)
@@ -474,6 +489,7 @@ def _build_term_parent_invite_preview(term, status_filter):
 			"parent_name": invite_status.get("parent_name") or parent_doc.get("parent_name") or parent,
 			"email": invite_status.get("email"),
 			"linked_user": invite_status.get("linked_user"),
+			"parent_status": parent_doc.get("status"),
 			"invite_status": invite_status_key,
 			"invite_label": invite_status.get("label"),
 			"invite_reason": invite_status.get("reason"),
@@ -496,6 +512,8 @@ def _build_term_parent_invite_preview(term, status_filter):
 
 	return {
 		"term": term,
+		"scope": scope,
+		"scope_label": TERM_PARENT_INVITE_SCOPE_OPTIONS[scope]["label"],
 		"status": status_filter,
 		"status_label": TERM_PARENT_INVITE_STATUS_OPTIONS[status_filter]["label"],
 		"total": len(rows),
@@ -515,7 +533,7 @@ def _build_term_parent_invite_preview(term, status_filter):
 	}
 
 
-def _run_one_term_parent_invite(term, mode, parent, allowed_statuses):
+def _run_one_term_parent_invite(term, mode, parent, allowed_statuses, scope="term"):
 	if not frappe.db.exists("Parent", parent):
 		return {
 			"parent": parent,
@@ -524,7 +542,8 @@ def _run_one_term_parent_invite(term, mode, parent, allowed_statuses):
 			"status": "failed",
 			"message": _("Parent was not found."),
 		}
-	if not _parent_has_open_enrollment_in_term(parent, term):
+	scope = _normalise_term_parent_invite_scope(scope)
+	if scope == "term" and not _parent_has_open_enrollment_in_term(parent, term):
 		return {
 			"parent": parent,
 			"sent": False,
@@ -532,6 +551,15 @@ def _run_one_term_parent_invite(term, mode, parent, allowed_statuses):
 			"skipped": True,
 			"status": "skipped",
 			"message": _("Parent no longer has an open enrollment in this term."),
+		}
+	if scope == "active_parents" and not _parent_matches_active_scope(parent):
+		return {
+			"parent": parent,
+			"sent": False,
+			"ok": True,
+			"skipped": True,
+			"status": "skipped",
+			"message": _("Parent is no longer active."),
 		}
 
 	invite_status = get_parent_portal_invite_status(parent)
@@ -548,7 +576,7 @@ def _run_one_term_parent_invite(term, mode, parent, allowed_statuses):
 			"portal_invite_status": invite_status,
 		}
 
-	result = _invite_parent_to_portal(parent, source=_term_parent_invite_source(term, mode))
+	result = _invite_parent_to_portal(parent, source=_term_parent_invite_source(term, mode, scope))
 	return {
 		"parent": result.get("parent") or parent,
 		"parent_name": result.get("parent_name") or invite_status.get("parent_name"),
@@ -584,6 +612,30 @@ def _term_parent_enrollment_groups(term):
 	return groups
 
 
+def _scope_parent_names(term, scope):
+	if scope == "term":
+		return list(_term_parent_enrollment_groups(term).keys())
+	return list(_scope_parent_docs(scope).keys())
+
+
+def _scope_parent_docs(scope):
+	if not _doctype_available("Parent"):
+		return {}
+	fields = _safe_fields("Parent", ["name", "parent_name", "email", "email_id", "contact_email", "linked_user", "mobile_number", "phone", "status"])
+	filters = {}
+	if scope == "active_parents" and "status" in fields:
+		filters["status"] = "Active"
+	order_by = "parent_name asc, name asc" if "parent_name" in fields else "name asc"
+	rows = frappe.get_all(
+		"Parent",
+		filters=filters,
+		fields=fields,
+		order_by=order_by,
+		limit_page_length=0,
+	)
+	return {row.get("name"): row for row in rows if row.get("name")}
+
+
 def _term_parent_docs(parent_names):
 	parent_names = _unique_clean_names(parent_names)
 	if not parent_names or not _doctype_available("Parent"):
@@ -598,6 +650,32 @@ def _term_parent_docs(parent_names):
 			limit_page_length=0,
 		)
 	}
+
+
+def _all_open_parent_enrollment_groups(parent_names):
+	parent_names = _unique_clean_names(parent_names)
+	if not parent_names or not _doctype_available("Enrollment"):
+		return {}
+	fields = _safe_fields("Enrollment", ["name", "parent", "student", "status", "enrollment_type", "course", "term"])
+	if "parent" not in fields:
+		return {}
+	rows = frappe.get_all(
+		"Enrollment",
+		filters={
+			"parent": ["in", parent_names],
+			"status": ["in", TERM_PARENT_INVITE_OPEN_ENROLLMENT_STATUSES],
+		},
+		fields=fields,
+		order_by="parent asc, student asc, name asc",
+		limit_page_length=0,
+	)
+	groups = {}
+	for row in rows:
+		parent = _clean_text(row.get("parent"))
+		if not parent:
+			continue
+		groups.setdefault(parent, []).append(row)
+	return groups
 
 
 def _student_label_map(student_names):
@@ -624,6 +702,15 @@ def _parent_has_open_enrollment_in_term(parent, term):
 	))
 
 
+def _parent_matches_active_scope(parent):
+	if not parent or not _doctype_available("Parent") or not frappe.db.exists("Parent", parent):
+		return False
+	fields = _safe_fields("Parent", ["status"])
+	if "status" not in fields:
+		return True
+	return frappe.db.get_value("Parent", parent, "status") == "Active"
+
+
 def _normalise_term_parent_invite_status(status):
 	status = _clean_text(status) or "never_invited"
 	if status not in TERM_PARENT_INVITE_STATUS_OPTIONS:
@@ -631,22 +718,32 @@ def _normalise_term_parent_invite_status(status):
 	return status
 
 
+def _normalise_term_parent_invite_scope(scope):
+	scope = _clean_text(scope) or "term"
+	if scope not in TERM_PARENT_INVITE_SCOPE_OPTIONS:
+		frappe.throw(_("Unsupported Parent Portal recipient group: {0}").format(scope))
+	return scope
+
+
 def _term_parent_status_matches(filter_status, row_status):
 	option = TERM_PARENT_INVITE_STATUS_OPTIONS.get(filter_status)
 	return bool(option and row_status in option["statuses"])
 
 
-def _term_parent_invite_source(term, mode):
+def _term_parent_invite_source(term, mode, scope="term"):
 	# ``source`` is a Select field. Batch context belongs to the job status,
 	# not in this fixed-value audit field.
 	return "Bulk Never Invited"
 
 
-def _term_parent_invite_initial_status(job_id, term, mode, parents):
+def _term_parent_invite_initial_status(job_id, term, mode, parents, scope="term"):
+	scope = _normalise_term_parent_invite_scope(scope)
 	return {
 		"job_id": job_id,
 		"status": "queued",
 		"term": term,
+		"scope": scope,
+		"scope_label": TERM_PARENT_INVITE_SCOPE_OPTIONS[scope]["label"],
 		"mode": mode,
 		"mode_label": TERM_PARENT_INVITE_STATUS_OPTIONS.get(mode, {}).get("label") or mode,
 		"total": len(parents or []),
