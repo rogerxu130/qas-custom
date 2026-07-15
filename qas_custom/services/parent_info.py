@@ -3,17 +3,22 @@ from __future__ import annotations
 import frappe
 
 from qas_custom.modules.billing.store_credit import get_store_credit_balance
+from qas_custom.services.support_view import get_support_view_parent
 
 
 def get_parent_info_data():
-    if frappe.session.user == "Guest":
-        frappe.throw("Login required.", frappe.PermissionError)
+    parent = get_support_view_parent()
+    if parent:
+        parent_name = parent.name
+    else:
+        if frappe.session.user == "Guest":
+            frappe.throw("Login required.", frappe.PermissionError)
 
-    parent_name = frappe.db.get_value("Parent", {"linked_user": frappe.session.user}, "name")
-    if not parent_name:
-        frappe.throw("No parent record is linked to this account.", frappe.PermissionError)
+        parent_name = frappe.db.get_value("Parent", {"linked_user": frappe.session.user}, "name")
+        if not parent_name:
+            frappe.throw("No parent record is linked to this account.", frappe.PermissionError)
 
-    parent = frappe.get_cached_doc("Parent", parent_name)
+        parent = frappe.get_cached_doc("Parent", parent_name)
 
     students = frappe.get_all(
         "Student",

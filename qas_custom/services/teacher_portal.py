@@ -13,6 +13,7 @@ from frappe.utils.file_manager import save_file
 from qas_custom.services.attendance import update_attendance_status
 from qas_custom.services.class_attendance import ATTENDANCE_DOCTYPE, get_attendance_entries
 from qas_custom.services.display_labels import get_makeup_voucher_label, get_student_display_name
+from qas_custom.services.support_view import get_support_view_teacher, get_support_view_token, reject_support_view_write
 
 
 SPECIAL_ENROLLMENT_TYPES = {"Trial", "Makeup", "Pay-as-you-go"}
@@ -164,6 +165,7 @@ def get_teacher_session_detail_data(course_session=None):
 
 
 def update_teacher_attendance_data(course_session=None, updates=None):
+    reject_support_view_write()
     teacher = _require_teacher()
     payload = _get_request_json()
     course_session = course_session or payload.get("course_session")
@@ -196,6 +198,7 @@ def update_teacher_attendance_data(course_session=None, updates=None):
 
 
 def publish_teacher_homework_data(course_session=None, title=None, description=None):
+    reject_support_view_write()
     teacher = _require_teacher()
     payload = _get_request_json()
     course_session = course_session or payload.get("course_session")
@@ -237,6 +240,7 @@ def publish_teacher_homework_data(course_session=None, title=None, description=N
 
 
 def publish_teacher_photo_post_data(course_session=None, title=None, caption=None):
+    reject_support_view_write()
     teacher = _require_teacher()
     form_payload = _get_request_form()
     course_session = course_session or form_payload.get("course_session")
@@ -327,6 +331,7 @@ def get_teacher_photo_content_data(photo_post=None, photo_idx=None):
 
 
 def publish_teacher_video_post_data(course_session=None, title=None, caption=None):
+    reject_support_view_write()
     teacher = _require_teacher()
     form_payload = _get_request_form()
     course_session = course_session or form_payload.get("course_session")
@@ -421,6 +426,9 @@ def get_teacher_video_content_data(video_post=None, download=False):
 
 
 def _require_teacher():
+    support_teacher = get_support_view_teacher()
+    if support_teacher:
+        return support_teacher
     if frappe.session.user == "Guest":
         frappe.throw(_("Login required."), frappe.PermissionError)
 
@@ -731,10 +739,13 @@ def _build_photo_post_payload(photo_post_id, title, caption, status, posted_at, 
 
 
 def _build_teacher_photo_url(photo_post_id, photo_idx):
-    return (
-        "/api/method/qas_custom.api.teacher_portal.teacher_portal_get_photo?"
-        + urlencode({"photo_post": photo_post_id, "photo_idx": cint(photo_idx)})
-    )
+	query = {"photo_post": photo_post_id, "photo_idx": cint(photo_idx)}
+	if get_support_view_token():
+		query["support_token"] = get_support_view_token()
+	return (
+		"/api/method/qas_custom.api.teacher_portal.teacher_portal_get_photo?"
+		+ urlencode(query)
+	)
 
 
 def _get_video_post_rows(course_session: str):
@@ -776,6 +787,8 @@ def _build_teacher_video_url(video_post_id, download=False):
     query = {"video_post": video_post_id}
     if download:
         query["download"] = 1
+    if get_support_view_token():
+        query["support_token"] = get_support_view_token()
     return (
         "/api/method/qas_custom.api.teacher_portal.teacher_portal_get_video?"
         + urlencode(query)

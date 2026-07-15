@@ -1,0 +1,33 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "creation": "2026-07-14 00:00:00.000000",
+ "doctype": "DocType",
+ "document_type": "Document",
+ "engine": "InnoDB",
+ "field_order": ["viewer_user", "target_type", "target_doctype", "target", "token_hash", "reason", "expires_at", "revoked", "last_used_at"],
+ "fields": [
+  {"fieldname": "viewer_user", "fieldtype": "Link", "label": "Viewer User", "options": "User", "reqd": 1},
+  {"fieldname": "target_type", "fieldtype": "Select", "label": "Target Type", "options": "Parent\nTeacher\nCampus Admin", "reqd": 1},
+  {"fieldname": "target_doctype", "fieldtype": "Data", "hidden": 1, "label": "Target DocType", "reqd": 1},
+  {"fieldname": "target", "fieldtype": "Dynamic Link", "label": "Target", "options": "target_doctype", "reqd": 1},
+  {"fieldname": "token_hash", "fieldtype": "Data", "label": "Token Hash", "read_only": 1, "reqd": 1, "unique": 1},
+  {"fieldname": "reason", "fieldtype": "Small Text", "label": "Reason"},
+  {"fieldname": "expires_at", "fieldtype": "Datetime", "label": "Expires At", "reqd": 1},
+  {"default": "0", "fieldname": "revoked", "fieldtype": "Check", "label": "Revoked"},
+  {"fieldname": "last_used_at", "fieldtype": "Datetime", "label": "Last Used At", "read_only": 1}
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-07-14 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "QAS Custom",
+ "name": "Support View Token",
+ "owner": "Administrator",
+ "permissions": [{"create": 1, "delete": 1, "email": 0, "export": 1, "print": 1, "read": 1, "report": 1, "role": "System Manager", "select": 1, "share": 0, "write": 1}],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

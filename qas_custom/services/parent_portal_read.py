@@ -14,9 +14,13 @@ from qas_custom.modules.course_schedule.queries import (
 )
 from qas_custom.modules.notifications import parent_portal_invoice_link
 from qas_custom.services.display_labels import get_makeup_voucher_label, get_student_display_name
+from qas_custom.services.support_view import get_support_view_parent
 
 
 def _require_parent():
+    support_parent = get_support_view_parent()
+    if support_parent:
+        return support_parent
     if frappe.session.user == "Guest":
         frappe.throw("Login required.", frappe.PermissionError)
 

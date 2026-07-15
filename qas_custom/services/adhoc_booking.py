@@ -14,6 +14,7 @@ from qas_custom.services.adhoc_finance import (
 	get_customer_balance_summary,
 	validate_booking_credit,
 )
+from qas_custom.services.support_view import get_support_view_parent, reject_support_view_write
 
 MINIMUM_NOTICE_HOURS = 72
 PAY_AS_YOU_GO = "Pay-as-you-go"
@@ -113,6 +114,7 @@ def preview_booking_data(student=None, course_session=None):
 
 
 def create_booking_data(student=None, course_session=None, confirmed_rules=0):
+	reject_support_view_write()
 	parent = require_parent()
 	students = get_adhoc_students_for_parent(parent.name)
 	selected_student = validate_student_filter(student, students)
@@ -171,6 +173,7 @@ def get_bookings_data(student=None, status=None, include_history=0):
 
 
 def cancel_booking_data(booking=None, reason=None):
+	reject_support_view_write()
 	if not booking:
 		frappe.throw(_("Booking is required."))
 	parent = require_parent()
@@ -235,6 +238,9 @@ def lock_due_bookings():
 
 
 def require_parent():
+	support_parent = get_support_view_parent()
+	if support_parent:
+		return support_parent
 	if frappe.session.user == "Guest":
 		frappe.throw(_("Login required."), frappe.PermissionError)
 	parent_name = frappe.db.get_value("Parent", {"linked_user": frappe.session.user}, "name")

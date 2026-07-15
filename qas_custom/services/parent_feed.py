@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 import mimetypes
+from urllib.parse import urlencode
 
 import frappe
 from frappe import _
 from frappe.utils import get_datetime, get_url
 
 from qas_custom.services.class_attendance import ATTENDANCE_DOCTYPE
+from qas_custom.services.support_view import get_support_view_parent, get_support_view_token
 
 
 def get_parent_feed_data(student=None, page=1, page_length=10):
-    if frappe.session.user == "Guest":
+    if frappe.session.user == "Guest" and not get_support_view_parent():
         frappe.throw(_("Please sign in to view the parent feed."))
 
     page = max(cint(page), 1)
@@ -314,6 +316,8 @@ def _build_photo_asset(photo_post_name, photo_row):
             "/api/method/qas_custom.api.parent_portal.parent_portal_get_feed_photo"
             f"?photo_post={photo_post_name}&photo_idx={idx}"
         )
+        if get_support_view_token():
+            proxy_url += "&" + urlencode({"support_token": get_support_view_token()})
         return proxy_url
 
     return direct_url
@@ -327,6 +331,8 @@ def _build_video_asset(row):
         "/api/method/qas_custom.api.parent_portal.parent_portal_get_feed_video"
         f"?video_post={row.name}"
     )
+    if get_support_view_token():
+        proxy_url += "&" + urlencode({"support_token": get_support_view_token()})
     download_url = f"{proxy_url}&download=1"
 
     if row.video.startswith("/private/files/"):
@@ -345,6 +351,9 @@ def _build_video_asset(row):
 
 
 def get_current_parent_name():
+    support_parent = get_support_view_parent()
+    if support_parent:
+        return support_parent.name
     return frappe.db.get_value("Parent", {"linked_user": frappe.session.user}, "name")
 
 

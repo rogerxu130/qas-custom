@@ -20,12 +20,13 @@ from qas_custom.services.inquiry import (
 	send_trial_class_reminder_core,
 )
 from qas_custom.services.teacher_directory import get_active_teacher_directory_data
+from qas_custom.services.support_view import get_support_view_campus_admin_profile, reject_support_view_write
 
 
 def get_campus_admin_me_data():
 	profile = _require_campus_admin_profile()
 	return {
-		"user": frappe.session.user,
+		"user": profile["user"],
 		"profile": profile["name"],
 		"active": True,
 		"campuses": profile["campuses"],
@@ -107,6 +108,7 @@ def get_campus_admin_inquiry_data(inquiry=None):
 
 
 def send_campus_admin_trial_class_reminder_data(inquiry=None):
+	reject_support_view_write()
 	_require_inquiry_access(inquiry)
 	return send_trial_class_reminder_core(inquiry=inquiry)
 
@@ -215,26 +217,31 @@ def get_campus_admin_contacts_data(from_date=None, to_date=None, campus=None, co
 
 
 def add_campus_admin_inquiry_note_data(inquiry=None, note=None):
+	reject_support_view_write()
 	_require_inquiry_access(inquiry)
 	return add_inquiry_note_core(inquiry, note, actor=frappe.session.user)
 
 
 def mark_campus_admin_inquiry_completed_data(inquiry=None):
+	reject_support_view_write()
 	_require_inquiry_access(inquiry)
 	return mark_inquiry_status_core(inquiry, "Completed", actor=frappe.session.user)
 
 
 def mark_campus_admin_inquiry_no_show_data(inquiry=None):
+	reject_support_view_write()
 	_require_inquiry_access(inquiry)
 	return mark_inquiry_status_core(inquiry, "No-show", actor=frappe.session.user)
 
 
 def mark_campus_admin_inquiry_cancelled_data(inquiry=None):
+	reject_support_view_write()
 	_require_inquiry_access(inquiry)
 	return mark_inquiry_status_core(inquiry, "Cancelled", actor=frappe.session.user)
 
 
 def reopen_campus_admin_inquiry_data(inquiry=None):
+	reject_support_view_write()
 	_require_inquiry_access(inquiry)
 	if not inquiry:
 		frappe.throw(_("Inquiry is required."))
@@ -265,6 +272,7 @@ def reopen_campus_admin_inquiry_data(inquiry=None):
 
 
 def mark_campus_admin_inquiry_follow_up_data(inquiry=None):
+	reject_support_view_write()
 	_require_inquiry_access(inquiry)
 	return mark_inquiry_status_core(inquiry, "Follow-up", actor=frappe.session.user)
 
@@ -283,6 +291,7 @@ def get_campus_admin_conversion_sessions_data(inquiry=None, start_date=None, cou
 
 
 def convert_campus_admin_inquiry_data(inquiry=None, course_session=None):
+	reject_support_view_write()
 	_require_inquiry_access(inquiry)
 	_validate_conversion_session_access(inquiry, course_session)
 	result = convert_inquiry_to_full_term_core(inquiry, course_session, actor=frappe.session.user)
@@ -290,11 +299,18 @@ def convert_campus_admin_inquiry_data(inquiry=None, course_session=None):
 
 
 def mark_campus_admin_inquiry_inactive_data(inquiry=None, inactive_reason=None):
+	reject_support_view_write()
 	_require_inquiry_access(inquiry)
 	return mark_inquiry_inactive_core(inquiry, inactive_reason, actor=frappe.session.user)
 
 
 def _require_campus_admin_profile():
+	support_profile = get_support_view_campus_admin_profile()
+	if support_profile:
+		campuses = [row.campus for row in support_profile.get("campuses", []) if row.campus]
+		if not campuses:
+			frappe.throw(_("Campus Admin profile has no assigned campuses."), frappe.PermissionError)
+		return {"name": support_profile.name, "user": support_profile.user, "campuses": campuses}
 	if frappe.session.user == "Guest":
 		frappe.throw(_("Login required."), frappe.PermissionError)
 	rows = frappe.get_all(
@@ -310,7 +326,7 @@ def _require_campus_admin_profile():
 	campuses = [row.campus for row in doc.get("campuses", []) if row.campus]
 	if not campuses:
 		frappe.throw(_("Campus Admin profile has no assigned campuses."), frappe.PermissionError)
-	return {"name": doc.name, "campuses": campuses}
+	return {"name": doc.name, "user": doc.user, "campuses": campuses}
 
 
 def _require_inquiry_access(inquiry):

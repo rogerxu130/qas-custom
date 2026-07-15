@@ -14,6 +14,7 @@ from qas_custom.services.parent_portal_read import (
     _get_parent_students,
     _require_parent,
 )
+from qas_custom.services.support_view import reject_support_view_write
 
 
 def get_parent_csrf_token_data():
@@ -22,6 +23,7 @@ def get_parent_csrf_token_data():
 
 
 def submit_parent_leave_request_data(student=None, course_session=None):
+    reject_support_view_write()
     payload = _get_request_payload()
     student = student or payload.get("student")
     course_session = course_session or payload.get("course_session")
@@ -52,6 +54,7 @@ def get_parent_redeemable_sessions_data(voucher_id=None, student=None):
 
 
 def redeem_parent_voucher_data(voucher_id=None, session_id=None, student=None):
+    reject_support_view_write()
     payload = _get_request_payload()
     voucher_id = voucher_id or payload.get("voucher_id")
     session_id = session_id or payload.get("session_id")
@@ -69,6 +72,7 @@ def redeem_parent_voucher_data(voucher_id=None, session_id=None, student=None):
 
 
 def cancel_parent_leave_data(voucher_id=None):
+    reject_support_view_write()
     payload = _get_request_payload()
     voucher_id = voucher_id or payload.get("voucher_id")
 

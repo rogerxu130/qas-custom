@@ -7,6 +7,7 @@ from frappe import _
 from frappe.utils import cint, escape_html, get_datetime, now_datetime
 
 from qas_custom.utils.environment import email_block_reason, outbound_email_enabled, sendmail_or_skip
+from qas_custom.services.support_view import get_support_view_parent
 
 
 ADMIN_ROLES = {"School Admin", "System Manager"}
@@ -427,6 +428,9 @@ def _require_school_admin():
 
 
 def _require_parent():
+	support_parent = get_support_view_parent()
+	if support_parent:
+		return support_parent
 	if frappe.session.user == "Guest":
 		frappe.throw(_("Login required."), frappe.PermissionError)
 	parent_name = frappe.db.get_value("Parent", {"linked_user": frappe.session.user}, "name")

@@ -65,7 +65,7 @@ def get_parent_feed(student=None, page=1, page_length=10):
 
 
 @frappe.whitelist()
-def parent_portal_get_feed_photo(photo_post=None, photo_idx=None):
+def parent_portal_get_feed_photo(photo_post=None, photo_idx=None, support_token=None):
     payload = get_parent_feed_photo_content(photo_post=photo_post, photo_idx=photo_idx)
     frappe.local.response.filename = payload["filename"]
     frappe.local.response.filecontent = payload["content"]
@@ -75,7 +75,7 @@ def parent_portal_get_feed_photo(photo_post=None, photo_idx=None):
 
 
 @frappe.whitelist()
-def parent_portal_get_feed_video(video_post=None, download=0):
+def parent_portal_get_feed_video(video_post=None, download=0, support_token=None):
     payload = get_parent_feed_video_content(video_post=video_post, download=download)
     frappe.local.response.filename = payload["filename"]
     frappe.local.response.filecontent = payload["content"]

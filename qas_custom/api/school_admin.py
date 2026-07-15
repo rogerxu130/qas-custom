@@ -7,6 +7,7 @@ from qas_custom.services.announcements import (
 	publish_school_admin_announcement_data,
 	save_school_admin_announcement_data,
 )
+from qas_custom.services.support_view import create_support_view_token, get_support_view_targets
 from qas_custom.services.school_admin_import import (
 	get_import_run_data,
 	get_import_runs_data,
@@ -130,6 +131,16 @@ def school_admin_get_me():
 @frappe.whitelist()
 def school_admin_get_csrf_token():
 	return get_school_admin_csrf_token_data()
+
+
+@frappe.whitelist()
+def school_admin_get_support_view_targets(target_type=None, query=None, limit=50):
+	return get_support_view_targets(target_type=target_type, query=query, limit=limit)
+
+
+@frappe.whitelist()
+def school_admin_create_support_view_token(target_type=None, target=None, reason=None):
+	return create_support_view_token(target_type=target_type, target=target, reason=reason)
 
 
 @frappe.whitelist()

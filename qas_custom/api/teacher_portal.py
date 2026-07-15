@@ -87,7 +87,7 @@ def teacher_portal_publish_video_post(course_session=None, title=None, caption=N
 
 
 @frappe.whitelist()
-def teacher_portal_get_photo(photo_post=None, photo_idx=None):
+def teacher_portal_get_photo(photo_post=None, photo_idx=None, support_token=None):
     payload = get_teacher_photo_content_data(photo_post=photo_post, photo_idx=photo_idx)
     frappe.local.response.filename = payload["filename"]
     frappe.local.response.filecontent = payload["content"]
@@ -97,7 +97,7 @@ def teacher_portal_get_photo(photo_post=None, photo_idx=None):
 
 
 @frappe.whitelist()
-def teacher_portal_get_video(video_post=None, download=0):
+def teacher_portal_get_video(video_post=None, download=0, support_token=None):
     payload = get_teacher_video_content_data(video_post=video_post, download=download)
     frappe.local.response.filename = payload["filename"]
     frappe.local.response.filecontent = payload["content"]
