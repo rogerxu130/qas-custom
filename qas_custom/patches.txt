@@ -3,6 +3,7 @@ qas_custom.patches.v2026_06_29_remove_term_rollover_doctypes
 qas_custom.patches.v2026_06_18_remove_enrollment_course_session
 qas_custom.patches.v2026_06_27_relax_payg_enrollment_fields
 qas_custom.patches.v2026_07_02_ensure_qas_roles
+qas_custom.patches.v2026_07_16_ensure_campus_admin_role
 # Patches added in this section will be executed before doctypes are migrated
 # Read docs to understand patches: https://frappeframework.com/docs/v14/user/en/database-migrations
 

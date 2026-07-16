@@ -1,8 +1,12 @@
 from types import SimpleNamespace
 from unittest import TestCase
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
+from frappe import ValidationError
+
+from qas_custom.patches.v2026_07_16_ensure_campus_admin_role import execute as ensure_campus_admin_role
 from qas_custom.services.campus_admin_accounts import (
+	_ensure_campus_admin_role,
 	_get_campus_admin_invite_status,
 	_normalise_campuses,
 	_normalise_email,
@@ -17,6 +21,44 @@ from qas_custom.services.password_reset import (
 
 
 class TestCampusAdminAccounts(TestCase):
+	@patch("qas_custom.patches.v2026_07_16_ensure_campus_admin_role._ensure_role")
+	@patch("qas_custom.patches.v2026_07_16_ensure_campus_admin_role._role_doctype_exists", return_value=True)
+	def test_patch_ensures_campus_admin_role(self, _mock_role_doctype, mock_ensure_role):
+		ensure_campus_admin_role()
+
+		mock_ensure_role.assert_called_once_with("Campus Admin", desk_access=0)
+
+	@patch("qas_custom.patches.v2026_07_16_ensure_campus_admin_role._ensure_role")
+	@patch("qas_custom.patches.v2026_07_16_ensure_campus_admin_role._role_doctype_exists", return_value=False)
+	def test_patch_skips_when_role_doctype_is_unavailable(self, _mock_role_doctype, mock_ensure_role):
+		ensure_campus_admin_role()
+
+		mock_ensure_role.assert_not_called()
+
+	@patch("qas_custom.services.campus_admin_accounts.frappe.throw", side_effect=ValidationError)
+	@patch("qas_custom.services.campus_admin_accounts._campus_admin_role_exists", return_value=False)
+	@patch("qas_custom.services.campus_admin_accounts._", side_effect=lambda value: value)
+	def test_role_assignment_fails_clearly_before_user_save(self, _mock_translate, _mock_role_exists, mock_throw):
+		user_doc = MagicMock()
+
+		with self.assertRaises(ValidationError):
+			_ensure_campus_admin_role(user_doc)
+
+		self.assertIn("run site migration", mock_throw.call_args.args[0])
+		user_doc.append.assert_not_called()
+		user_doc.save.assert_not_called()
+
+	@patch("qas_custom.services.campus_admin_accounts._campus_admin_role_exists", return_value=True)
+	def test_role_assignment_adds_campus_admin_role(self, _mock_role_exists):
+		user_doc = MagicMock()
+		user_doc.get.return_value = []
+		user_doc.flags = SimpleNamespace(ignore_permissions=False)
+
+		_ensure_campus_admin_role(user_doc)
+
+		user_doc.append.assert_called_once_with("roles", {"role": "Campus Admin"})
+		user_doc.save.assert_called_once_with(ignore_permissions=True)
+
 	def test_normalises_email_and_unique_campuses(self):
 		self.assertEqual(_normalise_email(" Admin@Example.COM "), "admin@example.com")
 		self.assertEqual(_normalise_campuses('["Indooroopilly", "Indooroopilly", "Springfield"]'), ["Indooroopilly", "Springfield"])

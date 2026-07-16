@@ -45,6 +45,7 @@ def save_campus_admin_account_data(profile=None, payload=None):
 		frappe.throw(_("Campus Admin email is required."))
 	validate_email_address(email, throw=True)
 	_validate_campuses(campuses)
+	_require_campus_admin_role()
 
 	if profile:
 		profile_doc = frappe.get_doc("Campus Admin Profile", profile)
@@ -255,12 +256,25 @@ def _update_user_name(user_doc, display_name):
 
 
 def _ensure_campus_admin_role(user_doc):
+	_require_campus_admin_role()
 	roles = {row.role for row in user_doc.get("roles", []) if row.get("role")}
 	if CAMPUS_ADMIN_ROLE in roles:
 		return
 	user_doc.append("roles", {"role": CAMPUS_ADMIN_ROLE})
 	user_doc.flags.ignore_permissions = True
 	user_doc.save(ignore_permissions=True)
+
+
+def _require_campus_admin_role():
+	if _campus_admin_role_exists():
+		return
+	frappe.throw(
+		_("Campus Admin role is not installed. Update QAS Custom and run site migration before saving Campus Admin accounts.")
+	)
+
+
+def _campus_admin_role_exists():
+	return bool(frappe.db.exists("Role", CAMPUS_ADMIN_ROLE))
 
 
 def _validate_campuses(campuses):
