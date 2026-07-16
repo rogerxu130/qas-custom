@@ -207,6 +207,83 @@ def send_parent_invoice_notification_job(
 	)
 
 
+def send_parent_invoice_cancellation_notification(invoice_doc, *, reason=None, notification_log=None):
+	recipient = _invoice_recipient(invoice_doc)
+	subject = _("Queensland Art School - Invoice cancelled {0}").format(invoice_doc.name)
+	message = _invoice_cancellation_email_message(invoice_doc, reason=reason)
+	log_name = notification_log or _create_notification_log(
+		event_key=f"invoice_cancelled:{invoice_doc.name}",
+		recipient=recipient,
+		subject=subject,
+		message=message,
+		document_type="Sales Invoice",
+		document_name=invoice_doc.name,
+	)
+	if not recipient.get("email"):
+		_mark_notification_failed(log_name, "No parent email found.")
+		return {"sent": False, "reason": "No parent email found.", "notification_log": log_name}
+	try:
+		mail_result = sendmail_or_skip(
+			action="parent_invoice_cancellation_notification",
+			recipients=[recipient["email"]],
+			subject=subject,
+			message=message,
+			reference_doctype="Sales Invoice",
+			reference_name=invoice_doc.name,
+			delayed=False,
+		)
+		if mail_result and mail_result.get("skipped"):
+			reason_text = mail_result.get("reason") or email_block_reason()
+			_mark_notification_failed(log_name, reason_text)
+			return {"sent": False, "skipped": True, "recipient": recipient["email"], "reason": reason_text, "notification_log": log_name}
+		_mark_notification_sent(log_name)
+		return {"sent": True, "recipient": recipient["email"], "notification_log": log_name}
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), f"QAS invoice cancellation notification failed: {invoice_doc.name}")
+		_mark_notification_failed(log_name, "Email send failed.")
+		_add_invoice_comment(invoice_doc.name, _("Invoice cancellation notification failed for {0}.").format(recipient["email"]))
+		return {"sent": False, "recipient": recipient["email"], "reason": "Email send failed.", "notification_log": log_name}
+
+
+def enqueue_parent_invoice_cancellation_notification(invoice_doc, *, reason=None):
+	recipient = _invoice_recipient(invoice_doc)
+	subject = _("Queensland Art School - Invoice cancelled {0}").format(invoice_doc.name)
+	message = _invoice_cancellation_email_message(invoice_doc, reason=reason)
+	log_name = _create_notification_log(
+		event_key=f"invoice_cancelled:{invoice_doc.name}",
+		recipient=recipient,
+		subject=subject,
+		message=message,
+		document_type="Sales Invoice",
+		document_name=invoice_doc.name,
+	)
+	if not recipient.get("email"):
+		_mark_notification_failed(log_name, "No parent email found.")
+		return {"sent": False, "queued": False, "reason": "No parent email found.", "notification_log": log_name}
+	_mark_notification_queued(log_name)
+	if not outbound_email_enabled():
+		_mark_notification_failed(log_name, email_block_reason())
+		return {"sent": False, "queued": False, "skipped": True, "recipient": recipient["email"], "reason": email_block_reason(), "notification_log": log_name}
+	frappe.enqueue(
+		"qas_custom.modules.notifications.commands.send_parent_invoice_cancellation_notification_job",
+		queue="short",
+		timeout=300,
+		enqueue_after_commit=True,
+		invoice=invoice_doc.name,
+		reason=reason,
+		notification_log=log_name,
+	)
+	return {"sent": False, "queued": True, "recipient": recipient["email"], "notification_log": log_name}
+
+
+def send_parent_invoice_cancellation_notification_job(invoice: str, *, reason=None, notification_log=None):
+	return send_parent_invoice_cancellation_notification(
+		frappe.get_doc("Sales Invoice", invoice),
+		reason=reason,
+		notification_log=notification_log,
+	)
+
+
 def maybe_send_parent_invoice_paid_receipt(invoice_doc, *, payment_entry=None, source: str | None = None):
 	doc, amounts, result = _prepare_paid_receipt(invoice_doc)
 	if result:
@@ -1533,6 +1610,40 @@ def _invoice_email_message(invoice_doc, event, store_credit_applied, payable_amo
 		payment_line=payment_line,
 		bank_details=bank_details,
 		portal_action=_invoice_email_portal_action(context),
+	)
+
+
+def _invoice_cancellation_email_message(invoice_doc, reason=None):
+	context = build_parent_invoice_context(invoice_doc, include_portal_link=False)
+	reason_html = ""
+	if reason:
+		reason_html = """<p style="margin:0 0 18px;font-size:15px;line-height:1.5;color:#334155;"><strong>Reason:</strong> {0}</p>""".format(
+			escape_html(reason)
+		)
+	return """
+		<div style="margin:0;padding:0;background:#f8fafc;font-family:Arial,sans-serif;color:#172033;">
+			<div style="max-width:640px;margin:0 auto;padding:24px;">
+				<div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;">
+					<div style="padding:22px 24px;background:#172033;color:#ffffff;">
+						<p style="margin:0 0 6px;font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:#f7b6a4;">{school_name}</p>
+						<h1 style="margin:0;font-size:24px;line-height:1.3;">Invoice cancelled</h1>
+						{school_identity}
+					</div>
+					<div style="padding:24px;">
+						<p style="margin:0 0 14px;font-size:16px;line-height:1.5;">{greeting}</p>
+						<p style="margin:0 0 18px;font-size:16px;line-height:1.5;">Invoice <strong>{invoice}</strong> has been cancelled.</p>
+						{reason_html}
+						<p style="margin:0;font-size:15px;line-height:1.5;color:#475569;">If you have any questions, please contact {school_name}.</p>
+					</div>
+				</div>
+			</div>
+		</div>
+	""".format(
+		school_name=escape_html(context.get("school_name") or "Queensland Art School"),
+		school_identity=_school_identity_email_html(context),
+		greeting=_invoice_email_greeting(context),
+		invoice=escape_html(invoice_doc.name),
+		reason_html=reason_html,
 	)
 
 

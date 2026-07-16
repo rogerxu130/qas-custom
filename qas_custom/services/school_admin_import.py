@@ -839,7 +839,7 @@ def _run_enrollment_change_operation(row):
 	return result
 
 
-def _apply_enrollment_change_invoice_action(invoice_action, reason, allow_empty_reason=False):
+def _apply_enrollment_change_invoice_action(invoice_action, reason, allow_empty_reason=False, send_notifications=True):
 	action = invoice_action.get("action")
 	invoice = invoice_action.get("invoice")
 	if not invoice or action in ("none", "already_cancelled"):
@@ -869,13 +869,19 @@ def _apply_enrollment_change_invoice_action(invoice_action, reason, allow_empty_
 			"count_key": "invoices_cancelled",
 		}
 	if action == "cancel_submitted":
-		cancel_school_admin_invoice_data(invoice=invoice, reason=reason, allow_empty_reason=allow_empty_reason)
+		cancellation = cancel_school_admin_invoice_data(
+			invoice=invoice,
+			reason=reason,
+			allow_empty_reason=allow_empty_reason,
+			send_notifications=send_notifications,
+		)
 		return {
 			"action": action,
 			"message": _("Submitted invoice was cancelled with the existing School Admin invoice cancellation flow."),
 			"invoice_status": "Cancelled",
 			"manual_action_required": False,
 			"count_key": "invoices_cancelled",
+			"cancellation_notification": cancellation.get("cancellation_notification"),
 		}
 	return {
 		"action": action,
@@ -989,6 +995,7 @@ def _build_invoice_enrollment_reset_operation(payload=None):
 		"mode": _normalize_spaces(payload.get("mode") or INVOICE_ENROLLMENT_RESET_MODE_CHANGE).lower(),
 		"preview_fingerprint": _normalize_spaces(payload.get("preview_fingerprint")),
 		"confirm_multiple_withdrawal": cint(payload.get("confirm_multiple_withdrawal")),
+		"send_notifications": cint(payload.get("send_notifications", 1)),
 		"errors": [],
 	}
 	if not row["invoice"]:
@@ -1042,6 +1049,7 @@ def _invoice_enrollment_reset_preview_snapshot(row, preview):
 		"invoice": row.get("invoice"),
 		"reason": row.get("reason"),
 		"effective_date": str(row.get("effective_date") or ""),
+		"send_notifications": cint(row.get("send_notifications", 1)),
 		"invoice_status": preview.get("invoice_status"),
 		"invoice_action": preview.get("invoice_action"),
 		"student_count": (preview.get("input") or {}).get("student_count", 0),
@@ -1086,6 +1094,7 @@ def _preview_invoice_enrollment_reset(operation):
 		"manual_action_count": 0,
 		"action": row.get("mode") or INVOICE_ENROLLMENT_RESET_MODE_CHANGE,
 		"action_label": _invoice_enrollment_reset_action_label(row.get("mode")),
+		"send_notifications": cint(row.get("send_notifications", 1)),
 	}
 	for error in row.get("errors") or []:
 		result["errors"].append({"row": row.get("row_number"), **error})
@@ -1222,7 +1231,12 @@ def _run_invoice_enrollment_reset_operation(row, preview):
 	target_status = _invoice_enrollment_reset_target_status(mode)
 	pending_count_key = _invoice_enrollment_reset_pending_count_key(mode)
 	completed_count_key = _invoice_enrollment_reset_completed_count_key(mode)
-	invoice_result = _apply_enrollment_change_invoice_action(invoice_action, reason, allow_empty_reason=True)
+	invoice_result = _apply_enrollment_change_invoice_action(
+		invoice_action,
+		reason,
+		allow_empty_reason=True,
+		send_notifications=row.get("send_notifications", 1),
+	)
 	result = {
 		"invoice": row.get("invoice"),
 		"invoice_status": invoice_result.get("invoice_status") or preview.get("invoice_status"),
@@ -1232,6 +1246,8 @@ def _run_invoice_enrollment_reset_operation(row, preview):
 		"counts": defaultdict(int, preview.get("counts") or {}),
 		"warnings": list(preview.get("warnings") or []),
 	}
+	if invoice_result.get("cancellation_notification") is not None:
+		result["cancellation_notification"] = invoice_result.get("cancellation_notification")
 	_mark_invoice_action_completed_in_counts(result["counts"], invoice_action.get("action"))
 	if invoice_result.get("count_key"):
 		result["counts"][invoice_result.get("count_key")] += 1

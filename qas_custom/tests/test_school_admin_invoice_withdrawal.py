@@ -7,6 +7,7 @@ from qas_custom.services.school_admin_import import (
 	HISTORICAL_ATTENDANCE_BLOCKING_STATUSES,
 	INVOICE_ENROLLMENT_RESET_MODE_WITHDRAW,
 	_build_invoice_enrollment_reset_operation,
+	_apply_enrollment_change_invoice_action,
 	_count_historical_enrollment_attendance,
 	_invoice_enrollment_reset_preview_snapshot,
 	_invoice_enrollment_reset_requires_multiple_withdrawal_confirmation,
@@ -42,6 +43,36 @@ class TestSchoolAdminInvoiceWithdrawal(TestCase):
 
 		self.assertEqual(operation["row"]["reason"], "")
 		self.assertEqual(operation["row"]["errors"], [])
+		self.assertEqual(operation["row"]["send_notifications"], 1)
+
+	def test_reset_can_skip_parent_notification(self):
+		fake_frappe = SimpleNamespace(db=SimpleNamespace(exists=Mock(return_value=True)))
+		with patch("qas_custom.services.school_admin_import.frappe", fake_frappe):
+			operation = _build_invoice_enrollment_reset_operation({
+				"invoice": "SINV-0001",
+				"mode": INVOICE_ENROLLMENT_RESET_MODE_WITHDRAW,
+				"send_notifications": 0,
+				"effective_date": "2026-07-16",
+			})
+
+		self.assertEqual(operation["row"]["send_notifications"], 0)
+
+	@patch("qas_custom.services.school_admin_import.cancel_school_admin_invoice_data")
+	@patch("qas_custom.services.school_admin_import._", side_effect=lambda value: value)
+	def test_submitted_invoice_action_passes_notification_choice(self, _mock_translate, mock_cancel):
+		_apply_enrollment_change_invoice_action(
+			{"action": "cancel_submitted", "invoice": "SINV-0001"},
+			"Family withdrew",
+			allow_empty_reason=True,
+			send_notifications=0,
+		)
+
+		mock_cancel.assert_called_once_with(
+			invoice="SINV-0001",
+			reason="Family withdrew",
+			allow_empty_reason=True,
+			send_notifications=0,
+		)
 
 	def test_one_student_with_multiple_enrollments_does_not_require_confirmation(self):
 		row = {"mode": INVOICE_ENROLLMENT_RESET_MODE_WITHDRAW, "confirm_multiple_withdrawal": 0}
@@ -77,4 +108,12 @@ class TestSchoolAdminInvoiceWithdrawal(TestCase):
 		self.assertNotEqual(
 			_invoice_enrollment_reset_preview_snapshot(row, preview),
 			_invoice_enrollment_reset_preview_snapshot(row, changed_preview),
+		)
+
+	def test_preview_snapshot_changes_when_notification_choice_changes(self):
+		preview = {"input": {"student_count": 0}, "parents": []}
+
+		self.assertNotEqual(
+			_invoice_enrollment_reset_preview_snapshot({"send_notifications": 1}, preview),
+			_invoice_enrollment_reset_preview_snapshot({"send_notifications": 0}, preview),
 		)

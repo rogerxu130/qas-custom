@@ -51,6 +51,7 @@ from qas_custom.modules.makeup.commands import (
     submit_parent_leave_request_core,
 )
 from qas_custom.modules.notifications import (
+	enqueue_parent_invoice_cancellation_notification,
 	enqueue_parent_invoice_paid_receipt,
 	enqueue_parent_invoice_notification,
 	get_invoice_notification_summary,
@@ -1386,11 +1387,12 @@ def mark_school_admin_invoice_paid_data(invoice=None, payload=None):
 	return payload
 
 
-def cancel_school_admin_invoice_data(invoice=None, reason=None, allow_empty_reason=False):
+def cancel_school_admin_invoice_data(invoice=None, reason=None, allow_empty_reason=False, send_notifications=True):
 	_require_school_admin()
 	if not invoice:
 		frappe.throw(_("Invoice is required."))
 	reason = (reason or "").strip()
+	send_notifications = cint(send_notifications)
 	if not reason and not allow_empty_reason:
 		frappe.throw(_("Cancellation reason is required."))
 
@@ -1398,7 +1400,9 @@ def cancel_school_admin_invoice_data(invoice=None, reason=None, allow_empty_reas
 	if cint(doc.docstatus) == 2:
 		_clear_deleted_invoice_enrollment_snapshot(doc, action="cancelled")
 		frappe.db.commit()
-		return _build_invoice_payload(doc)
+		payload = _build_invoice_payload(doc)
+		payload["cancellation_notification"] = _skipped_invoice_notification("Invoice was already cancelled; no duplicate notification was sent.")
+		return payload
 	if cint(doc.docstatus) == 1:
 		if not payment_mutations_enabled():
 			frappe.throw(_(payment_block_reason()))
@@ -1414,15 +1418,31 @@ def cancel_school_admin_invoice_data(invoice=None, reason=None, allow_empty_reas
 			comment = _("{0} Reason: {1}").format(comment, reason)
 		_add_comment("Sales Invoice", doc.name, comment)
 		frappe.db.commit()
+		doc = frappe.get_doc("Sales Invoice", invoice)
+		if send_notifications:
+			try:
+				notification = enqueue_parent_invoice_cancellation_notification(doc, reason=reason)
+				_add_comment("Sales Invoice", doc.name, "Parent cancellation notification queued by School Admin.")
+			except Exception:
+				frappe.log_error(frappe.get_traceback(), f"QAS invoice cancellation notification queue failed: {doc.name}")
+				_add_comment("Sales Invoice", doc.name, "Parent cancellation notification could not be queued; invoice cancellation remains completed.")
+				notification = {"sent": False, "queued": False, "reason": "Cancellation completed, but the parent notification could not be queued."}
+		else:
+			_add_comment("Sales Invoice", doc.name, "Parent cancellation notification skipped by School Admin.")
+			notification = _skipped_invoice_notification("Parent cancellation notification was skipped by School Admin.")
+		frappe.db.commit()
 		payload = _build_invoice_payload(frappe.get_doc("Sales Invoice", invoice))
 		payload["cancellation_store_credit_amount"] = paid_credit_amount if paid_credit else 0
 		payload["cancellation_store_credit"] = paid_credit.name if paid_credit else None
+		payload["cancellation_notification"] = notification
 		return payload
 
 	_mark_draft_invoice_cancelled(doc, reason)
 	_clear_deleted_invoice_enrollment_snapshot(doc, action="cancelled")
 	frappe.db.commit()
-	return _build_invoice_payload(frappe.get_doc("Sales Invoice", invoice))
+	payload = _build_invoice_payload(frappe.get_doc("Sales Invoice", invoice))
+	payload["cancellation_notification"] = _skipped_invoice_notification("Draft invoices do not send cancellation notifications.")
+	return payload
 
 
 def reopen_school_admin_unpaid_invoice_data(invoice=None, reason=None):

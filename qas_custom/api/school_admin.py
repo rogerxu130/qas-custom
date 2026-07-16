@@ -545,8 +545,8 @@ def school_admin_mark_invoice_paid(invoice=None, payload=None):
 
 
 @frappe.whitelist()
-def school_admin_cancel_invoice(invoice=None, reason=None):
-	return cancel_school_admin_invoice_data(invoice=invoice, reason=reason)
+def school_admin_cancel_invoice(invoice=None, reason=None, send_notifications=True):
+	return cancel_school_admin_invoice_data(invoice=invoice, reason=reason, send_notifications=send_notifications)
 
 
 @frappe.whitelist()

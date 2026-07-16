@@ -1,4 +1,5 @@
 from .commands import (
+	enqueue_parent_invoice_cancellation_notification,
 	enqueue_parent_invoice_paid_receipt,
 	enqueue_parent_invoice_notification,
 	maybe_send_parent_invoice_paid_receipt,
@@ -11,6 +12,7 @@ from .commands import (
 
 __all__ = [
 	"enqueue_parent_invoice_paid_receipt",
+	"enqueue_parent_invoice_cancellation_notification",
 	"enqueue_parent_invoice_notification",
 	"maybe_send_parent_invoice_paid_receipt",
 	"get_invoice_notification_summary",
