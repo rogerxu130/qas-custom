@@ -3,14 +3,33 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from qas_custom.services.school_admin_import import (
+	ATTENDANCE_DOCTYPE,
+	HISTORICAL_ATTENDANCE_BLOCKING_STATUSES,
 	INVOICE_ENROLLMENT_RESET_MODE_WITHDRAW,
 	_build_invoice_enrollment_reset_operation,
+	_count_historical_enrollment_attendance,
 	_invoice_enrollment_reset_preview_snapshot,
 	_invoice_enrollment_reset_requires_multiple_withdrawal_confirmation,
 )
 
 
 class TestSchoolAdminInvoiceWithdrawal(TestCase):
+	@patch("qas_custom.services.school_admin_import._doctype_available", return_value=True)
+	def test_only_present_and_late_attendance_block_reset(self, _mock_doctype_available):
+		fake_db = SimpleNamespace(count=Mock(return_value=2))
+		fake_frappe = SimpleNamespace(db=fake_db)
+
+		with patch("qas_custom.services.school_admin_import.frappe", fake_frappe):
+			count = _count_historical_enrollment_attendance("ENR-0001")
+
+		self.assertEqual(set(HISTORICAL_ATTENDANCE_BLOCKING_STATUSES), {"Present", "Late"})
+		self.assertEqual(count, 2)
+		fake_db.count.assert_called_once_with(ATTENDANCE_DOCTYPE, {
+			"source_doctype": "Enrollment",
+			"source_document": "ENR-0001",
+			"status": ["in", ["Present", "Late"]],
+		})
+
 	def test_reset_reason_is_optional(self):
 		fake_frappe = SimpleNamespace(db=SimpleNamespace(exists=Mock(return_value=True)))
 		with patch("qas_custom.services.school_admin_import.frappe", fake_frappe):

@@ -54,7 +54,7 @@ ENROLLMENT_CHANGE_ACTIONS = {
 	ENROLLMENT_CHANGE_REISSUE_INVOICE_ONLY,
 }
 CANCELLABLE_ATTENDANCE_STATUSES = ["To be started", "Scheduled"]
-HISTORICAL_ATTENDANCE_EXCLUDED_STATUSES = CANCELLABLE_ATTENDANCE_STATUSES + ["Cancelled"]
+HISTORICAL_ATTENDANCE_BLOCKING_STATUSES = ["Present", "Late"]
 OPERATION_REPORT_DOCTYPE = "QAS Operation Report"
 OPERATION_REPORT_SOURCE_SCHOOL_ADMIN_IMPORT = "School Admin Import"
 OPERATION_REPORT_SOURCE_SCHOOL_ADMIN_ENROLLMENT_CHANGE = "School Admin Enrollment Change"
@@ -1445,7 +1445,7 @@ def _count_historical_enrollment_attendance(enrollment):
 	return frappe.db.count(ATTENDANCE_DOCTYPE, {
 		"source_doctype": "Enrollment",
 		"source_document": enrollment,
-		"status": ["not in", HISTORICAL_ATTENDANCE_EXCLUDED_STATUSES],
+		"status": ["in", HISTORICAL_ATTENDANCE_BLOCKING_STATUSES],
 	})
 
 
