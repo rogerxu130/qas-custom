@@ -26,15 +26,23 @@ class Inquiry(Document):
 
 		old_doc = self.get_doc_before_save()
 		old_course_session = old_doc.get("course_session") if old_doc else None
-		if (
-			self.inquiry_type == "Trial Lesson"
-			and self.course_session
-			and self.student
-			and old_course_session != self.course_session
-		):
+		old_status = old_doc.get("status") if old_doc else None
+		if self.inquiry_type != "Trial Lesson" or not self.student:
+			return
+		if self.status == "Cancelled" and old_status != "Cancelled" and old_course_session:
 			enqueue_session_staff_notification(
-				"trial_added",
+				"trial_cancelled",
+				course_session=old_course_session,
+				student=self.student,
+				source_doctype="Inquiry",
+				source_document=self.name,
+			)
+		elif self.course_session and old_course_session != self.course_session:
+			event = "trial_rescheduled" if old_course_session else "trial_added"
+			enqueue_session_staff_notification(
+				event,
 				course_session=self.course_session,
+				previous_course_session=old_course_session,
 				student=self.student,
 				source_doctype="Inquiry",
 				source_document=self.name,

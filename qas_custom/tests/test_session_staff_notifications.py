@@ -1,6 +1,8 @@
+from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import patch
 
+from qas_custom.qas_custom.doctype.inquiry.inquiry import Inquiry
 from qas_custom.modules.notifications.commands import (
 	TRIAL_ADDED_NOTIFICATION_DISABLED_REASON,
 	_session_staff_notification_email_message,
@@ -12,6 +14,49 @@ from qas_custom.modules.notifications.commands import (
 
 
 class TestSessionStaffNotifications(TestCase):
+	@patch("qas_custom.modules.notifications.commands.enqueue_session_staff_notification")
+	def test_inquiry_cancel_queues_original_session_notification(self, mock_enqueue):
+		doc = SimpleNamespace(
+			inquiry_type="Trial Lesson",
+			student="STU-001",
+			status="Cancelled",
+			course_session="CS-001",
+			name="INQ-001",
+			get_doc_before_save=lambda: {"status": "Booked", "course_session": "CS-001"},
+		)
+
+		Inquiry.on_update(doc)
+
+		mock_enqueue.assert_called_once_with(
+			"trial_cancelled",
+			course_session="CS-001",
+			student="STU-001",
+			source_doctype="Inquiry",
+			source_document="INQ-001",
+		)
+
+	@patch("qas_custom.modules.notifications.commands.enqueue_session_staff_notification")
+	def test_inquiry_reschedule_queues_one_combined_notification(self, mock_enqueue):
+		doc = SimpleNamespace(
+			inquiry_type="Trial Lesson",
+			student="STU-001",
+			status="Rescheduled",
+			course_session="CS-002",
+			name="INQ-001",
+			get_doc_before_save=lambda: {"status": "Booked", "course_session": "CS-001"},
+		)
+
+		Inquiry.on_update(doc)
+
+		mock_enqueue.assert_called_once_with(
+			"trial_rescheduled",
+			course_session="CS-002",
+			previous_course_session="CS-001",
+			student="STU-001",
+			source_doctype="Inquiry",
+			source_document="INQ-001",
+		)
+
 	@patch("qas_custom.modules.notifications.commands.frappe.conf", {})
 	def test_trial_added_notification_is_enabled_by_default(self):
 		self.assertTrue(session_staff_notification_enabled("trial_added"))
@@ -20,6 +65,8 @@ class TestSessionStaffNotifications(TestCase):
 	@patch("qas_custom.modules.notifications.commands.frappe.conf", {"qas_trial_added_notification_enabled": 0})
 	def test_trial_added_notification_can_be_disabled_without_affecting_other_events(self):
 		self.assertFalse(session_staff_notification_enabled("trial_added"))
+		self.assertFalse(session_staff_notification_enabled("trial_cancelled"))
+		self.assertFalse(session_staff_notification_enabled("trial_rescheduled"))
 		self.assertTrue(session_staff_notification_enabled("leave_requested"))
 		self.assertTrue(session_staff_notification_enabled("makeup_booked"))
 
@@ -61,6 +108,14 @@ class TestSessionStaffNotifications(TestCase):
 		leave_key = _session_staff_notification_event_key("leave_requested", "CS-001", "STU-001", "LR-001")
 		makeup_key = _session_staff_notification_event_key("makeup_booked", "CS-001", "STU-001", "MV-001")
 		trial_key = _session_staff_notification_event_key("trial_added", "CS-001", "STU-001", "INQ-001")
+		cancel_key = _session_staff_notification_event_key("trial_cancelled", "CS-001", "STU-001", "INQ-001")
+		reschedule_key = _session_staff_notification_event_key(
+			"trial_rescheduled",
+			"CS-002",
+			"STU-001",
+			"INQ-001",
+			previous_course_session="CS-001",
+		)
 
 		self.assertEqual(
 			makeup_key,
@@ -69,8 +124,10 @@ class TestSessionStaffNotifications(TestCase):
 		self.assertTrue(leave_key.startswith("session_staff:leave:"))
 		self.assertTrue(makeup_key.startswith("session_staff:makeup:"))
 		self.assertTrue(trial_key.startswith("session_staff:trial:"))
-		self.assertEqual(len({leave_key, makeup_key, trial_key}), 3)
-		self.assertLessEqual(max(len(leave_key), len(makeup_key), len(trial_key)), 140)
+		self.assertTrue(cancel_key.startswith("session_staff:trial-cancel:"))
+		self.assertTrue(reschedule_key.startswith("session_staff:trial-reschedule:"))
+		self.assertEqual(len({leave_key, makeup_key, trial_key, cancel_key, reschedule_key}), 5)
+		self.assertLessEqual(max(len(leave_key), len(makeup_key), len(trial_key), len(cancel_key), len(reschedule_key)), 140)
 
 		long_makeup_key = _session_staff_notification_event_key(
 			"makeup_booked",
@@ -80,7 +137,8 @@ class TestSessionStaffNotifications(TestCase):
 		)
 		self.assertLessEqual(len(long_makeup_key), 140)
 
-	def test_trial_email_includes_session_details_and_escapes_student_name(self):
+	@patch("qas_custom.modules.notifications.commands._", side_effect=lambda value: value)
+	def test_trial_email_includes_session_details_and_escapes_student_name(self, _mock_translate):
 		message = _session_staff_notification_email_message(
 			{
 				"event": "trial_added",
@@ -102,6 +160,99 @@ class TestSessionStaffNotifications(TestCase):
 		self.assertIn("Room 1", message)
 		self.assertIn("Tuesday 14 July 2026", message)
 		self.assertIn("16:00 - 17:30", message)
+
+	@patch("qas_custom.modules.notifications.commands._", side_effect=lambda value: value)
+	def test_trial_reschedule_email_includes_original_and_new_sessions(self, _mock_translate):
+		message = _session_staff_notification_email_message(
+			{
+				"event": "trial_rescheduled",
+				"school_name": "Queensland Art School",
+				"student_name": "Ava & Ben",
+				"course": "Painting",
+				"campus": "Springfield",
+				"classroom": "Room 2",
+				"day_of_week": "Friday",
+				"date_display": "17 July 2026",
+				"start_time": "17:00",
+				"end_time": "18:30",
+				"previous": {
+					"course": "Anime Art",
+					"campus": "Indooroopilly",
+					"classroom": "Room 1",
+					"day_of_week": "Thursday",
+					"date_display": "16 July 2026",
+					"start_time": "16:00",
+					"end_time": "17:30",
+				},
+			}
+		)
+
+		self.assertIn("Ava &amp; Ben", message)
+		self.assertIn("Original", message)
+		self.assertIn("New", message)
+		self.assertIn("Anime Art", message)
+		self.assertIn("Painting", message)
+		self.assertIn("16 July 2026", message)
+		self.assertIn("17 July 2026", message)
+
+	@patch("qas_custom.modules.notifications.commands._session_staff_course_context")
+	def test_trial_reschedule_context_deduplicates_same_teacher(self, mock_course_context):
+		from qas_custom.modules.notifications.commands import _session_staff_notification_context
+
+		mock_course_context.side_effect = [
+			{
+				"student_name": "Ava",
+				"date_display": "17 July 2026",
+				"teacher_recipients": ["teacher@example.com"],
+				"school_email": "school@example.com",
+			},
+			{
+				"student_name": "Ava",
+				"date_display": "16 July 2026",
+				"teacher_recipients": ["teacher@example.com"],
+				"school_email": "school@example.com",
+			},
+		]
+
+		context = _session_staff_notification_context(
+			"trial_rescheduled",
+			"CS-002",
+			"STU-001",
+			previous_course_session="CS-001",
+		)
+
+		self.assertEqual(context["recipients"], ["teacher@example.com"])
+		self.assertEqual(context["missing_recipients"], [])
+
+	@patch("qas_custom.modules.notifications.commands._session_staff_course_context")
+	def test_trial_reschedule_context_includes_both_teachers_without_school(self, mock_course_context):
+		from qas_custom.modules.notifications.commands import _session_staff_notification_context
+
+		mock_course_context.side_effect = [
+			{
+				"student_name": "Ava",
+				"date_display": "17 July 2026",
+				"teacher_recipients": ["new@example.com"],
+				"school_email": "school@example.com",
+			},
+			{
+				"student_name": "Ava",
+				"date_display": "16 July 2026",
+				"teacher_recipients": ["original@example.com"],
+				"school_email": "school@example.com",
+			},
+		]
+
+		context = _session_staff_notification_context(
+			"trial_rescheduled",
+			"CS-002",
+			"STU-001",
+			previous_course_session="CS-001",
+		)
+
+		self.assertEqual(context["recipients"], ["original@example.com", "new@example.com"])
+		self.assertNotIn("school@example.com", context["recipients"])
+		self.assertEqual(context["missing_recipients"], [])
 
 	@patch("qas_custom.modules.notifications.commands.frappe.enqueue")
 	@patch("qas_custom.modules.notifications.commands.outbound_email_enabled", return_value=True)
