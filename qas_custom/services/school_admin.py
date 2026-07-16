@@ -66,6 +66,7 @@ from qas_custom.services.inquiry import (
 	add_inquiry_note_core,
 	build_inquiry_detail,
 	build_inquiry_summary,
+	create_inquiry_core,
 	mark_inquiry_status_core,
 	reschedule_inquiry_core,
 	send_trial_class_reminder_core,
@@ -1003,6 +1004,99 @@ def get_school_admin_inquiry_data(inquiry=None):
 	if not inquiry:
 		frappe.throw(_("Inquiry is required."))
 	return build_inquiry_detail(inquiry)
+
+
+def create_school_admin_trial_inquiry_data(payload=None):
+	_require_school_admin()
+	payload = _get_payload(payload)
+	family_mode = str(payload.get("family_mode") or "").strip().lower()
+	if family_mode not in {"existing", "new"}:
+		frappe.throw(_("Family mode must be existing or new."))
+
+	course_session = str(payload.get("course_session") or "").strip()
+	if not course_session:
+		frappe.throw(_("Course Session is required."))
+
+	if family_mode == "existing":
+		family_payload = _manual_trial_existing_family_payload(payload)
+	else:
+		family_payload = _manual_trial_new_family_payload(payload)
+
+	trial_payload = {
+		**family_payload,
+		"inquiry_type": "Trial Lesson",
+		"course_session": course_session,
+		"require_bookable_session": True,
+		"prevent_duplicate_student_session": True,
+	}
+	detail = create_inquiry_core(
+		trial_payload,
+		source="Manual",
+		actor=frappe.session.user,
+		commit=False,
+	)
+	inquiry = (detail.get("inquiry") or {}).get("id")
+	note = str(payload.get("note") or "").strip()
+	if note:
+		detail = add_inquiry_note_core(inquiry, note, actor=frappe.session.user, commit=False)
+	frappe.db.commit()
+	return detail
+
+
+def _manual_trial_existing_family_payload(payload):
+	parent = str(payload.get("parent") or "").strip()
+	student = str(payload.get("student") or "").strip()
+	if not parent or not student:
+		frappe.throw(_("Parent and Student are required for an existing family."))
+	if not frappe.db.exists("Parent", parent):
+		frappe.throw(_("Parent was not found."))
+	if not frappe.db.exists("Student", student):
+		frappe.throw(_("Student was not found."))
+
+	parent_field = _student_parent_field()
+	student_parent = frappe.db.get_value("Student", student, parent_field) if parent_field else None
+	if student_parent != parent:
+		frappe.throw(_("The selected Student does not belong to the selected Parent."))
+
+	parent_doc = frappe.get_doc("Parent", parent)
+	linked_user = parent_doc.get("linked_user")
+	contact_email = frappe.db.get_value("User", linked_user, "email") if linked_user else None
+	contact_phone = parent_doc.get("mobile_number") or parent_doc.get("phone")
+	return {
+		"parent": parent,
+		"student": student,
+		"contact_name": parent_doc.get("parent_name") or parent_doc.name,
+		"contact_email": contact_email,
+		"contact_phone": contact_phone,
+	}
+
+
+def _manual_trial_new_family_payload(payload):
+	parent_name = str(payload.get("parent_name") or "").strip()
+	contact_email = str(payload.get("contact_email") or payload.get("email") or "").strip().lower()
+	student_name = str(payload.get("student_name") or "").strip()
+	date_of_birth = payload.get("date_of_birth")
+	missing = []
+	if not parent_name:
+		missing.append(_("Parent name"))
+	if not contact_email:
+		missing.append(_("Parent email"))
+	if not student_name:
+		missing.append(_("Student name"))
+	if not date_of_birth:
+		missing.append(_("Student date of birth"))
+	if missing:
+		frappe.throw(_("Required fields are missing: {0}.").format(", ".join(missing)))
+	validate_email_address(contact_email, throw=True)
+	return {
+		"parent_name": parent_name,
+		"contact_name": parent_name,
+		"contact_email": contact_email,
+		"contact_phone": str(payload.get("contact_phone") or payload.get("phone") or "").strip(),
+		"student_name": student_name,
+		"date_of_birth": date_of_birth,
+		"student_status": "Inactive",
+	}
 
 
 def add_school_admin_inquiry_note_data(inquiry=None, note=None):

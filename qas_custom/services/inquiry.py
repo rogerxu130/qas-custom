@@ -192,7 +192,7 @@ def add_inquiry_note_data(inquiry=None, note=None):
 	return add_inquiry_note_core(inquiry, note, actor=frappe.session.user)
 
 
-def create_inquiry_core(payload: dict, source="Manual", actor=None):
+def create_inquiry_core(payload: dict, source="Manual", actor=None, commit=True):
 	payload = _normalize_inquiry_payload(payload)
 	inquiry_type = payload.get("inquiry_type")
 	if inquiry_type not in INQUIRY_TYPES:
@@ -210,6 +210,8 @@ def create_inquiry_core(payload: dict, source="Manual", actor=None):
 
 	if inquiry_type == "Trial Lesson" and session_context and not student:
 		frappe.throw(_("A linked student is required before booking a trial lesson into a course session."))
+	if inquiry_type == "Trial Lesson" and session_context and payload.get("prevent_duplicate_student_session"):
+		_assert_no_duplicate_trial_inquiry(student, session_context["session"].get("name"))
 
 	current_date, current_time = _get_requested_trial_datetime(payload)
 	inquiry_doc = frappe.new_doc("Inquiry")
@@ -281,7 +283,8 @@ def create_inquiry_core(payload: dict, source="Manual", actor=None):
 	if review_reason:
 		_send_needs_review_alert(inquiry_doc, review_reason)
 
-	frappe.db.commit()
+	if commit:
+		frappe.db.commit()
 	return build_inquiry_detail(inquiry_doc.name)
 
 
@@ -352,7 +355,7 @@ def mark_inquiry_status_core(inquiry: str | None, status: str, actor=None):
 	return build_inquiry_detail(inquiry_doc.name)
 
 
-def add_inquiry_note_core(inquiry: str | None, note: str | None, actor=None):
+def add_inquiry_note_core(inquiry: str | None, note: str | None, actor=None, commit=True):
 	if not inquiry:
 		frappe.throw(_("Inquiry is required."))
 	note = (note or "").strip()
@@ -370,8 +373,26 @@ def add_inquiry_note_core(inquiry: str | None, note: str | None, actor=None):
 		note_doc.note_type = "Manual"
 	note_doc.flags.ignore_permissions = True
 	note_doc.insert()
-	frappe.db.commit()
+	if commit:
+		frappe.db.commit()
 	return build_inquiry_detail(inquiry_doc.name)
+
+
+def _assert_no_duplicate_trial_inquiry(student: str | None, course_session: str | None):
+	if not student or not course_session:
+		return
+	existing = frappe.db.get_value(
+		"Inquiry",
+		{
+			"inquiry_type": "Trial Lesson",
+			"student": student,
+			"course_session": course_session,
+			"status": ["not in", ["Cancelled", "Inactive"]],
+		},
+		"name",
+	)
+	if existing:
+		frappe.throw(_("Trial Inquiry {0} already exists for this student and Course Session.").format(existing))
 
 
 def build_inquiry_detail(inquiry: str):
@@ -712,6 +733,8 @@ def _get_or_create_user_for_parent(email: str | None, parent_name: str | None):
 	user_doc.enabled = 1
 	user_doc.user_type = "Website User"
 	user_doc.send_welcome_email = 0
+	if frappe.db.exists("Role", "Parent"):
+		user_doc.append("roles", {"role": "Parent"})
 	user_doc.flags.ignore_permissions = True
 	user_doc.insert()
 	return user_doc.name

@@ -113,6 +113,7 @@ from qas_custom.services.school_admin import (
 	submit_school_admin_invoice_data,
 	transfer_school_admin_enrollment_data,
 	copy_school_admin_term_data,
+	create_school_admin_trial_inquiry_data,
 	update_school_admin_attendance_data,
 	update_school_admin_course_session_teacher_data,
 	update_school_admin_draft_invoice_data,
@@ -425,6 +426,11 @@ def school_admin_get_inquiries(status=None, inquiry_type=None, confirmation_stat
 @frappe.whitelist()
 def school_admin_get_inquiry(inquiry=None):
 	return get_school_admin_inquiry_data(inquiry=inquiry)
+
+
+@frappe.whitelist()
+def school_admin_create_trial_inquiry(payload=None):
+	return create_school_admin_trial_inquiry_data(payload=payload)
 
 
 @frappe.whitelist()
