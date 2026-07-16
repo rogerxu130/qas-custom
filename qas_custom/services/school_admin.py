@@ -69,6 +69,7 @@ from qas_custom.services.inquiry import (
 	mark_inquiry_status_core,
 	reschedule_inquiry_core,
 	send_trial_class_reminder_core,
+	update_inquiry_confirmation_core,
 )
 from qas_custom.services.teacher_revenue_share import get_teacher_revenue_share_session_rows
 from qas_custom.services.teacher_directory import get_active_teacher_directory_data
@@ -915,6 +916,7 @@ def adjust_school_admin_store_credit_data(parent=None, customer=None, amount=0, 
 def get_school_admin_inquiries_data(
 	status=None,
 	inquiry_type=None,
+	confirmation_status=None,
 	campus=None,
 	from_date=None,
 	to_date=None,
@@ -935,6 +937,11 @@ def get_school_admin_inquiries_data(
 		filters["status"] = "Needs Review"
 	if inquiry_type:
 		filters["inquiry_type"] = inquiry_type
+	confirmation_status = str(confirmation_status or "").strip()
+	if confirmation_status:
+		if confirmation_status not in {"Pending", "Customer Confirmed"}:
+			frappe.throw(_("Unsupported customer confirmation filter."))
+		filters["confirmation_status"] = confirmation_status
 	if campus:
 		filters["campus"] = campus
 	if from_date and to_date:
@@ -963,6 +970,7 @@ def get_school_admin_inquiries_data(
 			"name",
 			"inquiry_type",
 			"status",
+			"confirmation_status",
 			"campus",
 			"parent",
 			"student",
@@ -1004,6 +1012,20 @@ def add_school_admin_inquiry_note_data(inquiry=None, note=None):
 def send_school_admin_trial_class_reminder_data(inquiry=None):
 	_require_school_admin()
 	return send_trial_class_reminder_core(inquiry=inquiry)
+
+
+def update_school_admin_inquiry_confirmation_data(
+	inquiry=None,
+	confirmation_status=None,
+	expected_course_session=None,
+):
+	_require_school_admin()
+	return update_inquiry_confirmation_core(
+		inquiry=inquiry,
+		confirmation_status=confirmation_status,
+		expected_course_session=expected_course_session,
+		actor=frappe.session.user,
+	)
 
 
 

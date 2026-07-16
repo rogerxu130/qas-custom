@@ -25,6 +25,8 @@ from qas_custom.utils.environment import sendmail_or_skip
 INQUIRY_TYPES = {"Trial Lesson", "School Visit"}
 ADMIN_ROLES = {"System Manager", "School Admin"}
 NEEDS_REVIEW_STATUS = "Needs Review"
+CUSTOMER_CONFIRMATION_VALUES = {"Pending", "Customer Confirmed"}
+CUSTOMER_CONFIRMATION_MUTABLE_STATUSES = {"Booked", "Rescheduled"}
 DAY_ABBREVIATIONS = {
 	"mon": "Monday",
 	"monday": "Monday",
@@ -84,6 +86,49 @@ def send_trial_class_reminder_core(inquiry=None):
 		frappe.throw(_("Inquiry is required."))
 	inquiry_doc = frappe.get_doc("Inquiry", inquiry)
 	send_trial_class_reminder(inquiry_doc)
+	frappe.db.commit()
+	return build_inquiry_detail(inquiry_doc.name)
+
+
+def update_inquiry_confirmation_core(
+	inquiry=None,
+	confirmation_status=None,
+	expected_course_session=None,
+	actor=None,
+):
+	if not inquiry:
+		frappe.throw(_("Inquiry is required."))
+	confirmation_status = (confirmation_status or "").strip()
+	if confirmation_status not in CUSTOMER_CONFIRMATION_VALUES:
+		frappe.throw(_("Customer confirmation must be Pending or Customer Confirmed."))
+
+	inquiry_doc = frappe.get_doc("Inquiry", inquiry)
+	if inquiry_doc.inquiry_type != "Trial Lesson":
+		frappe.throw(_("Customer confirmation is available only for Trial Lesson inquiries."))
+	if inquiry_doc.status not in CUSTOMER_CONFIRMATION_MUTABLE_STATUSES:
+		frappe.throw(_("Customer confirmation can be changed only for Booked or Rescheduled inquiries."))
+
+	current_course_session = (inquiry_doc.get("course_session") or "").strip()
+	expected_course_session = (expected_course_session or "").strip()
+	if current_course_session != expected_course_session:
+		frappe.throw(_("The trial session changed after this Inquiry was opened. Refresh and try again."))
+	if confirmation_status == "Customer Confirmed" and not current_course_session:
+		frappe.throw(_("A Course Session is required before the customer can be marked confirmed."))
+
+	previous_status = (inquiry_doc.get("confirmation_status") or "Not Required").strip()
+	if previous_status == confirmation_status:
+		return build_inquiry_detail(inquiry_doc.name)
+
+	inquiry_doc.confirmation_status = confirmation_status
+	inquiry_doc.save(ignore_permissions=True)
+	inquiry_doc.add_comment(
+		"Info",
+		_("Customer confirmation changed from {0} to {1} by {2}.").format(
+			previous_status,
+			confirmation_status,
+			actor or frappe.session.user,
+		),
+	)
 	frappe.db.commit()
 	return build_inquiry_detail(inquiry_doc.name)
 
@@ -1062,7 +1107,7 @@ def sync_inquiry_course_session(inquiry_doc):
 	inquiry_doc.review_reason = None
 	if not inquiry_doc.status or inquiry_doc.status in {"New", NEEDS_REVIEW_STATUS, "Follow-up"}:
 		inquiry_doc.status = "Booked"
-	if not inquiry_doc.confirmation_status or inquiry_doc.confirmation_status == "Not Required":
+	if _should_reset_inquiry_confirmation(inquiry_doc, old_course_session):
 		inquiry_doc.confirmation_status = "Pending"
 	if not inquiry_doc.is_new():
 		ensure_inquiry_attendance_entry(inquiry_doc)
@@ -1070,6 +1115,14 @@ def sync_inquiry_course_session(inquiry_doc):
 
 def ensure_inquiry_attendance_entry(inquiry_doc):
 	return ensure_trial_inquiry_attendance_entry(inquiry_doc)
+
+
+def _should_reset_inquiry_confirmation(inquiry_doc, old_course_session):
+	return (
+		old_course_session != inquiry_doc.course_session
+		or not inquiry_doc.confirmation_status
+		or inquiry_doc.confirmation_status == "Not Required"
+	)
 
 
 def _apply_session_to_inquiry(inquiry_doc, session_context):

@@ -118,6 +118,7 @@ from qas_custom.services.school_admin import (
 	update_school_admin_draft_invoice_data,
 	update_school_admin_enrollment_data,
 	update_school_admin_inquiry_status_data,
+	update_school_admin_inquiry_confirmation_data,
 	update_school_admin_invoice_settings_data,
 	update_school_admin_voucher_data,
 	update_school_admin_weekly_timeslot_data,
@@ -407,10 +408,11 @@ def school_admin_adjust_store_credit(parent=None, customer=None, amount=0, reaso
 
 
 @frappe.whitelist()
-def school_admin_get_inquiries(status=None, inquiry_type=None, campus=None, from_date=None, to_date=None, queue=None, query=None, limit=80):
+def school_admin_get_inquiries(status=None, inquiry_type=None, confirmation_status=None, campus=None, from_date=None, to_date=None, queue=None, query=None, limit=80):
 	return get_school_admin_inquiries_data(
 		status=status,
 		inquiry_type=inquiry_type,
+		confirmation_status=confirmation_status,
 		campus=campus,
 		from_date=from_date,
 		to_date=to_date,
@@ -438,6 +440,15 @@ def school_admin_send_trial_class_reminder(inquiry=None):
 @frappe.whitelist()
 def school_admin_update_inquiry_status(inquiry=None, status=None):
 	return update_school_admin_inquiry_status_data(inquiry=inquiry, status=status)
+
+
+@frappe.whitelist()
+def school_admin_update_inquiry_confirmation(inquiry=None, confirmation_status=None, expected_course_session=None):
+	return update_school_admin_inquiry_confirmation_data(
+		inquiry=inquiry,
+		confirmation_status=confirmation_status,
+		expected_course_session=expected_course_session,
+	)
 
 
 @frappe.whitelist()
