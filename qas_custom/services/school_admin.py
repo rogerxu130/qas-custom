@@ -1269,12 +1269,12 @@ def mark_school_admin_invoice_paid_data(invoice=None, payload=None):
 	return payload
 
 
-def cancel_school_admin_invoice_data(invoice=None, reason=None):
+def cancel_school_admin_invoice_data(invoice=None, reason=None, allow_empty_reason=False):
 	_require_school_admin()
 	if not invoice:
 		frappe.throw(_("Invoice is required."))
 	reason = (reason or "").strip()
-	if not reason:
+	if not reason and not allow_empty_reason:
 		frappe.throw(_("Cancellation reason is required."))
 
 	doc = frappe.get_doc("Sales Invoice", invoice)
@@ -1292,7 +1292,10 @@ def cancel_school_admin_invoice_data(invoice=None, reason=None):
 		paid_credit = _create_invoice_cancellation_store_credit(doc, paid_credit_amount, reason)
 		_cancel_submitted_invoice_as_admin(doc.name)
 		_clear_deleted_invoice_enrollment_snapshot(frappe.get_doc("Sales Invoice", doc.name), action="cancelled")
-		_add_comment("Sales Invoice", doc.name, f"Invoice cancelled by School Admin. Reason: {reason}")
+		comment = _("Invoice cancelled by School Admin.")
+		if reason:
+			comment = _("{0} Reason: {1}").format(comment, reason)
+		_add_comment("Sales Invoice", doc.name, comment)
 		frappe.db.commit()
 		payload = _build_invoice_payload(frappe.get_doc("Sales Invoice", invoice))
 		payload["cancellation_store_credit_amount"] = paid_credit_amount if paid_credit else 0
@@ -4698,7 +4701,10 @@ def _sync_invoice_student_summary(invoice):
 
 
 def _mark_draft_invoice_cancelled(doc, reason):
-	_add_comment("Sales Invoice", doc.name, f"Draft invoice marked cancelled by School Admin. Reason: {reason}")
+	comment = _("Draft invoice marked cancelled by School Admin.")
+	if reason:
+		comment = _("{0} Reason: {1}").format(comment, reason)
+	_add_comment("Sales Invoice", doc.name, comment)
 	if _has_field("Sales Invoice", "status"):
 		frappe.db.set_value("Sales Invoice", doc.name, "status", "Cancelled", update_modified=True)
 	if _has_field("Sales Invoice", "cancel_reason"):
@@ -4795,6 +4801,9 @@ def _create_invoice_cancellation_store_credit(doc, amount, reason):
 	amount = flt(amount)
 	if amount <= 0 or not doc.get("customer"):
 		return None
+	notes = _("Moved paid amount to store credit because invoice {0} was cancelled.").format(doc.name)
+	if reason:
+		notes = _("{0} Reason: {1}").format(notes, reason)
 	credit = create_store_credit_entry(
 		parent=doc.get("parent"),
 		customer=doc.get("customer"),
@@ -4809,7 +4818,7 @@ def _create_invoice_cancellation_store_credit(doc, amount, reason):
 		source_doctype="Sales Invoice",
 		source_document=doc.name,
 		reason="Paid invoice cancellation",
-		notes=_("Moved paid amount to store credit because invoice {0} was cancelled. Reason: {1}").format(doc.name, reason),
+		notes=notes,
 	)
 	_add_comment("Sales Invoice", doc.name, _("Paid amount moved to store credit: {0}.").format(amount))
 	return credit
@@ -4911,6 +4920,9 @@ def _reverse_invoice_store_credit_application(doc, reason):
 	customer = doc.get("customer")
 	if not customer:
 		return None
+	notes = _("Reversed store credit because invoice {0} was cancelled.").format(doc.name)
+	if reason:
+		notes = _("{0} Reason: {1}").format(notes, reason)
 	return create_store_credit_entry(
 		parent=parent,
 		customer=customer,
@@ -4924,7 +4936,7 @@ def _reverse_invoice_store_credit_application(doc, reason):
 		source_doctype="Sales Invoice",
 		source_document=doc.name,
 		reason="Invoice cancellation",
-		notes=_("Reversed store credit because invoice {0} was cancelled. Reason: {1}").format(doc.name, reason),
+		notes=notes,
 	)
 
 
