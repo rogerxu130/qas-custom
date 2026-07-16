@@ -2,13 +2,61 @@ from unittest import TestCase
 from unittest.mock import patch
 
 from qas_custom.modules.notifications.commands import (
+	TRIAL_ADDED_NOTIFICATION_DISABLED_REASON,
 	_session_staff_notification_email_message,
 	_session_staff_notification_event_key,
 	enqueue_session_staff_notification,
+	send_session_staff_notification_job,
+	session_staff_notification_enabled,
 )
 
 
 class TestSessionStaffNotifications(TestCase):
+	@patch("qas_custom.modules.notifications.commands.frappe.conf", {})
+	def test_trial_added_notification_is_enabled_by_default(self):
+		self.assertTrue(session_staff_notification_enabled("trial_added"))
+		self.assertTrue(session_staff_notification_enabled("leave_requested"))
+
+	@patch("qas_custom.modules.notifications.commands.frappe.conf", {"qas_trial_added_notification_enabled": 0})
+	def test_trial_added_notification_can_be_disabled_without_affecting_other_events(self):
+		self.assertFalse(session_staff_notification_enabled("trial_added"))
+		self.assertTrue(session_staff_notification_enabled("leave_requested"))
+		self.assertTrue(session_staff_notification_enabled("makeup_booked"))
+
+	@patch("qas_custom.modules.notifications.commands._session_staff_notification_context")
+	@patch("qas_custom.modules.notifications.commands.frappe.conf", {"qas_trial_added_notification_enabled": 0})
+	def test_disabled_trial_added_notification_is_not_queued(self, mock_context):
+		result = enqueue_session_staff_notification(
+			"trial_added",
+			course_session="CS-001",
+			student="STU-001",
+			source_doctype="Inquiry",
+			source_document="INQ-001",
+		)
+
+		self.assertFalse(result["queued"])
+		self.assertTrue(result["skipped"])
+		self.assertEqual(result["reason"], TRIAL_ADDED_NOTIFICATION_DISABLED_REASON)
+		mock_context.assert_not_called()
+
+	@patch("qas_custom.modules.notifications.commands.send_session_staff_notification")
+	@patch("qas_custom.modules.notifications.commands._mark_notification_failed")
+	@patch("qas_custom.modules.notifications.commands.frappe.conf", {"qas_trial_added_notification_enabled": 0})
+	def test_already_queued_trial_added_job_rechecks_the_switch(self, mock_mark_failed, mock_send):
+		result = send_session_staff_notification_job(
+			"trial_added",
+			course_session="CS-001",
+			student="STU-001",
+			source_doctype="Inquiry",
+			source_document="INQ-001",
+			notification_log="NOTIF-001",
+		)
+
+		self.assertFalse(result["sent"])
+		self.assertTrue(result["skipped"])
+		mock_mark_failed.assert_called_once_with("NOTIF-001", TRIAL_ADDED_NOTIFICATION_DISABLED_REASON)
+		mock_send.assert_not_called()
+
 	def test_event_keys_are_stable_short_and_specific_to_the_source_event(self):
 		leave_key = _session_staff_notification_event_key("leave_requested", "CS-001", "STU-001", "LR-001")
 		makeup_key = _session_staff_notification_event_key("makeup_booked", "CS-001", "STU-001", "MV-001")

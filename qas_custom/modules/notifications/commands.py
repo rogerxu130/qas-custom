@@ -17,6 +17,8 @@ from qas_custom.utils.environment import email_block_reason, outbound_email_enab
 TRIAL_CLASS_REMINDER_EVENT_PREFIX = "trial_class_reminder:"
 SESSION_STAFF_NOTIFICATION_EVENT_PREFIX = "session_staff:"
 SESSION_STAFF_NOTIFICATION_EVENTS = {"leave_requested", "makeup_booked", "trial_added"}
+TRIAL_ADDED_NOTIFICATION_CONFIG = "qas_trial_added_notification_enabled"
+TRIAL_ADDED_NOTIFICATION_DISABLED_REASON = "Trial-added teacher notifications are disabled by site config."
 
 
 def send_parent_invoice_notification(
@@ -494,6 +496,13 @@ def enqueue_session_staff_notification(
 	source_document: str,
 ):
 	"""Queue one idempotent operational email after the source transaction commits."""
+	if not session_staff_notification_enabled(event):
+		return {
+			"queued": False,
+			"skipped": True,
+			"reason": TRIAL_ADDED_NOTIFICATION_DISABLED_REASON,
+		}
+
 	try:
 		context = _session_staff_notification_context(event, course_session, student)
 	except Exception:
@@ -563,6 +572,14 @@ def send_session_staff_notification_job(
 	source_document: str,
 	notification_log: str | None = None,
 ):
+	if not session_staff_notification_enabled(notification_event):
+		_mark_notification_failed(notification_log, TRIAL_ADDED_NOTIFICATION_DISABLED_REASON)
+		return {
+			"sent": False,
+			"skipped": True,
+			"reason": TRIAL_ADDED_NOTIFICATION_DISABLED_REASON,
+			"notification_log": notification_log,
+		}
 	if not _session_staff_notification_is_current(notification_event, course_session, student, source_document):
 		reason = "The source event is no longer eligible for notification."
 		_mark_notification_failed(notification_log, reason)
@@ -586,6 +603,15 @@ def send_session_staff_notification(
 	source_document: str,
 	notification_log: str | None = None,
 ):
+	if not session_staff_notification_enabled(event):
+		_mark_notification_failed(notification_log, TRIAL_ADDED_NOTIFICATION_DISABLED_REASON)
+		return {
+			"sent": False,
+			"skipped": True,
+			"reason": TRIAL_ADDED_NOTIFICATION_DISABLED_REASON,
+			"notification_log": notification_log,
+		}
+
 	try:
 		context = _session_staff_notification_context(event, course_session, student)
 		subject = _session_staff_notification_subject(context)
@@ -623,6 +649,16 @@ def send_session_staff_notification(
 		frappe.log_error(frappe.get_traceback(), "QAS session staff notification failed: {0}".format(source_document))
 		_mark_notification_failed(notification_log, "Email send failed.")
 		return {"sent": False, "reason": "Email send failed.", "notification_log": notification_log}
+
+
+def session_staff_notification_enabled(event: str) -> bool:
+	"""Allow trial-added teacher mail to be paused without affecting other operational mail."""
+	if event != "trial_added":
+		return True
+	configured = frappe.conf.get(TRIAL_ADDED_NOTIFICATION_CONFIG)
+	if configured is None:
+		return True
+	return cint(configured) == 1
 
 
 def _session_staff_notification_context(event: str, course_session: str, student: str):
