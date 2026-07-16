@@ -38,7 +38,7 @@ def enqueue_teacher_next_day_schedule_reminders(target_date):
 
 		teacher_info = _get_teacher_info(teacher)
 		subject = _teacher_schedule_subject(target_date)
-		message = _teacher_schedule_message(target_date, sessions)
+		message = _teacher_schedule_message(target_date, sessions, teacher_name=teacher_info.get("teacher_name"))
 		log_name = _create_notification_log(event_key, teacher_info, subject, message)
 		recipient = _teacher_email(teacher_info)
 		if not recipient:
@@ -82,7 +82,7 @@ def send_teacher_next_day_schedule_reminder_job(teacher, target_date, notificati
 			action="teacher_next_day_schedule_reminder",
 			recipients=[recipient],
 			subject=_teacher_schedule_subject(target_date),
-			message=_teacher_schedule_message(target_date, sessions),
+			message=_teacher_schedule_message(target_date, sessions, teacher_name=teacher_info.get("teacher_name")),
 			reference_doctype="Teacher",
 			reference_name=teacher,
 			delayed=False,
@@ -178,33 +178,113 @@ def _teacher_email(teacher):
 
 
 def _teacher_schedule_subject(target_date):
-	return _("Your classes for {0}").format(formatdate(target_date, "EEEE d MMMM yyyy"))
+	return _("Tomorrow's classes — {0}").format(formatdate(target_date, "EEEE d MMMM yyyy"))
 
 
-def _teacher_schedule_message(target_date, sessions):
-	rows = []
+def _teacher_schedule_message(target_date, sessions, teacher_name=None):
+	date_display = escape_html(formatdate(target_date, "EEEE d MMMM yyyy"))
+	teacher_name = str(teacher_name or "").strip()
+	greeting = _("Hi {0},").format(escape_html(teacher_name)) if teacher_name else _("Hello,")
+	class_count = len(sessions)
+	class_summary = (
+		_("You have {0} class.").format(class_count)
+		if class_count == 1
+		else _("You have {0} classes.").format(class_count)
+	)
+	cards = []
 	for session in sessions:
-		rows.append(
-			"<tr><td>{0}</td><td>{1}</td><td>{2} - {3}</td><td>{4}</td><td>{5}</td><td>{6}</td></tr>".format(
-				escape_html(session["course"]),
-				escape_html(session["campus"]),
-				escape_html(session["start_time"]),
-				escape_html(session["end_time"]),
-				session["student_count"],
-				session["trial_count"],
-				session["makeup_count"],
+		student_count = int(session.get("student_count") or 0)
+		trial_count = int(session.get("trial_count") or 0)
+		makeup_count = int(session.get("makeup_count") or 0)
+		badges = []
+		if trial_count > 0:
+			badges.append(
+				'<span style="display:inline-block;margin:4px 6px 0 0;padding:5px 9px;border-radius:999px;'
+				'background-color:#fff0eb;color:#b94328;font-size:12px;font-weight:700;line-height:1.2;">{0}</span>'.format(
+					escape_html(_count_label(trial_count, _("Trial"), _("Trials")))
+				)
+			)
+		if makeup_count > 0:
+			badges.append(
+				'<span style="display:inline-block;margin:4px 6px 0 0;padding:5px 9px;border-radius:999px;'
+				'background-color:#eaf3ff;color:#185ca8;font-size:12px;font-weight:700;line-height:1.2;">{0}</span>'.format(
+					escape_html(_count_label(makeup_count, _("Makeup"), _("Makeups")))
+				)
+			)
+		cards.append(
+			"""
+			<tr>
+				<td style="padding:0 0 14px;">
+					<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;border:1px solid #e2e8f0;border-radius:12px;background-color:#ffffff;">
+						<tr>
+							<td style="padding:18px 20px;">
+								<div style="margin:0 0 6px;color:#e75f43;font-size:19px;font-weight:700;line-height:1.3;">{start_time} – {end_time}</div>
+								<div style="margin:0 0 5px;color:#172033;font-size:18px;font-weight:700;line-height:1.35;">{course}</div>
+								<div style="margin:0 0 12px;color:#64748b;font-size:14px;line-height:1.4;">{campus}</div>
+								<div style="color:#334155;font-size:14px;line-height:1.4;">
+									<span style="display:inline-block;margin:4px 10px 0 0;font-weight:700;">{students}</span>{badges}
+								</div>
+							</td>
+						</tr>
+					</table>
+				</td>
+			</tr>
+			""".format(
+				start_time=escape_html(str(session.get("start_time") or "-")),
+				end_time=escape_html(str(session.get("end_time") or "-")),
+				course=escape_html(str(session.get("course") or _("Class"))),
+				campus=escape_html(str(session.get("campus") or _("Not assigned"))),
+				students=escape_html(_count_label(student_count, _("student"), _("students"))),
+				badges="".join(badges),
 			)
 		)
-	return "".join(
-		[
-			"<p>{0}</p>".format(_("Hello,")),
-			"<p>{0}</p>".format(_("Here are your classes for {0}.").format(escape_html(formatdate(target_date, "EEEE d MMMM yyyy")))),
-			"<table><thead><tr><th>{0}</th><th>{1}</th><th>{2}</th><th>{3}</th><th>{4}</th><th>{5}</th></tr></thead><tbody>{6}</tbody></table>".format(
-				_("Course"), _("Campus"), _("Time"), _("Students"), _("Trial"), _("Makeup"), "".join(rows)
-			),
-			"<p>{0}</p>".format(_("Queensland Art School")),
-		]
+
+	return """
+		<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;margin:0;padding:0;background-color:#f4f6f8;font-family:Arial,Helvetica,sans-serif;color:#172033;">
+			<tr>
+				<td align="center" style="padding:24px 12px;">
+					<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:640px;border-collapse:separate;background-color:#ffffff;border-radius:16px;overflow:hidden;">
+						<tr>
+							<td style="height:6px;background-color:#ef6a4c;font-size:0;line-height:0;">&nbsp;</td>
+						</tr>
+						<tr>
+							<td style="padding:24px 26px;background-color:#172033;">
+								<div style="margin:0 0 6px;color:#f7b6a4;font-size:12px;font-weight:700;letter-spacing:1px;line-height:1.3;text-transform:uppercase;">{school_name}</div>
+								<div style="margin:0 0 6px;color:#ffffff;font-size:26px;font-weight:700;line-height:1.25;">{title}</div>
+								<div style="color:#dbe4f0;font-size:15px;line-height:1.4;">{date_display}</div>
+							</td>
+						</tr>
+						<tr>
+							<td style="padding:24px 26px 10px;">
+								<div style="margin:0 0 8px;color:#172033;font-size:18px;font-weight:700;line-height:1.4;">{greeting}</div>
+								<div style="margin:0;color:#64748b;font-size:15px;line-height:1.55;">{intro} {class_summary}</div>
+							</td>
+						</tr>
+						<tr>
+							<td style="padding:12px 26px 10px;">
+								<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;">{cards}</table>
+							</td>
+						</tr>
+						<tr>
+							<td style="padding:16px 26px 24px;border-top:1px solid #e2e8f0;color:#94a3b8;font-size:12px;line-height:1.5;text-align:center;">{school_name}</td>
+						</tr>
+					</table>
+				</td>
+			</tr>
+		</table>
+	""".format(
+		school_name=escape_html(_("Queensland Art School")),
+		title=escape_html(_("Tomorrow's Classes")),
+		date_display=date_display,
+		greeting=greeting,
+		intro=escape_html(_("Here is your schedule for tomorrow.")),
+		class_summary=escape_html(class_summary),
+		cards="".join(cards),
 	)
+
+
+def _count_label(count, singular, plural):
+	return _("{0} {1}").format(count, singular if count == 1 else plural)
 
 
 def _display_time(value):

@@ -5,6 +5,7 @@ from qas_custom.modules.attendance import commands as attendance_commands
 from qas_custom.modules.notifications.teacher_schedule_reminders import (
 	_build_schedule_groups,
 	_teacher_schedule_message,
+	_teacher_schedule_subject,
 	teacher_next_day_schedule_event_key,
 )
 
@@ -33,17 +34,61 @@ class TestTeacherScheduleReminders(TestCase):
 
 	@patch("qas_custom.modules.notifications.teacher_schedule_reminders._", side_effect=lambda value: value)
 	@patch("qas_custom.modules.notifications.teacher_schedule_reminders.formatdate", return_value="Thursday 16 July 2026")
-	def test_message_has_counts_but_never_student_names(self, _mock_formatdate, _mock_translate):
+	def test_message_uses_qas_cards_and_never_student_names(self, _mock_formatdate, _mock_translate):
 		message = _teacher_schedule_message(
 			"2026-07-16",
 			[{"course": "Anime Art", "campus": "Indooroopilly", "start_time": "16:00", "end_time": "17:30", "student_count": 3, "trial_count": 1, "makeup_count": 1}],
+			teacher_name="Suki",
 		)
 
-		self.assertIn("Students", message)
-		self.assertIn("Trial", message)
-		self.assertIn("Makeup", message)
-		self.assertIn("3", message)
+		self.assertIn("Hi Suki,", message)
+		self.assertIn("Tomorrow&apos;s Classes", message)
+		self.assertIn("Anime Art", message)
+		self.assertIn("Indooroopilly", message)
+		self.assertIn("16:00", message)
+		self.assertIn("17:30", message)
+		self.assertIn("3 students", message)
+		self.assertIn("1 Trial", message)
+		self.assertIn("1 Makeup", message)
+		self.assertIn("Queensland Art School", message)
+		self.assertIn("background-color:#172033", message)
 		self.assertNotIn("Ava", message)
+
+	@patch("qas_custom.modules.notifications.teacher_schedule_reminders._", side_effect=lambda value: value)
+	@patch("qas_custom.modules.notifications.teacher_schedule_reminders.formatdate", return_value="Friday 17 July 2026")
+	def test_message_hides_zero_badges_and_uses_fallback_greeting(self, _mock_formatdate, _mock_translate):
+		message = _teacher_schedule_message(
+			"2026-07-17",
+			[{"course": "Creative Art", "campus": "Upper Mount Gravatt", "start_time": "15:45", "end_time": "16:45", "student_count": 1, "trial_count": 0, "makeup_count": 0}],
+		)
+
+		self.assertIn("Hello,", message)
+		self.assertIn("You have 1 class.", message)
+		self.assertIn("1 student", message)
+		self.assertNotIn("Trial", message)
+		self.assertNotIn("Makeup", message)
+
+	@patch("qas_custom.modules.notifications.teacher_schedule_reminders._", side_effect=lambda value: value)
+	@patch("qas_custom.modules.notifications.teacher_schedule_reminders.formatdate", return_value="Friday 17 July 2026")
+	def test_message_escapes_teacher_and_session_values(self, _mock_formatdate, _mock_translate):
+		message = _teacher_schedule_message(
+			"2026-07-17",
+			[{"course": "Art <script>", "campus": "A & B", "start_time": "15:45", "end_time": "16:45", "student_count": 2, "trial_count": 0, "makeup_count": 0}],
+			teacher_name="Suki <Admin>",
+		)
+
+		self.assertIn("Suki &lt;Admin&gt;", message)
+		self.assertIn("Art &lt;script&gt;", message)
+		self.assertIn("A &amp; B", message)
+		self.assertNotIn("<script>", message)
+
+	@patch("qas_custom.modules.notifications.teacher_schedule_reminders._", side_effect=lambda value: value)
+	@patch("qas_custom.modules.notifications.teacher_schedule_reminders.formatdate", return_value="Friday 17 July 2026")
+	def test_subject_is_tomorrow_classes_with_target_date(self, _mock_formatdate, _mock_translate):
+		self.assertEqual(
+			_teacher_schedule_subject("2026-07-17"),
+			"Tomorrow's classes — Friday 17 July 2026",
+		)
 
 	def test_event_key_is_stable_per_teacher_and_target_date(self):
 		self.assertEqual(
