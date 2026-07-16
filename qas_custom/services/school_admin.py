@@ -3,7 +3,9 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import datetime, timedelta
 import json
+import mimetypes
 import re
+from urllib.parse import urlencode
 
 import frappe
 from frappe import _
@@ -2881,7 +2883,183 @@ def get_school_admin_course_session_data(course_session=None):
 		_timeslot_teacher = (payload.get("weekly_timeslot_detail") or {}).get("teacher")
 	payload["teacher"] = payload.get("teacher_override") or _timeslot_teacher
 	payload["teacher_assignment_source"] = "Session override" if payload.get("teacher_override") else "Weekly timeslot"
+	payload["class_content"] = _get_school_admin_session_content_rows(course_session)
 	return payload
+
+
+def get_school_admin_session_photo_content_data(course_session=None, photo_post=None, photo_idx=None):
+	_require_school_admin()
+	if not course_session or not photo_post:
+		frappe.throw(_("Course session and photo post are required."))
+
+	photo_post_doc = frappe.get_doc("Session Photo Post", photo_post)
+	if photo_post_doc.get("course_session") != course_session or photo_post_doc.get("status") != "Published":
+		raise frappe.PermissionError
+
+	target_idx = cint(photo_idx)
+	if target_idx <= 0:
+		raise frappe.PermissionError
+
+	photo_row = next((row for row in photo_post_doc.photos or [] if cint(row.idx) == target_idx), None)
+	if not photo_row or not getattr(photo_row, "image", None):
+		raise frappe.DoesNotExistError
+
+	return _get_school_admin_file_content(photo_row.image)
+
+
+def get_school_admin_session_video_content_data(course_session=None, video_post=None):
+	_require_school_admin()
+	if not course_session or not video_post:
+		frappe.throw(_("Course session and video post are required."))
+
+	video_post_doc = frappe.get_doc("Session Video Post", video_post)
+	if video_post_doc.get("course_session") != course_session or video_post_doc.get("status") != "Published":
+		raise frappe.PermissionError
+	if not video_post_doc.get("video"):
+		raise frappe.DoesNotExistError
+
+	payload = _get_school_admin_file_content(
+		video_post_doc.get("video"),
+		fallback_filename=video_post_doc.get("file_name"),
+		fallback_content_type=video_post_doc.get("mime_type"),
+	)
+	payload["display_content_as"] = "inline"
+	return payload
+
+
+def _get_school_admin_session_content_rows(course_session):
+	items = []
+	teacher_ids = set()
+
+	if _doctype_available("Session Homework"):
+		for row in frappe.get_all(
+			"Session Homework",
+			filters={"course_session": course_session, "status": "Published"},
+			fields=["name", "title", "description", "published_at", "teacher"],
+			order_by="published_at desc, creation desc",
+		):
+			teacher_ids.add(row.get("teacher"))
+			items.append({
+				"type": "class_update",
+				"id": row.get("name"),
+				"title": row.get("title") or _("Class Update"),
+				"summary": row.get("description") or "",
+				"published_at": _school_admin_content_datetime(row.get("published_at")),
+				"teacher": row.get("teacher") or "",
+			})
+
+	photo_rows = []
+	if _doctype_available("Session Photo Post"):
+		photo_rows = frappe.get_all(
+			"Session Photo Post",
+			filters={"course_session": course_session, "status": "Published"},
+			fields=["name", "title", "caption", "posted_at", "teacher"],
+			order_by="posted_at desc, creation desc",
+		)
+		photo_items = defaultdict(list)
+		photo_post_ids = [row.get("name") for row in photo_rows]
+		if photo_post_ids and _doctype_available("Session Photo Item"):
+			for photo in frappe.get_all(
+				"Session Photo Item",
+				filters={
+					"parent": ["in", photo_post_ids],
+					"parenttype": "Session Photo Post",
+					"parentfield": "photos",
+				},
+				fields=["parent", "idx"],
+				order_by="parent asc, idx asc",
+			):
+				photo_items[photo.get("parent")].append({
+					"idx": cint(photo.get("idx")),
+					"url": _build_school_admin_photo_url(course_session, photo.get("parent"), photo.get("idx")),
+				})
+
+		for row in photo_rows:
+			teacher_ids.add(row.get("teacher"))
+			photos = photo_items.get(row.get("name"), [])
+			items.append({
+				"type": "photo_post",
+				"id": row.get("name"),
+				"title": row.get("title") or _("Class Photos"),
+				"summary": row.get("caption") or "",
+				"published_at": _school_admin_content_datetime(row.get("posted_at")),
+				"teacher": row.get("teacher") or "",
+				"photo_count": len(photos),
+				"photos": photos,
+			})
+
+	if _doctype_available("Session Video Post"):
+		for row in frappe.get_all(
+			"Session Video Post",
+			filters={"course_session": course_session, "status": "Published"},
+			fields=["name", "title", "caption", "posted_at", "teacher", "file_name", "file_size"],
+			order_by="posted_at desc, creation desc",
+		):
+			teacher_ids.add(row.get("teacher"))
+			items.append({
+				"type": "video_post",
+				"id": row.get("name"),
+				"title": row.get("title") or _("Class Video"),
+				"summary": row.get("caption") or "",
+				"published_at": _school_admin_content_datetime(row.get("posted_at")),
+				"teacher": row.get("teacher") or "",
+				"file_name": row.get("file_name") or "",
+				"file_size": cint(row.get("file_size")),
+				"video_url": _build_school_admin_video_url(course_session, row.get("name")),
+			})
+
+	teacher_map = {}
+	teacher_ids.discard(None)
+	teacher_ids.discard("")
+	if teacher_ids and _doctype_available("Teacher"):
+		teacher_map = {
+			row.get("name"): row.get("teacher_name") or row.get("name")
+			for row in frappe.get_all(
+				"Teacher",
+				filters={"name": ["in", sorted(teacher_ids)]},
+				fields=["name", "teacher_name"],
+				limit_page_length=0,
+			)
+		}
+
+	for item in items:
+		item["teacher_name"] = teacher_map.get(item.get("teacher"), item.get("teacher") or "")
+
+	items.sort(key=lambda item: item.get("published_at") or "", reverse=True)
+	return items
+
+
+def _school_admin_content_datetime(value):
+	return str(value) if value else ""
+
+
+def _build_school_admin_photo_url(course_session, photo_post, photo_idx):
+	return "/api/method/qas_custom.api.school_admin.school_admin_get_course_session_photo?" + urlencode({
+		"course_session": course_session,
+		"photo_post": photo_post,
+		"photo_idx": cint(photo_idx),
+	})
+
+
+def _build_school_admin_video_url(course_session, video_post):
+	return "/api/method/qas_custom.api.school_admin.school_admin_get_course_session_video?" + urlencode({
+		"course_session": course_session,
+		"video_post": video_post,
+	})
+
+
+def _get_school_admin_file_content(file_url, fallback_filename=None, fallback_content_type=None):
+	file_doc_name = frappe.db.get_value("File", {"file_url": file_url}, "name")
+	if not file_doc_name:
+		raise frappe.DoesNotExistError
+
+	file_doc = frappe.get_doc("File", file_doc_name)
+	filename = file_doc.file_name or fallback_filename or file_url.rsplit("/", 1)[-1]
+	return {
+		"filename": filename,
+		"content": file_doc.get_content(),
+		"content_type": fallback_content_type or mimetypes.guess_type(filename)[0] or "application/octet-stream",
+	}
 
 
 def update_school_admin_course_session_teacher_data(course_session=None, teacher=None, reset_override=0):
