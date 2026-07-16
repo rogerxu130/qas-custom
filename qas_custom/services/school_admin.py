@@ -86,6 +86,7 @@ DEFAULT_COURSE_INVOICE_ITEM = "Tuition Fee"
 MANUAL_INVOICE_ITEM = "Other"
 BULK_INVOICE_SUBMIT_JOB_TTL_SECONDS = 86400
 NON_ATTENDING_ATTENDANCE_STATUSES = {"Cancelled", "Leave"}
+TRIAL_CONFIRMATION_STATUSES = {"Pending", "Customer Confirmed"}
 SCHOOL_ADMIN_LEAVE_ATTENDANCE_STATUSES = ("To be started", "Absent")
 PARENT_EDIT_FIELDS = ["parent_name", "mobile_number", "phone", "email", "email_id", "address", "status", "customer"]
 PARENT_UPDATE_FIELDS = ["parent_name", "mobile_number", "phone", "address", "status", "customer"]
@@ -3017,6 +3018,7 @@ def _validate_course_session_attendance_status(status):
 
 def _get_school_admin_attendance_rows(course_session, term=None):
 	rows = [_docdict(row) for row in get_attendance_entries([course_session])]
+	_enrich_trial_confirmation_status(rows)
 	family_map = _get_attendance_family_map([row.get("student") for row in rows])
 	outstanding_map = _get_family_outstanding_invoice_map(family_map.values())
 	term_invoice_map = _get_family_current_term_invoice_map(family_map.values(), term)
@@ -3036,6 +3038,34 @@ def _get_school_admin_attendance_rows(course_session, term=None):
 		row["current_term_outstanding_amount"] = flt(term_invoice.get("outstanding_amount") or 0)
 		row["attendance_type"] = row.get("enrollment_type") or _infer_attendance_type(row)
 		row["source_label"] = _attendance_source_label(row)
+	return rows
+
+
+def _enrich_trial_confirmation_status(rows):
+	inquiry_names = sorted(
+		{
+			row.get("source_document")
+			for row in rows
+			if row.get("source_doctype") == "Inquiry" and row.get("source_document")
+		}
+	)
+	if not inquiry_names:
+		return rows
+
+	inquiry_rows = frappe.get_all(
+		"Inquiry",
+		filters={"name": ["in", inquiry_names]},
+		fields=["name", "confirmation_status"],
+		limit_page_length=0,
+	)
+	status_map = {
+		row.get("name"): row.get("confirmation_status")
+		for row in inquiry_rows
+		if row.get("name") and row.get("confirmation_status") in TRIAL_CONFIRMATION_STATUSES
+	}
+	for row in rows:
+		if row.get("source_doctype") == "Inquiry":
+			row["trial_confirmation_status"] = status_map.get(row.get("source_document"), "")
 	return rows
 
 
