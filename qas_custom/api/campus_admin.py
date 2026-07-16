@@ -1,5 +1,10 @@
 import frappe
 
+from qas_custom.services.password_reset import (
+	confirm_campus_admin_password_reset,
+	request_campus_admin_password_reset,
+	validate_campus_admin_password_reset_token,
+)
 from qas_custom.services.campus_admin import (
 	add_campus_admin_inquiry_note_data,
 	convert_campus_admin_inquiry_data,
@@ -19,6 +24,21 @@ from qas_custom.services.campus_admin import (
 	reopen_campus_admin_inquiry_data,
 	send_campus_admin_trial_class_reminder_data,
 )
+
+
+@frappe.whitelist(allow_guest=True)
+def campus_admin_request_password_reset(email=None):
+	return request_campus_admin_password_reset(email)
+
+
+@frappe.whitelist(allow_guest=True)
+def campus_admin_validate_password_reset_token(token=None):
+	return validate_campus_admin_password_reset_token(token)
+
+
+@frappe.whitelist(allow_guest=True)
+def campus_admin_confirm_password_reset(token=None, new_password=None):
+	return confirm_campus_admin_password_reset(token, new_password)
 
 
 @frappe.whitelist()

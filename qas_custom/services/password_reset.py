@@ -13,6 +13,7 @@ PASSWORD_RESET_PATH = "/reset-password"
 DEFAULT_PARENT_PORTAL_ALLOWED_ROLES = ("Parent",)
 PORTAL_PARENT = "parent"
 PORTAL_TEACHER = "teacher"
+PORTAL_CAMPUS_ADMIN = "campus_admin"
 
 
 def request_password_reset(email: str | None) -> dict:
@@ -21,6 +22,10 @@ def request_password_reset(email: str | None) -> dict:
 
 def request_teacher_password_reset(email: str | None) -> dict:
     return _request_password_reset(email, portal=PORTAL_TEACHER)
+
+
+def request_campus_admin_password_reset(email: str | None) -> dict:
+    return _request_password_reset(email, portal=PORTAL_CAMPUS_ADMIN)
 
 
 def _request_password_reset(email: str | None, portal: str = PORTAL_PARENT) -> dict:
@@ -76,6 +81,10 @@ def validate_password_reset_token(token: str | None) -> dict:
 
 def validate_teacher_password_reset_token(token: str | None) -> dict:
     return _validate_password_reset_token(token, portal=PORTAL_TEACHER)
+
+
+def validate_campus_admin_password_reset_token(token: str | None) -> dict:
+    return _validate_password_reset_token(token, portal=PORTAL_CAMPUS_ADMIN)
 
 
 def _validate_password_reset_token(token: str | None, portal: str = PORTAL_PARENT) -> dict:
@@ -150,6 +159,10 @@ def confirm_teacher_password_reset(token: str | None, new_password: str | None) 
     return _confirm_password_reset(token, new_password, portal=PORTAL_TEACHER)
 
 
+def confirm_campus_admin_password_reset(token: str | None, new_password: str | None) -> dict:
+    return _confirm_password_reset(token, new_password, portal=PORTAL_CAMPUS_ADMIN)
+
+
 def _confirm_password_reset(token: str | None, new_password: str | None, portal: str = PORTAL_PARENT) -> dict:
     validation = _validate_password_reset_token(token, portal=portal)
     if not validation.get("valid"):
@@ -196,15 +209,22 @@ def _confirm_password_reset(token: str | None, new_password: str | None, portal:
 
 def _build_password_reset_link(reset_token: str, portal: str = PORTAL_PARENT) -> str:
     portal_base_url = _get_portal_base_url(portal)
+    portal_query = f"&portal={portal}" if portal == PORTAL_CAMPUS_ADMIN else ""
     if portal_base_url:
-        return f"{portal_base_url.rstrip('/')}{PASSWORD_RESET_PATH}?token={reset_token}"
+        return f"{portal_base_url.rstrip('/')}{PASSWORD_RESET_PATH}?token={reset_token}{portal_query}"
 
-    return f"{get_url(PASSWORD_RESET_PATH)}?token={reset_token}"
+    return f"{get_url(PASSWORD_RESET_PATH)}?token={reset_token}{portal_query}"
 
 
 def _send_password_reset_email(email: str, reset_link: str, expires_at, token_record: str, portal: str = PORTAL_PARENT) -> None:
     subject = "Reset your password"
-    portal_label = "Teacher Portal" if portal == PORTAL_TEACHER else "Parent Portal"
+    portal_label = (
+        "Teacher Portal"
+        if portal == PORTAL_TEACHER
+        else "Campus Admin Portal"
+        if portal == PORTAL_CAMPUS_ADMIN
+        else "Parent Portal"
+    )
     message = f"""
         <p>A password reset was requested for your Queensland Art School {portal_label} account.</p>
         <p>Use the link below to set a new password:</p>
@@ -250,9 +270,25 @@ def _is_teacher_portal_user(user_name: str) -> bool:
     return bool(frappe.db.exists("Teacher", {"user": user_name, "status": ["!=", "Inactive"]}))
 
 
+def _is_campus_admin_portal_user(user_name: str) -> bool:
+	if not _portal_user_enabled(user_name):
+		return False
+	return _active_campus_admin_profile_exists(user_name)
+
+
+def _portal_user_enabled(user_name: str) -> bool:
+	return bool(frappe.db.get_value("User", user_name, "enabled"))
+
+
+def _active_campus_admin_profile_exists(user_name: str) -> bool:
+	return bool(frappe.db.exists("Campus Admin Profile", {"user": user_name, "active": 1}))
+
+
 def _is_portal_reset_user(user_name: str, portal: str = PORTAL_PARENT) -> bool:
     if portal == PORTAL_TEACHER:
         return _is_teacher_portal_user(user_name)
+    if portal == PORTAL_CAMPUS_ADMIN:
+        return _is_campus_admin_portal_user(user_name)
     return _is_parent_portal_user(user_name)
 
 

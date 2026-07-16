@@ -38,11 +38,17 @@ class Inquiry(Document):
 				source_document=self.name,
 			)
 		elif self.course_session and old_course_session != self.course_session:
-			event = "trial_rescheduled" if old_course_session else "trial_added"
+			if old_course_session:
+				enqueue_session_staff_notification(
+					"trial_cancelled",
+					course_session=old_course_session,
+					student=self.student,
+					source_doctype="Inquiry",
+					source_document=self.name,
+				)
 			enqueue_session_staff_notification(
-				event,
+				"trial_added",
 				course_session=self.course_session,
-				previous_course_session=old_course_session,
 				student=self.student,
 				source_doctype="Inquiry",
 				source_document=self.name,

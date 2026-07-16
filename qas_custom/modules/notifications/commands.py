@@ -707,7 +707,7 @@ def _session_staff_notification_context(
 	context = _session_staff_course_context(course_session, student)
 	context["event"] = event
 	if event in TRIAL_NOTIFICATION_EVENTS:
-		context["recipients"] = list(context["teacher_recipients"])
+		context["recipients"] = list(dict.fromkeys(context["teacher_recipients"] + context.get("campus_admin_recipients", [])))
 		context["missing_recipients"] = [] if context["teacher_recipients"] else ["teacher email"]
 	else:
 		context["recipients"] = list(context["teacher_recipients"])
@@ -724,7 +724,12 @@ def _session_staff_notification_context(
 			frappe.throw(_("Previous course session is required for a trial reschedule notification."))
 		previous = _session_staff_course_context(previous_course_session, student)
 		context["previous"] = previous
-		context["recipients"] = list(dict.fromkeys(previous["teacher_recipients"] + context["teacher_recipients"]))
+		context["recipients"] = list(dict.fromkeys(
+			previous["teacher_recipients"]
+			+ previous.get("campus_admin_recipients", [])
+			+ context["teacher_recipients"]
+			+ context.get("campus_admin_recipients", [])
+		))
 		context["missing_recipients"] = []
 		if not previous["teacher_recipients"]:
 			context["missing_recipients"].append("original session teacher email")
@@ -734,6 +739,8 @@ def _session_staff_notification_context(
 
 
 def _session_staff_course_context(course_session: str, student: str):
+	from qas_custom.services.campus_admin_accounts import get_active_campus_admin_emails
+
 	session = frappe.db.get_value(
 		"Course Sessions",
 		course_session,
@@ -763,6 +770,7 @@ def _session_staff_course_context(course_session: str, student: str):
 	settings = get_invoice_settings()
 	school_email = (settings.get("school_email") or "").strip().lower()
 	teacher_recipients = [teacher_email] if teacher_email else []
+	campus_admin_recipients = get_active_campus_admin_emails(timeslot.get("campus"))
 
 	return {
 		"course_session": course_session,
@@ -779,6 +787,7 @@ def _session_staff_course_context(course_session: str, student: str):
 		"school_name": settings.get("school_name") or "Queensland Art School",
 		"school_email": school_email,
 		"teacher_recipients": teacher_recipients,
+		"campus_admin_recipients": campus_admin_recipients,
 	}
 
 
@@ -845,14 +854,16 @@ def _session_staff_notification_is_current(
 			and (row.get("used_by_student") or row.get("student")) == student
 		)
 	if event in TRIAL_NOTIFICATION_EVENTS:
-		row = frappe.db.get_value("Inquiry", source_document, ["inquiry_type", "status", "course_session", "student"], as_dict=True)
+		row = _get_trial_notification_inquiry(source_document)
 		if event == "trial_cancelled":
 			return bool(
 				row
 				and row.get("inquiry_type") == "Trial Lesson"
-				and row.get("status") == "Cancelled"
-				and row.get("course_session") == course_session
 				and row.get("student") == student
+				and (
+					(row.get("status") == "Cancelled" and row.get("course_session") == course_session)
+					or (row.get("status") != "Cancelled" and row.get("course_session") != course_session)
+				)
 			)
 		return bool(
 			row
@@ -862,6 +873,10 @@ def _session_staff_notification_is_current(
 			and row.get("student") == student
 		)
 	return False
+
+
+def _get_trial_notification_inquiry(inquiry):
+	return frappe.db.get_value("Inquiry", inquiry, ["inquiry_type", "status", "course_session", "student"], as_dict=True)
 
 
 def _session_staff_notification_subject(context):

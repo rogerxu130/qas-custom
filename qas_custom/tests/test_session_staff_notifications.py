@@ -36,7 +36,7 @@ class TestSessionStaffNotifications(TestCase):
 		)
 
 	@patch("qas_custom.modules.notifications.commands.enqueue_session_staff_notification")
-	def test_inquiry_reschedule_queues_one_combined_notification(self, mock_enqueue):
+	def test_inquiry_reschedule_queues_cancel_then_add_notifications(self, mock_enqueue):
 		doc = SimpleNamespace(
 			inquiry_type="Trial Lesson",
 			student="STU-001",
@@ -48,14 +48,39 @@ class TestSessionStaffNotifications(TestCase):
 
 		Inquiry.on_update(doc)
 
-		mock_enqueue.assert_called_once_with(
-			"trial_rescheduled",
-			course_session="CS-002",
-			previous_course_session="CS-001",
-			student="STU-001",
-			source_doctype="Inquiry",
-			source_document="INQ-001",
-		)
+		self.assertEqual(mock_enqueue.call_count, 2)
+		self.assertEqual(mock_enqueue.call_args_list[0].args, ("trial_cancelled",))
+		self.assertEqual(mock_enqueue.call_args_list[0].kwargs["course_session"], "CS-001")
+		self.assertEqual(mock_enqueue.call_args_list[1].args, ("trial_added",))
+		self.assertEqual(mock_enqueue.call_args_list[1].kwargs["course_session"], "CS-002")
+
+	@patch("qas_custom.modules.notifications.commands._session_staff_course_context")
+	def test_trial_added_context_includes_teacher_and_campus_admins_once(self, mock_course_context):
+		from qas_custom.modules.notifications.commands import _session_staff_notification_context
+
+		mock_course_context.return_value = {
+			"teacher_recipients": ["teacher@example.com"],
+			"campus_admin_recipients": ["admin@example.com", "teacher@example.com"],
+			"school_email": "school@example.com",
+		}
+
+		context = _session_staff_notification_context("trial_added", "CS-001", "STU-001")
+
+		self.assertEqual(context["recipients"], ["teacher@example.com", "admin@example.com"])
+		self.assertNotIn("school@example.com", context["recipients"])
+
+	@patch("qas_custom.modules.notifications.commands._get_trial_notification_inquiry")
+	def test_reschedule_cancel_event_remains_current_after_inquiry_moves(self, mock_get_value):
+		from qas_custom.modules.notifications.commands import _session_staff_notification_is_current
+
+		mock_get_value.return_value = {
+			"inquiry_type": "Trial Lesson",
+			"status": "Rescheduled",
+			"course_session": "CS-002",
+			"student": "STU-001",
+		}
+
+		self.assertTrue(_session_staff_notification_is_current("trial_cancelled", "CS-001", "STU-001", "INQ-001"))
 
 	@patch("qas_custom.modules.notifications.commands.frappe.conf", {})
 	def test_trial_added_notification_is_enabled_by_default(self):
