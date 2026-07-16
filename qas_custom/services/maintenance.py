@@ -214,6 +214,7 @@ def _find_inquiry_attendance_issues():
 	attendance_by_source = _get_attendance_by_source("Inquiry")
 	for inquiry in inquiries:
 		entries = attendance_by_source.get(inquiry.name, [])
+		entries_to_check = entries
 		if inquiry.status in {"Booked", "Rescheduled"} and inquiry.course_session and not entries:
 			yield _issue(
 				key_parts=["inquiry-booked-missing-attendance", inquiry.name],
@@ -225,20 +226,22 @@ def _find_inquiry_attendance_issues():
 				description=_("Booked trial inquiry has no linked Class Attendance Entry."),
 				suggested_action=_("Open and save the Inquiry, or manually recreate the trial attendance entry for the original course session."),
 			)
-		if inquiry.status == "Cancelled" and entries:
-			yield _issue(
-				key_parts=["inquiry-cancelled-has-attendance", inquiry.name],
-				severity="Warning",
-				source_doctype="Inquiry",
-				source_document=inquiry.name,
-				related_doctype="Class Attendance Entry",
-				related_document=entries[0].name,
-				student=inquiry.student,
-				course_session=entries[0].course_session,
-				description=_("Cancelled trial inquiry still has linked Class Attendance Entry rows."),
-				suggested_action=_("Remove the linked trial attendance entry if the cancellation is final, or reopen the Inquiry if it was cancelled by mistake."),
-			)
-		for entry in entries:
+		if inquiry.status == "Cancelled":
+			entries_to_check = [entry for entry in entries if entry.status != "Cancelled"]
+			if entries_to_check:
+				yield _issue(
+					key_parts=["inquiry-cancelled-has-attendance", inquiry.name],
+					severity="Warning",
+					source_doctype="Inquiry",
+					source_document=inquiry.name,
+					related_doctype="Class Attendance Entry",
+					related_document=entries_to_check[0].name,
+					student=inquiry.student,
+					course_session=entries_to_check[0].course_session,
+					description=_("Cancelled trial inquiry still has linked non-cancelled Class Attendance Entry rows."),
+					suggested_action=_("Mark the linked trial attendance entry as Cancelled, or reopen the Inquiry if it was cancelled by mistake."),
+				)
+		for entry in entries_to_check:
 			if inquiry.course_session and entry.course_session != inquiry.course_session:
 				yield _issue(
 					key_parts=["inquiry-attendance-session-mismatch", inquiry.name, entry.name],
