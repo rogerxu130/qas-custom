@@ -32,6 +32,9 @@ from qas_custom.services.teacher_directory import get_active_teacher_directory_d
 from qas_custom.services.support_view import get_support_view_campus_admin_profile, reject_support_view_write
 
 
+POST_VISIT_INQUIRY_STATUSES = ("Completed", "Follow-up", "No-show", "Converted", "Inactive")
+
+
 def get_campus_admin_me_data():
 	profile = _require_campus_admin_profile()
 	return {
@@ -80,17 +83,21 @@ def get_campus_admin_inquiries_data(status=None, inquiry_type=None, from_date=No
 		filters["status"] = status
 	if inquiry_type:
 		filters["inquiry_type"] = inquiry_type
-	if from_date and to_date:
-		filters["current_appointment_date"] = ["between", [getdate(from_date), getdate(to_date)]]
-	elif from_date:
-		filters["current_appointment_date"] = [">=", getdate(from_date)]
-	elif to_date:
-		filters["current_appointment_date"] = ["<=", getdate(to_date)]
+	queue_filters, or_filters = _campus_admin_inquiry_queue_filters(queue, status=status)
+	filters.update(queue_filters)
+	if not queue:
+		if from_date and to_date:
+			filters["current_appointment_date"] = ["between", [getdate(from_date), getdate(to_date)]]
+		elif from_date:
+			filters["current_appointment_date"] = [">=", getdate(from_date)]
+		elif to_date:
+			filters["current_appointment_date"] = ["<=", getdate(to_date)]
 
 	order_by = "current_appointment_date desc, modified desc" if queue == "post_trial" else "current_appointment_date asc, modified desc"
 	rows = frappe.get_all(
 		"Inquiry",
 		filters=filters,
+		or_filters=or_filters,
 		fields=[
 			"name",
 			"inquiry_type",
@@ -109,6 +116,27 @@ def get_campus_admin_inquiries_data(status=None, inquiry_type=None, from_date=No
 		order_by=order_by,
 	)
 	return {"items": [_build_inquiry_list_item(row) for row in rows]}
+
+
+def _campus_admin_inquiry_queue_filters(queue, status=None, reference_date=None):
+	reference_date = getdate(reference_date or today())
+	if queue == "upcoming":
+		if status in POST_VISIT_INQUIRY_STATUSES:
+			return {"name": "__qas_no_matching_inquiry__"}, None
+		filters = {"current_appointment_date": [">=", reference_date]}
+		if not status:
+			filters["status"] = ["not in", list(POST_VISIT_INQUIRY_STATUSES)]
+		return filters, None
+	if queue == "post_trial":
+		if status:
+			if status in POST_VISIT_INQUIRY_STATUSES:
+				return {}, None
+			return {"current_appointment_date": ["<", reference_date]}, None
+		return {}, [
+			["Inquiry", "status", "in", list(POST_VISIT_INQUIRY_STATUSES)],
+			["Inquiry", "current_appointment_date", "<", reference_date],
+		]
+	return {}, None
 
 
 def get_campus_admin_inquiry_data(inquiry=None):
@@ -348,11 +376,11 @@ def reopen_campus_admin_inquiry_data(inquiry=None):
 		frappe.throw(_("Inquiry is required."))
 
 	inquiry_doc = frappe.get_doc("Inquiry", inquiry)
-	if inquiry_doc.status != "Cancelled":
-		frappe.throw(_("Only cancelled inquiries can be reopened."))
+	if inquiry_doc.status not in {"Cancelled", "Completed"}:
+		frappe.throw(_("Only completed or cancelled inquiries can be reopened."))
 
-	target_status = _get_reopen_status(inquiry_doc)
 	previous_status = inquiry_doc.status
+	target_status = "Booked" if previous_status == "Completed" else _get_reopen_status(inquiry_doc)
 	original_course_session = inquiry_doc.course_session
 	inquiry_doc.status = target_status
 	if target_status == "Needs Review":
