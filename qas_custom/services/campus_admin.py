@@ -3,7 +3,7 @@ from __future__ import annotations
 import frappe
 from frappe import _
 
-from frappe.utils import add_days, getdate, now_datetime, today
+from frappe.utils import add_days, cint, getdate, now_datetime, today
 
 from qas_custom.services.billing_enrollment import (
 	convert_inquiry_to_full_term_core,
@@ -18,6 +18,15 @@ from qas_custom.services.inquiry import (
 	build_inquiry_summary,
 	mark_inquiry_status_core,
 	send_trial_class_reminder_core,
+)
+from qas_custom.services.school_admin import (
+	_count_leave_attendance_rows,
+	_document_payload,
+	_get_course_session_rows,
+	_get_school_admin_attendance_rows,
+	_get_timeslot_summary,
+	_roster_course_session_attendance_rows,
+	_visible_course_session_attendance_rows,
 )
 from qas_custom.services.teacher_directory import get_active_teacher_directory_data
 from qas_custom.services.support_view import get_support_view_campus_admin_profile, reject_support_view_write
@@ -214,6 +223,98 @@ def get_campus_admin_contacts_data(from_date=None, to_date=None, campus=None, co
 		],
 		"contacts": contacts,
 	}
+
+
+def get_campus_admin_course_sessions_data(
+	term=None,
+	course=None,
+	campus=None,
+	from_date=None,
+	to_date=None,
+	include_inactive_terms=0,
+	include_inactive_timeslots=0,
+	limit=160,
+):
+	profile = _require_campus_admin_profile()
+	campuses = _filter_requested_campus(profile["campuses"], campus)
+	row_limit = min(max(cint(limit or 160), 1), 3000)
+	items_by_name = {}
+	for allowed_campus in campuses:
+		for item in _get_course_session_rows(
+			term=term,
+			course=course,
+			campus=allowed_campus,
+			from_date=from_date,
+			to_date=to_date,
+			include_inactive_terms=include_inactive_terms,
+			include_inactive_timeslots=include_inactive_timeslots,
+			limit=row_limit,
+		):
+			if item.get("name"):
+				items_by_name[item["name"]] = item
+
+	items = sorted(
+		items_by_name.values(),
+		key=lambda item: (item.get("session_date") or "", item.get("name") or ""),
+	)
+	_attach_campus_admin_teacher_labels(items)
+	return {"items": items[:row_limit]}
+
+
+def get_campus_admin_course_session_data(course_session=None):
+	profile = _require_campus_admin_profile()
+	if not course_session:
+		frappe.throw(_("Course session is required."))
+
+	doc, timeslot = _get_campus_admin_course_session_access(course_session, profile["campuses"])
+	payload = _document_payload(doc)
+	payload["weekly_timeslot_detail"] = _get_timeslot_summary(timeslot.name)
+	attendance_rows = _get_school_admin_attendance_rows(
+		course_session,
+		term=(payload.get("weekly_timeslot_detail") or {}).get("term"),
+	)
+	attending_rows = _visible_course_session_attendance_rows(attendance_rows)
+	payload["attendance"] = _roster_course_session_attendance_rows(attendance_rows)
+	payload["student_count"] = len(attending_rows)
+	payload["trial_count"] = sum(1 for row in attending_rows if row.get("source_doctype") == "Inquiry")
+	payload["leave_count"] = _count_leave_attendance_rows(attendance_rows)
+	timeslot_teacher = (payload.get("weekly_timeslot_detail") or {}).get("teacher")
+	payload["teacher"] = payload.get("teacher_override") or timeslot_teacher
+	_attach_campus_admin_teacher_labels([payload])
+	payload["teacher_assignment_source"] = "Session override" if payload.get("teacher_override") else "Weekly timeslot"
+	return payload
+
+
+def _get_campus_admin_course_session_access(course_session, allowed_campuses):
+	try:
+		doc = frappe.get_doc("Course Sessions", course_session)
+	except frappe.DoesNotExistError:
+		frappe.throw(_("Course session was not found."), frappe.DoesNotExistError)
+	weekly_timeslot = doc.get("weekly_timeslot")
+	if not weekly_timeslot:
+		frappe.throw(_("Course session has no weekly timeslot."), frappe.PermissionError)
+	timeslot = frappe.get_doc("Weekly Timeslot", weekly_timeslot)
+	if timeslot.get("campus") not in allowed_campuses:
+		frappe.throw(_("You do not have access to this course session."), frappe.PermissionError)
+	return doc, timeslot
+
+
+def _attach_campus_admin_teacher_labels(items):
+	teacher_ids = sorted({item.get("teacher") for item in items if item.get("teacher")})
+	if not teacher_ids:
+		return items
+	teacher_map = {
+		row.get("name"): row.get("teacher_name") or row.get("name")
+		for row in frappe.get_all(
+			"Teacher",
+			filters={"name": ["in", teacher_ids]},
+			fields=["name", "teacher_name"],
+			limit_page_length=0,
+		)
+	}
+	for item in items:
+		item["teacher_display"] = teacher_map.get(item.get("teacher"), item.get("teacher") or "")
+	return items
 
 
 def add_campus_admin_inquiry_note_data(inquiry=None, note=None):

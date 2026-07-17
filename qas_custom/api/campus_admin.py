@@ -10,6 +10,8 @@ from qas_custom.services.campus_admin import (
 	convert_campus_admin_inquiry_data,
 	get_campus_admin_csrf_token_data,
 	get_campus_admin_contacts_data,
+	get_campus_admin_course_session_data,
+	get_campus_admin_course_sessions_data,
 	get_campus_admin_conversion_sessions_data,
 	get_campus_admin_dashboard_data,
 	get_campus_admin_inquiries_data,
@@ -90,8 +92,31 @@ def campus_admin_get_contacts(from_date=None, to_date=None, campus=None, course_
 
 
 @frappe.whitelist()
-def campus_admin_get_course_sessions(campus=None, course=None, from_date=None, to_date=None, query=None):
-	frappe.throw("Trial lesson scheduling is managed by School Admin.", frappe.PermissionError)
+def campus_admin_get_course_sessions(
+	term=None,
+	campus=None,
+	course=None,
+	from_date=None,
+	to_date=None,
+	include_inactive_terms=0,
+	include_inactive_timeslots=0,
+	limit=160,
+):
+	return get_campus_admin_course_sessions_data(
+		term=term,
+		campus=campus,
+		course=course,
+		from_date=from_date,
+		to_date=to_date,
+		include_inactive_terms=include_inactive_terms,
+		include_inactive_timeslots=include_inactive_timeslots,
+		limit=limit,
+	)
+
+
+@frappe.whitelist()
+def campus_admin_get_course_session(course_session=None):
+	return get_campus_admin_course_session_data(course_session=course_session)
 
 
 @frappe.whitelist()
