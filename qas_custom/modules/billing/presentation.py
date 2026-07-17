@@ -128,6 +128,7 @@ def build_parent_invoice_item(row):
 		"term": term,
 		"course_session": row.get("course_session") if hasattr(row, "get") else None,
 		"qas_line_type": row.get("qas_line_type") if hasattr(row, "get") else None,
+		"qty": quantity,
 		"rate": rate,
 		"amount": amount,
 		"description": description,

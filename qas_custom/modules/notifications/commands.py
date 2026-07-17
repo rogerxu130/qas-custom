@@ -231,6 +231,12 @@ def send_parent_invoice_cancellation_notification(invoice_doc, *, reason=None, n
 			reference_doctype="Sales Invoice",
 			reference_name=invoice_doc.name,
 			delayed=False,
+			attachments=[
+				_invoice_cancellation_pdf_attachment(
+					invoice_doc.name,
+					reason=reason,
+				)
+			],
 		)
 		if mail_result and mail_result.get("skipped"):
 			reason_text = mail_result.get("reason") or email_block_reason()
@@ -1358,6 +1364,27 @@ def _invoice_pdf_attachment(invoice: str, *, store_credit_applied=None, payable_
 	}
 
 
+def render_parent_invoice_cancellation_pdf(invoice: str, *, reason=None):
+	doc = frappe.get_doc("Sales Invoice", invoice)
+	context = build_parent_invoice_context(doc, include_portal_link=False)
+	context["cancellation_reason"] = reason or ""
+	return get_pdf(_invoice_cancellation_pdf_html(context))
+
+
+def _invoice_cancellation_pdf_attachment(invoice: str, *, reason=None):
+	pdf_content = render_parent_invoice_cancellation_pdf(invoice, reason=reason)
+	file_doc = save_file(
+		f"{invoice}-CANCELLED.pdf",
+		pdf_content,
+		"Sales Invoice",
+		invoice,
+		is_private=1,
+	)
+	return {
+		"fid": file_doc.name,
+	}
+
+
 def _invoice_notification_amounts(invoice_doc, *, store_credit_applied=None, payable_amount=None):
 	return resolve_invoice_print_amounts(
 		invoice_doc,
@@ -1476,6 +1503,111 @@ def _invoice_pdf_item_row(item):
 	""".format(
 		student=escape_html(item.get("student") or ""),
 		description=escape_html(item.get("description") or ""),
+		rate=flt(item.get("rate")),
+		amount=flt(item.get("amount")),
+	)
+
+
+def _invoice_cancellation_pdf_html(context):
+	rows = "\n".join(_invoice_cancellation_pdf_item_row(item) for item in context.get("items", []))
+	if not rows:
+		rows = """<tr><td colspan="5" class="muted">No invoice line details are available.</td></tr>"""
+
+	reason = context.get("cancellation_reason") or "Not provided"
+	parent_identity = context.get("recipient_name") or context.get("customer") or context.get("parent") or "-"
+	return """
+<!doctype html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<style>
+		@page {{ size: A4; margin: 20mm 18mm; }}
+		body {{ color: #172033; font-family: Arial, sans-serif; font-size: 12px; line-height: 1.45; }}
+		* {{ box-sizing: border-box; }}
+		.header {{ border-bottom: 2px solid #172033; margin-bottom: 20px; padding-bottom: 18px; width: 100%; }}
+		.brand {{ color: #e85f47; font-size: 12px; font-weight: 700; letter-spacing: .04em; margin: 0 0 8px; text-transform: uppercase; }}
+		h1 {{ font-size: 28px; font-weight: 800; margin: 0; }}
+		.cancelled {{ color: #b42318; font-size: 30px; font-weight: 900; letter-spacing: .08em; text-align: right; }}
+		.muted {{ color: #64748b; }}
+		.notice {{ background: #fff1f0; border: 2px solid #fda29b; border-radius: 10px; color: #7a271a; font-size: 15px; font-weight: 700; margin: 18px 0; padding: 14px 16px; }}
+		.meta {{ background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 10px; margin: 0 0 20px; width: 100%; }}
+		.meta td {{ padding: 12px 14px; width: 50%; }}
+		.meta span {{ color: #64748b; display: block; font-size: 11px; margin-bottom: 3px; text-transform: uppercase; }}
+		table.items {{ border-collapse: collapse; margin-top: 18px; width: 100%; }}
+		table.items th {{ background: #f1f5f9; color: #64748b; font-size: 10px; padding: 9px 7px; text-align: left; text-transform: uppercase; }}
+		table.items td {{ border-bottom: 1px solid #e5e7eb; padding: 10px 7px; vertical-align: top; }}
+		.total {{ margin-left: auto; margin-top: 20px; width: 320px; }}
+		.total td {{ border-top: 2px solid #172033; font-size: 16px; font-weight: 800; padding-top: 11px; }}
+		.reason {{ background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 10px; margin-top: 22px; padding: 14px 16px; }}
+		.right {{ text-align: right; }}
+	</style>
+</head>
+<body>
+	<table class="header">
+		<tr>
+			<td>
+				<p class="brand">{school_name}</p>
+				<h1>Invoice cancellation</h1>
+				<div class="muted">{invoice}</div>
+				{school_identity}
+			</td>
+			<td class="cancelled">CANCELLED</td>
+		</tr>
+	</table>
+
+	<div class="notice">This invoice has been cancelled. No payment is required.</div>
+
+	<table class="meta">
+		<tr>
+			<td><span>Invoice number</span><strong>{invoice}</strong></td>
+			<td><span>Parent</span><strong>{parent_identity}</strong></td>
+		</tr>
+	</table>
+
+	<table class="items">
+		<thead>
+			<tr>
+				<th>Student</th>
+				<th>Description</th>
+				<th class="right">Qty</th>
+				<th class="right">Rate</th>
+				<th class="right">Amount</th>
+			</tr>
+		</thead>
+		<tbody>{rows}</tbody>
+	</table>
+
+	<table class="total">
+		<tr><td>Original invoice total</td><td class="right">AUD ${total:.2f}</td></tr>
+	</table>
+
+	<div class="reason"><strong>Cancellation reason</strong><br>{reason}</div>
+</body>
+</html>
+	""".format(
+		school_name=escape_html(context.get("school_name") or "Queensland Art School"),
+		invoice=escape_html(context.get("invoice") or ""),
+		school_identity=_school_identity_pdf_html(context),
+		parent_identity=escape_html(parent_identity),
+		rows=rows,
+		total=flt(context.get("total")),
+		reason=escape_html(reason).replace("\n", "<br>"),
+	)
+
+
+def _invoice_cancellation_pdf_item_row(item):
+	return """
+		<tr>
+			<td><strong>{student}</strong></td>
+			<td>{description}</td>
+			<td class="right">{qty:g}</td>
+			<td class="right">AUD ${rate:.2f}</td>
+			<td class="right"><strong>AUD ${amount:.2f}</strong></td>
+		</tr>
+	""".format(
+		student=escape_html(item.get("student") or ""),
+		description=escape_html(item.get("description") or ""),
+		qty=flt(item.get("qty")),
 		rate=flt(item.get("rate")),
 		amount=flt(item.get("amount")),
 	)
@@ -1623,6 +1755,9 @@ def _invoice_email_message(invoice_doc, event, store_credit_applied, payable_amo
 
 def _invoice_cancellation_email_message(invoice_doc, reason=None):
 	context = build_parent_invoice_context(invoice_doc, include_portal_link=False)
+	rows = "\n".join(_invoice_email_item_row(item) for item in context.get("items", []))
+	if not rows:
+		rows = """<tr><td colspan="3" style="padding:12px;color:#64748b;">No invoice line details are available.</td></tr>"""
 	reason_html = ""
 	if reason:
 		reason_html = """<p style="margin:0 0 18px;font-size:15px;line-height:1.5;color:#334155;"><strong>Reason:</strong> {0}</p>""".format(
@@ -1640,7 +1775,28 @@ def _invoice_cancellation_email_message(invoice_doc, reason=None):
 					<div style="padding:24px;">
 						<p style="margin:0 0 14px;font-size:16px;line-height:1.5;">{greeting}</p>
 						<p style="margin:0 0 18px;font-size:16px;line-height:1.5;">Invoice <strong>{invoice}</strong> has been cancelled.</p>
+						<p style="margin:0 0 18px;padding:14px 16px;border:1px solid #fda29b;border-radius:10px;background:#fff1f0;font-size:16px;font-weight:700;line-height:1.5;color:#7a271a;">This invoice has been cancelled. No payment is required.</p>
+
+						<table style="width:100%;border-collapse:collapse;margin:0 0 18px;">
+							<tr>
+								<td style="padding:10px 0;color:#64748b;">Original invoice total</td>
+								<td style="padding:10px 0;text-align:right;font-weight:700;">AUD ${total:.2f}</td>
+							</tr>
+						</table>
+
+						<table style="width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin:0 0 22px;">
+							<thead>
+								<tr style="background:#f1f5f9;">
+									<th align="left" style="padding:10px;font-size:12px;color:#64748b;">Student</th>
+									<th align="left" style="padding:10px;font-size:12px;color:#64748b;">Description</th>
+									<th align="right" style="padding:10px;font-size:12px;color:#64748b;">Amount</th>
+								</tr>
+							</thead>
+							<tbody>{rows}</tbody>
+						</table>
+
 						{reason_html}
+						<p style="margin:0 0 18px;font-size:15px;line-height:1.5;color:#334155;">A cancelled copy of the invoice is attached for your records.</p>
 						<p style="margin:0;font-size:15px;line-height:1.5;color:#475569;">If you have any questions, please contact {school_name}.</p>
 					</div>
 				</div>
@@ -1651,6 +1807,8 @@ def _invoice_cancellation_email_message(invoice_doc, reason=None):
 		school_identity=_school_identity_email_html(context),
 		greeting=_invoice_email_greeting(context),
 		invoice=escape_html(invoice_doc.name),
+		total=flt(context.get("total")),
+		rows=rows,
 		reason_html=reason_html,
 	)
 
