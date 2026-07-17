@@ -139,6 +139,7 @@ class TestTrialParentEmailContent(TestCase):
 		self.assertIn("Sam &lt;Student&gt;", manual_message)
 		self.assertIn("Creative &lt;Art&gt;", manual_message)
 		self.assertIn("1 Art Street<br>Brisbane", manual_message)
+		self.assertIn("All art supplies are provided for the trial class.", manual_message)
 
 		custom_message = _trial_class_reminder_email_message(
 			context,
@@ -147,6 +148,7 @@ class TestTrialParentEmailContent(TestCase):
 		)
 		self.assertIn("Booked &lt;now&gt;", custom_message)
 		self.assertIn("Safe &lt;copy&gt;", custom_message)
+		self.assertIn("All art supplies are provided for the trial class.", custom_message)
 
 
 class TestTrialParentReminderTiming(TestCase):

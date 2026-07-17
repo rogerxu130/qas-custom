@@ -1174,6 +1174,7 @@ def _trial_class_reminder_email_message(context, heading=None, intro=None):
 
 	heading = heading or _("Trial class reminder")
 	intro = intro or _("This is a friendly reminder about your child's upcoming trial class.")
+	supplies_notice = _("All art supplies are provided for the trial class.")
 
 	return """
 		<div style="margin:0;padding:0;background:#f8fafc;font-family:Arial,sans-serif;color:#172033;">
@@ -1194,6 +1195,7 @@ def _trial_class_reminder_email_message(context, heading=None, intro=None):
 							<tr><td style="padding:9px 0;color:#64748b;">Date</td><td style="padding:9px 0;text-align:right;font-weight:700;">{date_display}</td></tr>
 							<tr><td style="padding:9px 0;color:#64748b;">Time</td><td style="padding:9px 0;text-align:right;font-weight:700;">{start_time} - {end_time}</td></tr>
 						</table>
+						<p style="margin:0 0 18px;padding:12px 14px;border-radius:8px;background:#fff7ed;font-size:15px;line-height:1.5;color:#9a3412;font-weight:700;">{supplies_notice}</p>
 						<p style="margin:0;font-size:15px;line-height:1.5;color:#475569;">If you are unable to attend or need to make changes, please reply to this email or call {school_name} on {school_phone}.</p>
 					</div>
 				</div>
@@ -1211,6 +1213,7 @@ def _trial_class_reminder_email_message(context, heading=None, intro=None):
 		date_display=value("date_display"),
 		start_time=value("start_time"),
 		end_time=value("end_time"),
+		supplies_notice=escape_html(supplies_notice),
 		school_phone=value("school_phone"),
 	)
 
