@@ -5,12 +5,36 @@ from frappe.utils import getdate
 
 from qas_custom.api.school_admin import school_admin_get_course_sessions
 from qas_custom.services.school_admin import (
+	_course_session_sort_key,
 	_get_course_session_rows,
 	get_school_admin_course_sessions_data,
 )
 
 
 class TestSchoolAdminCourseSessions(TestCase):
+	def test_session_sort_key_orders_time_then_campus_course_and_name(self):
+		rows = [
+			{"name": "SESSION-LATE", "session_date": "2026-07-18", "weekly_timeslot_detail": {"start_time": "15:30:00", "campus": "Campus A", "course": "Art"}},
+			{"name": "SESSION-B", "session_date": "2026-07-18", "weekly_timeslot_detail": {"start_time": "09:00:00", "campus": "Campus B", "course": "Art"}},
+			{"name": "SESSION-A", "session_date": "2026-07-18", "weekly_timeslot_detail": {"start_time": "09:00:00", "campus": "Campus A", "course": "Art"}},
+		]
+
+		result = sorted(rows, key=_course_session_sort_key)
+
+		self.assertEqual([row["name"] for row in result], ["SESSION-A", "SESSION-B", "SESSION-LATE"])
+
+	def test_session_sort_key_places_missing_or_invalid_time_last(self):
+		rows = [
+			{"name": "SESSION-MISSING", "session_date": "2026-07-18", "weekly_timeslot_detail": {"start_time": None}},
+			{"name": "SESSION-INVALID", "session_date": "2026-07-18", "weekly_timeslot_detail": {"start_time": "not-a-time"}},
+			{"name": "SESSION-VALID", "session_date": "2026-07-18", "weekly_timeslot_detail": {"start_time": "16:00:00"}},
+		]
+
+		result = sorted(rows, key=_course_session_sort_key)
+
+		self.assertEqual(result[0]["name"], "SESSION-VALID")
+		self.assertEqual({row["name"] for row in result[1:]}, {"SESSION-INVALID", "SESSION-MISSING"})
+
 	@patch("qas_custom.api.school_admin.get_school_admin_course_sessions_data")
 	def test_api_accepts_and_passes_course_session_status(self, get_sessions):
 		get_sessions.return_value = {"items": []}

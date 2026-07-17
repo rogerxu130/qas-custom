@@ -18,8 +18,8 @@ class TestCampusAdminReadonlyClasses(TestCase):
 	def test_session_list_queries_each_assigned_campus_and_merges_in_date_order(self, _labels, require_profile, get_rows):
 		require_profile.return_value = {"campuses": ["Campus B", "Campus A"]}
 		get_rows.side_effect = [
-			[{"name": "SESSION-B", "session_date": "2026-07-18"}],
-			[{"name": "SESSION-A", "session_date": "2026-07-17"}],
+			[{"name": "SESSION-B", "session_date": "2026-07-18", "weekly_timeslot_detail": {"start_time": "15:30:00", "campus": "Campus B"}}],
+			[{"name": "SESSION-A", "session_date": "2026-07-18", "weekly_timeslot_detail": {"start_time": "09:00:00", "campus": "Campus A"}}],
 		]
 
 		result = get_campus_admin_course_sessions_data(from_date="2026-07-17", to_date="2026-07-31")

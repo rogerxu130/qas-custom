@@ -21,6 +21,7 @@ from qas_custom.services.inquiry import (
 )
 from qas_custom.services.school_admin import (
 	_count_leave_attendance_rows,
+	_course_session_sort_key,
 	_document_payload,
 	_get_course_session_rows,
 	_get_school_admin_attendance_rows,
@@ -283,7 +284,7 @@ def get_campus_admin_course_sessions_data(
 
 	items = sorted(
 		items_by_name.values(),
-		key=lambda item: (item.get("session_date") or "", item.get("name") or ""),
+		key=_course_session_sort_key,
 	)
 	_attach_campus_admin_teacher_labels(items)
 	return {"items": items[:row_limit]}

@@ -5808,7 +5808,26 @@ def _get_course_session_rows(
 		if item.get("weekly_timeslot_detail"):
 			_attach_course_label(item, item["weekly_timeslot_detail"].get("course"), item["weekly_timeslot_detail"])
 		items.append(item)
-	return items
+	return sorted(items, key=_course_session_sort_key)
+
+
+def _course_session_sort_key(item):
+	detail = item.get("weekly_timeslot_detail") or {}
+	start_time = detail.get("start_time") or item.get("start_time")
+	time_key = (1, 0)
+	if start_time:
+		try:
+			parsed_time = get_time(start_time)
+			time_key = (0, parsed_time.hour * 3600 + parsed_time.minute * 60 + parsed_time.second)
+		except (TypeError, ValueError):
+			pass
+	return (
+		str(item.get("session_date") or "9999-12-31"),
+		*time_key,
+		str(detail.get("campus") or item.get("campus") or "").casefold(),
+		str(detail.get("course") or item.get("course") or "").casefold(),
+		str(item.get("name") or "").casefold(),
+	)
 
 
 def _get_course_session_student_counts(course_sessions):
