@@ -313,6 +313,50 @@ def get_campus_admin_course_session_data(course_session=None):
 	return payload
 
 
+def update_campus_admin_student_teaching_notes_data(student=None, teaching_notes=None):
+	reject_support_view_write()
+	profile = _require_campus_admin_profile()
+	if not student:
+		frappe.throw(_("Student is required."))
+	if not frappe.db.exists("Student", student):
+		frappe.throw(_("Student was not found."), frappe.DoesNotExistError)
+	if "teaching_notes" not in _safe_fields("Student", ["teaching_notes"]):
+		frappe.throw(_("Student teaching notes are not available on this site. Please run migrate."))
+	_assert_campus_admin_student_access(student, profile["campuses"])
+
+	doc = frappe.get_doc("Student", student)
+	doc.teaching_notes = str(teaching_notes or "").strip()
+	doc.save(ignore_permissions=True)
+	frappe.db.commit()
+	return {"student": doc.name, "teaching_notes": doc.get("teaching_notes") or ""}
+
+
+def _assert_campus_admin_student_access(student, allowed_campuses):
+	attendance_sessions = frappe.get_all(
+		"Class Attendance Entry",
+		filters={"student": student},
+		pluck="course_session",
+		limit_page_length=0,
+	)
+	attendance_sessions = sorted({session for session in attendance_sessions if session})
+	if attendance_sessions:
+		weekly_timeslots = frappe.get_all(
+			"Course Sessions",
+			filters={"name": ["in", attendance_sessions]},
+			pluck="weekly_timeslot",
+			limit_page_length=0,
+		)
+		weekly_timeslots = sorted({timeslot for timeslot in weekly_timeslots if timeslot})
+		if weekly_timeslots and frappe.get_all(
+			"Weekly Timeslot",
+			filters={"name": ["in", weekly_timeslots], "campus": ["in", allowed_campuses]},
+			pluck="name",
+			limit=1,
+		):
+			return
+	frappe.throw(_("You do not have access to this Student."), frappe.PermissionError)
+
+
 def _get_campus_admin_course_session_access(course_session, allowed_campuses):
 	try:
 		doc = frappe.get_doc("Course Sessions", course_session)

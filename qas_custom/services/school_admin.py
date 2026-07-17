@@ -96,7 +96,7 @@ PARENT_UPDATE_FIELDS = ["parent_name", "mobile_number", "phone", "address", "sta
 PARENT_EMAIL_FIELDS = ("email", "email_id", "contact_email")
 PARENT_PORTAL_INVITE_LOG_DOCTYPE = "Parent Portal Invite Log"
 PARENT_PORTAL_RESET_TOKEN_DOCTYPE = "Portal Password Reset Token"
-STUDENT_EDIT_FIELDS = ["student_name", "first_name", "last_name", "date_of_birth", "dob", "gender", "status", "guardian", "parent"]
+STUDENT_EDIT_FIELDS = ["student_name", "first_name", "last_name", "date_of_birth", "dob", "gender", "status", "guardian", "parent", "teaching_notes"]
 COURSE_EDIT_FIELDS = [
 	"course_name",
 	"course_name_zh",
@@ -575,6 +575,7 @@ def get_school_admin_students_data(parent=None, query=None, status=None, limit=1
 def create_school_admin_student_data(payload=None):
 	_require_school_admin()
 	payload = _get_payload(payload)
+	_normalize_student_teaching_notes(payload)
 	doc = frappe.new_doc("Student")
 	_apply_master_payload(doc, payload, STUDENT_EDIT_FIELDS)
 	if payload.get("parent"):
@@ -593,6 +594,7 @@ def update_school_admin_student_data(student=None, payload=None):
 	if not student:
 		frappe.throw(_("Student is required."))
 	payload = _get_payload(payload)
+	_normalize_student_teaching_notes(payload)
 	doc = frappe.get_doc("Student", student)
 	_apply_master_payload(doc, payload, STUDENT_EDIT_FIELDS)
 	if payload.get("parent"):
@@ -3224,12 +3226,14 @@ def _validate_course_session_attendance_status(status):
 def _get_school_admin_attendance_rows(course_session, term=None):
 	rows = [_docdict(row) for row in get_attendance_entries([course_session])]
 	_enrich_trial_confirmation_status(rows)
+	teaching_notes_map = _get_student_teaching_notes_map([row.get("student") for row in rows])
 	family_map = _get_attendance_family_map([row.get("student") for row in rows])
 	outstanding_map = _get_family_outstanding_invoice_map(family_map.values())
 	term_invoice_map = _get_family_current_term_invoice_map(family_map.values(), term)
 	for row in rows:
 		student = row.get("student")
 		family = family_map.get(student) or {}
+		row["teaching_notes"] = teaching_notes_map.get(student) or ""
 		outstanding = outstanding_map.get(family.get("parent")) or {}
 		term_invoice = term_invoice_map.get(family.get("parent")) or {}
 		row["student_display"] = get_student_display_name(student) or student
@@ -3289,6 +3293,23 @@ def _roster_course_session_attendance_rows(rows):
 
 def _count_leave_attendance_rows(rows):
 	return sum(1 for row in rows if (row.get("status") or "").strip() == "Leave")
+
+
+def _get_student_teaching_notes_map(student_ids):
+	student_ids = sorted({student for student in student_ids if student})
+	if not student_ids:
+		return {}
+	fields = _safe_fields("Student", ["name", "teaching_notes"])
+	return {
+		row.get("name"): (row.get("teaching_notes") or "").strip()
+		for row in frappe.get_all(
+			"Student",
+			filters={"name": ["in", student_ids]},
+			fields=fields,
+			limit_page_length=0,
+		)
+		if row.get("name")
+	}
 
 
 def _get_attendance_family_map(student_ids):
@@ -4135,6 +4156,11 @@ def _apply_master_payload(doc, payload, candidate_fields):
 	for fieldname in candidate_fields:
 		if fieldname in payload:
 			_set_if_field(doc, fieldname, payload.get(fieldname))
+
+
+def _normalize_student_teaching_notes(payload):
+	if payload is not None and "teaching_notes" in payload:
+		payload["teaching_notes"] = str(payload.get("teaching_notes") or "").strip()
 
 
 def _validate_required(doc, required_fields):

@@ -129,6 +129,7 @@ def get_teacher_session_detail_data(course_session=None):
                 "row_id": row.get("name"),
                 "student": student_id,
                 "student_name": get_student_display_name(student) or student_id,
+                "teaching_notes": (student.get("teaching_notes") or "").strip(),
                 "parent_name": parent.get("parent_name") or "",
                 "parent_phone": parent.get("parent_phone") or "",
                 "enrollment_type": row.get("enrollment_type"),
@@ -596,7 +597,7 @@ def _get_student_map(student_ids: list[str]):
         for row in frappe.get_all(
             "Student",
             filters={"name": ["in", student_ids]},
-            fields=_safe_fields("Student", ["name", "student_name", "student_code", "guardian", "parent"]),
+            fields=_safe_fields("Student", ["name", "student_name", "student_code", "guardian", "parent", "teaching_notes"]),
         )
     }
 
