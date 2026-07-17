@@ -163,6 +163,8 @@ def get_school_admin_teacher_directory_data(query=None, limit=300):
 
 def get_school_admin_dashboard_data():
 	_require_school_admin()
+	from qas_custom.services.payment_collection_requests import get_pending_payment_request_count
+
 	start_date = getdate(today())
 	end_date = getdate(add_days(start_date, 7))
 	outstanding = _get_outstanding_invoice_summary()
@@ -173,6 +175,7 @@ def get_school_admin_dashboard_data():
 		"date": str(start_date),
 		"action_counts": {
 			"draft_invoices": _count_sales_invoices(draft_invoice_filters),
+			"pending_payment_requests": get_pending_payment_request_count(),
 			"trial_needs_scheduling": _count(
 				"Inquiry",
 				{"inquiry_type": "Trial Lesson", "status": "Needs Review"},
@@ -4918,12 +4921,18 @@ def _get_invoice_rows(status=None, customer=None, parent=None, students=None, so
 		order_by="modified desc",
 		limit=limit,
 	)
-	return [_invoice_row_payload(row) for row in rows]
+	from qas_custom.services.payment_collection_requests import get_invoice_payment_request_summaries
+
+	payment_request_summaries = get_invoice_payment_request_summaries(row.get("name") for row in rows)
+	return [_invoice_row_payload(row, payment_request_summaries.get(row.get("name"))) for row in rows]
 
 
-def _invoice_row_payload(row):
+def _invoice_row_payload(row, payment_request_summary=None):
+	from qas_custom.services.payment_collection_requests import get_invoice_payment_request_summary
+
 	payload = _normalize_row_payload("Sales Invoice", row)
 	payload.update(_invoice_credit_payload(payload))
+	payload.update(payment_request_summary or get_invoice_payment_request_summary(payload.get("name")))
 	return payload
 
 
@@ -4981,6 +4990,8 @@ def _invoice_names_for_students(students):
 
 
 def _build_invoice_payload(doc):
+	from qas_custom.services.payment_collection_requests import get_invoice_payment_request_summary
+
 	doc = frappe.get_doc("Sales Invoice", doc) if isinstance(doc, str) else doc
 	payload = _document_payload(doc)
 	payload["docstatus"] = cint(doc.docstatus)
@@ -4989,6 +5000,7 @@ def _build_invoice_payload(doc):
 	payload["comments"] = _get_comments("Sales Invoice", doc.name)
 	payload.update(_invoice_credit_payload(doc))
 	payload["notifications"] = get_invoice_notification_summary(doc.name)
+	payload.update(get_invoice_payment_request_summary(doc.name))
 	return payload
 
 

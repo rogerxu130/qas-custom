@@ -1,5 +1,11 @@
 import frappe
 
+from qas_custom.services.payment_collection_requests import (
+	create_campus_payment_request_data,
+	get_campus_payment_requests_data,
+	search_campus_payment_targets_data,
+)
+
 from qas_custom.services.password_reset import (
 	confirm_campus_admin_password_reset,
 	request_campus_admin_password_reset,
@@ -57,6 +63,21 @@ def campus_admin_get_csrf_token():
 @frappe.whitelist()
 def campus_admin_get_teacher_directory(query=None, limit=300):
 	return get_campus_admin_teacher_directory_data(query=query, limit=limit)
+
+
+@frappe.whitelist()
+def campus_admin_search_payment_targets(query=None, campus=None, limit=40):
+	return search_campus_payment_targets_data(query=query, campus=campus, limit=limit)
+
+
+@frappe.whitelist()
+def campus_admin_get_payment_requests(status=None, campus=None, query=None, limit=80):
+	return get_campus_payment_requests_data(status=status, campus=campus, query=query, limit=limit)
+
+
+@frappe.whitelist()
+def campus_admin_create_payment_request(payload=None):
+	return create_campus_payment_request_data(payload=payload)
 
 
 @frappe.whitelist()

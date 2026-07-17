@@ -1,5 +1,10 @@
 import frappe
 
+from qas_custom.services.payment_collection_requests import (
+	get_school_admin_payment_requests_data,
+	resolve_school_admin_payment_request_data,
+)
+
 from qas_custom.services.announcements import (
 	archive_school_admin_announcement_data,
 	get_school_admin_announcement_data,
@@ -127,6 +132,22 @@ from qas_custom.services.school_admin import (
 	update_school_admin_weekly_timeslot_data,
 	change_school_admin_weekly_timeslot_teacher_data,
 )
+
+
+@frappe.whitelist()
+def school_admin_get_payment_requests(status=None, campus=None, query=None, limit=120):
+	return get_school_admin_payment_requests_data(status=status, campus=campus, query=query, limit=limit)
+
+
+@frappe.whitelist()
+def school_admin_resolve_payment_request(request_name=None, status=None, resolution_note=None, payment_entry=None, store_credit_entry=None):
+	return resolve_school_admin_payment_request_data(
+		request_name=request_name,
+		status=status,
+		resolution_note=resolution_note,
+		payment_entry=payment_entry,
+		store_credit_entry=store_credit_entry,
+	)
 
 
 @frappe.whitelist()
