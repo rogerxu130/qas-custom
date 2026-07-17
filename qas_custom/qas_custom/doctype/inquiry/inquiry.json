@@ -253,7 +253,7 @@
    "fieldname": "confirmation_status",
    "fieldtype": "Select",
    "label": "Confirmation Status",
-   "options": "Not Required\nPending\nCustomer Confirmed\nSent\nFailed"
+   "options": "Not Required\nPending\nText Message Sent\nCustomer Confirmed\nSent\nFailed"
   },
   {
    "default": "Not Required",

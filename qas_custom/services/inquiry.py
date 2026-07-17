@@ -26,7 +26,7 @@ from qas_custom.utils.environment import sendmail_or_skip
 INQUIRY_TYPES = {"Trial Lesson", "School Visit"}
 ADMIN_ROLES = {"System Manager", "School Admin"}
 NEEDS_REVIEW_STATUS = "Needs Review"
-CUSTOMER_CONFIRMATION_VALUES = {"Pending", "Customer Confirmed"}
+CUSTOMER_CONFIRMATION_VALUES = {"Pending", "Text Message Sent", "Customer Confirmed"}
 CUSTOMER_CONFIRMATION_MUTABLE_STATUSES = {"Booked", "Rescheduled"}
 DAY_ABBREVIATIONS = {
 	"mon": "Monday",
@@ -101,7 +101,7 @@ def update_inquiry_confirmation_core(
 		frappe.throw(_("Inquiry is required."))
 	confirmation_status = (confirmation_status or "").strip()
 	if confirmation_status not in CUSTOMER_CONFIRMATION_VALUES:
-		frappe.throw(_("Customer confirmation must be Pending or Customer Confirmed."))
+		frappe.throw(_("Customer confirmation must be Pending, Text Message Sent, or Customer Confirmed."))
 
 	inquiry_doc = frappe.get_doc("Inquiry", inquiry)
 	if inquiry_doc.inquiry_type != "Trial Lesson":
@@ -113,10 +113,17 @@ def update_inquiry_confirmation_core(
 	expected_course_session = (expected_course_session or "").strip()
 	if current_course_session != expected_course_session:
 		frappe.throw(_("The trial session changed after this Inquiry was opened. Refresh and try again."))
-	if confirmation_status == "Customer Confirmed" and not current_course_session:
-		frappe.throw(_("A Course Session is required before the customer can be marked confirmed."))
+	if confirmation_status in {"Text Message Sent", "Customer Confirmed"} and not current_course_session:
+		frappe.throw(_("A Course Session is required before customer contact can be recorded."))
+	if confirmation_status == "Text Message Sent":
+		if not (inquiry_doc.get("contact_phone") or "").strip():
+			frappe.throw(_("A parent contact phone is required before recording a text message."))
+		if not _get_campus_address(inquiry_doc.get("campus")):
+			frappe.throw(_("The booked Campus must have an address before recording a text message."))
 
 	previous_status = (inquiry_doc.get("confirmation_status") or "Not Required").strip()
+	if confirmation_status == "Text Message Sent" and previous_status == "Customer Confirmed":
+		return build_inquiry_detail(inquiry_doc.name)
 	if previous_status == confirmation_status:
 		return build_inquiry_detail(inquiry_doc.name)
 
@@ -407,7 +414,7 @@ def build_inquiry_detail(inquiry: str):
 		elif reminder.get("status") == "Logged":
 			reminder["status"] = inquiry_doc.reminder_status
 	return {
-		"inquiry": _build_inquiry_payload(inquiry_doc),
+		"inquiry": _build_inquiry_payload(inquiry_doc, include_campus_address=True),
 		"notes": _get_note_payloads(inquiry_doc.name),
 		"reminder": reminder,
 	}
@@ -1311,9 +1318,9 @@ def _build_needs_review_email(inquiry_doc, reason: str):
 	return "<br>".join(frappe.utils.escape_html(line) for line in lines)
 
 
-def _build_inquiry_payload(doc):
+def _build_inquiry_payload(doc, include_campus_address=False):
 	trial_invoice_status = get_trial_invoice_status(doc)
-	return {
+	payload = {
 		"id": doc.name,
 		"inquiry_id": doc.name,
 		"inquiry_type": doc.inquiry_type,
@@ -1352,6 +1359,15 @@ def _build_inquiry_payload(doc):
 		"converted_invoice": doc.get("converted_invoice"),
 		"inactive_reason": doc.inactive_reason,
 	}
+	if include_campus_address:
+		payload["campus_address"] = _get_campus_address(doc.campus)
+	return payload
+
+
+def _get_campus_address(campus):
+	if not campus:
+		return ""
+	return str(frappe.db.get_value("Campus", campus, "address") or "").strip()
 
 
 def _get_note_payloads(inquiry):

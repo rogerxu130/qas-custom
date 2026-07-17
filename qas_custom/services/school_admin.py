@@ -89,7 +89,7 @@ DEFAULT_COURSE_INVOICE_ITEM = "Tuition Fee"
 MANUAL_INVOICE_ITEM = "Other"
 BULK_INVOICE_SUBMIT_JOB_TTL_SECONDS = 86400
 NON_ATTENDING_ATTENDANCE_STATUSES = {"Cancelled", "Leave"}
-TRIAL_CONFIRMATION_STATUSES = {"Pending", "Customer Confirmed"}
+TRIAL_CONFIRMATION_STATUSES = {"Pending", "Text Message Sent", "Customer Confirmed"}
 SCHOOL_ADMIN_LEAVE_ATTENDANCE_STATUSES = ("To be started", "Absent")
 PARENT_EDIT_FIELDS = ["parent_name", "mobile_number", "phone", "email", "email_id", "address", "status", "customer"]
 PARENT_UPDATE_FIELDS = ["parent_name", "mobile_number", "phone", "address", "status", "customer"]
@@ -944,7 +944,7 @@ def get_school_admin_inquiries_data(
 		filters["inquiry_type"] = inquiry_type
 	confirmation_status = str(confirmation_status or "").strip()
 	if confirmation_status:
-		if confirmation_status not in {"Pending", "Customer Confirmed"}:
+		if confirmation_status not in TRIAL_CONFIRMATION_STATUSES:
 			frappe.throw(_("Unsupported customer confirmation filter."))
 		filters["confirmation_status"] = confirmation_status
 	if campus:

@@ -26,11 +26,13 @@ class TestSchoolAdminSessionRoster(TestCase):
 	def test_trial_confirmation_status_is_loaded_in_one_batch_for_all_roster_rows(self, get_all):
 		get_all.return_value = [
 			{"name": "INQ-PENDING", "confirmation_status": "Pending"},
+			{"name": "INQ-TEXTED", "confirmation_status": "Text Message Sent"},
 			{"name": "INQ-CONFIRMED", "confirmation_status": "Customer Confirmed"},
 			{"name": "INQ-LEGACY", "confirmation_status": "Sent"},
 		]
 		rows = [
 			{"student": "Pending", "source_doctype": "Inquiry", "source_document": "INQ-PENDING"},
+			{"student": "Texted", "source_doctype": "Inquiry", "source_document": "INQ-TEXTED"},
 			{
 				"student": "Confirmed leave",
 				"status": "Leave",
@@ -47,16 +49,17 @@ class TestSchoolAdminSessionRoster(TestCase):
 		get_all.assert_called_once_with(
 			"Inquiry",
 			filters={
-				"name": ["in", ["INQ-CONFIRMED", "INQ-LEGACY", "INQ-MISSING", "INQ-PENDING"]]
+				"name": ["in", ["INQ-CONFIRMED", "INQ-LEGACY", "INQ-MISSING", "INQ-PENDING", "INQ-TEXTED"]]
 			},
 			fields=["name", "confirmation_status"],
 			limit_page_length=0,
 		)
 		self.assertEqual(rows[0]["trial_confirmation_status"], "Pending")
-		self.assertEqual(rows[1]["trial_confirmation_status"], "Customer Confirmed")
-		self.assertEqual(rows[2]["trial_confirmation_status"], "")
+		self.assertEqual(rows[1]["trial_confirmation_status"], "Text Message Sent")
+		self.assertEqual(rows[2]["trial_confirmation_status"], "Customer Confirmed")
 		self.assertEqual(rows[3]["trial_confirmation_status"], "")
-		self.assertNotIn("trial_confirmation_status", rows[4])
+		self.assertEqual(rows[4]["trial_confirmation_status"], "")
+		self.assertNotIn("trial_confirmation_status", rows[5])
 
 	@patch("qas_custom.services.school_admin.frappe.get_all")
 	def test_non_trial_roster_does_not_query_inquiries(self, get_all):
