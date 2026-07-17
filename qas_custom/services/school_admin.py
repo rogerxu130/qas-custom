@@ -2837,6 +2837,7 @@ def get_school_admin_course_sessions_data(
 	campus=None,
 	from_date=None,
 	to_date=None,
+	status=None,
 	include_inactive_terms=0,
 	include_inactive_timeslots=0,
 	limit=160,
@@ -2850,6 +2851,7 @@ def get_school_admin_course_sessions_data(
 			term=term,
 			course=course,
 			campus=campus,
+			status=status,
 			from_date=from_date,
 			to_date=to_date,
 			include_inactive_terms=include_inactive_terms,
@@ -5700,6 +5702,7 @@ def _get_course_session_rows(
 	campus=None,
 	from_date=None,
 	to_date=None,
+	status=None,
 	include_inactive_terms=0,
 	include_inactive_timeslots=0,
 	limit=160,
@@ -5709,6 +5712,8 @@ def _get_course_session_rows(
 	filters = {}
 	if weekly_timeslot:
 		filters["weekly_timeslot"] = weekly_timeslot
+	if status:
+		filters["status"] = status
 	if from_date and to_date:
 		filters["session_date"] = ["between", [getdate(from_date), getdate(to_date)]]
 	elif from_date:
