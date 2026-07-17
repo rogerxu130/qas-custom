@@ -184,6 +184,9 @@ doc_events = {
 
 scheduler_events = {
 	"cron": {
+		"*/15 * * * *": [
+			"qas_custom.tasks.teacher_session_completion_reminders.send_teacher_session_completion_reminders",
+		],
 		"0 * * * *": [
 			"qas_custom.tasks.teacher_schedule_reminders.send_teacher_next_day_schedule_reminders",
 		],
