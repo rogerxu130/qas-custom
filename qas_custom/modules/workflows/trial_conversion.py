@@ -5,7 +5,7 @@ from frappe import _
 from frappe.utils import flt, getdate, nowdate
 
 from qas_custom.modules.attendance.commands import create_full_term_attendance_entries
-from qas_custom.modules.billing.commands import create_prorata_invoice
+from qas_custom.modules.billing.commands import create_prorata_invoice, run_invoice_mutation_as_administrator
 from qas_custom.modules.common import clear_frappe_messages
 from qas_custom.modules.course_schedule.queries import (
 	build_session_option,
@@ -157,5 +157,5 @@ def apply_conversion_invoice_note(invoice, internal_note):
 	if not internal_note:
 		return invoice
 	invoice.set("remarks", append_conversion_invoice_note(invoice.get("remarks"), internal_note))
-	invoice.save(ignore_permissions=True)
+	run_invoice_mutation_as_administrator(lambda: invoice.save(ignore_permissions=True))
 	return invoice

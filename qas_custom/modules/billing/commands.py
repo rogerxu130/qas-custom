@@ -18,6 +18,15 @@ from qas_custom.services.display_labels import (
 TRIAL_CLASS_FEE_FIELDS = ("trial_class_fee", "trial_fee", "pay_as_you_go_fee")
 
 
+def run_invoice_mutation_as_administrator(callback):
+	original_user = frappe.session.user or "Administrator"
+	try:
+		frappe.set_user("Administrator")
+		return callback()
+	finally:
+		frappe.set_user(original_user)
+
+
 def create_prorata_invoice(inquiry_doc, enrollment, course: str, term: str, start_session: str, remaining_session_count: int):
 	context = get_prorata_invoice_context(
 		inquiry_doc=inquiry_doc,
@@ -62,9 +71,9 @@ def create_prorata_invoice(inquiry_doc, enrollment, course: str, term: str, star
 	apply_invoice_payment_snapshot(invoice)
 
 	if is_new_doc(invoice):
-		invoice.insert(ignore_permissions=True)
+		run_invoice_mutation_as_administrator(lambda: invoice.insert(ignore_permissions=True))
 	else:
-		invoice.save(ignore_permissions=True)
+		run_invoice_mutation_as_administrator(lambda: invoice.save(ignore_permissions=True))
 	return invoice
 
 

@@ -33,11 +33,16 @@ class TestCampusAdminInvoiceNote(TestCase):
 	def test_applies_note_to_invoice_and_saves_draft(self):
 		invoice = Mock()
 		invoice.get.return_value = "Existing instruction"
-		self.assertIs(apply_conversion_invoice_note(invoice, "Promised 10% discount"), invoice)
+		with patch(
+			"qas_custom.modules.workflows.trial_conversion.run_invoice_mutation_as_administrator",
+			side_effect=lambda callback: callback(),
+		) as run_mutation:
+			self.assertIs(apply_conversion_invoice_note(invoice, "Promised 10% discount"), invoice)
 		invoice.set.assert_called_once_with(
 			"remarks",
 			"Existing instruction\nCampus Admin conversion note: Promised 10% discount",
 		)
+		run_mutation.assert_called_once()
 		invoice.save.assert_called_once_with(ignore_permissions=True)
 
 	def test_empty_note_does_not_save_invoice(self):
