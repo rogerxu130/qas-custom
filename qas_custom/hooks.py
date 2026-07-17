@@ -186,6 +186,7 @@ scheduler_events = {
 	"cron": {
 		"*/15 * * * *": [
 			"qas_custom.tasks.teacher_session_completion_reminders.send_teacher_session_completion_reminders",
+			"qas_custom.tasks.trial_parent_notifications.send_trial_parent_24h_reminders",
 		],
 		"0 * * * *": [
 			"qas_custom.tasks.teacher_schedule_reminders.send_teacher_next_day_schedule_reminders",

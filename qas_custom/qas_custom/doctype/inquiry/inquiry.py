@@ -10,8 +10,10 @@ class Inquiry(Document):
 	def after_insert(self):
 		from qas_custom.services.inquiry import ensure_inquiry_attendance_entry
 		from qas_custom.modules.notifications.commands import enqueue_session_staff_notification
+		from qas_custom.modules.notifications.trial_parent_notifications import queue_trial_parent_booking_change
 
 		ensure_inquiry_attendance_entry(self)
+		queue_trial_parent_booking_change(self)
 		if self.inquiry_type == "Trial Lesson" and self.course_session and self.student:
 			enqueue_session_staff_notification(
 				"trial_added",
@@ -23,10 +25,12 @@ class Inquiry(Document):
 
 	def on_update(self):
 		from qas_custom.modules.notifications.commands import enqueue_session_staff_notification
+		from qas_custom.modules.notifications.trial_parent_notifications import queue_trial_parent_booking_change
 
 		old_doc = self.get_doc_before_save()
 		old_course_session = old_doc.get("course_session") if old_doc else None
 		old_status = old_doc.get("status") if old_doc else None
+		queue_trial_parent_booking_change(self, old_doc=old_doc)
 		if self.inquiry_type != "Trial Lesson" or not self.student:
 			return
 		if self.status == "Cancelled" and old_status != "Cancelled" and old_course_session:

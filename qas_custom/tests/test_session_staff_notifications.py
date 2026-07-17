@@ -14,8 +14,9 @@ from qas_custom.modules.notifications.commands import (
 
 
 class TestSessionStaffNotifications(TestCase):
+	@patch("qas_custom.modules.notifications.trial_parent_notifications.queue_trial_parent_booking_change")
 	@patch("qas_custom.modules.notifications.commands.enqueue_session_staff_notification")
-	def test_inquiry_cancel_queues_original_session_notification(self, mock_enqueue):
+	def test_inquiry_cancel_queues_original_session_notification(self, mock_enqueue, _mock_parent_email):
 		doc = SimpleNamespace(
 			inquiry_type="Trial Lesson",
 			student="STU-001",
@@ -35,8 +36,9 @@ class TestSessionStaffNotifications(TestCase):
 			source_document="INQ-001",
 		)
 
+	@patch("qas_custom.modules.notifications.trial_parent_notifications.queue_trial_parent_booking_change")
 	@patch("qas_custom.modules.notifications.commands.enqueue_session_staff_notification")
-	def test_inquiry_reschedule_queues_cancel_then_add_notifications(self, mock_enqueue):
+	def test_inquiry_reschedule_queues_cancel_then_add_notifications(self, mock_enqueue, _mock_parent_email):
 		doc = SimpleNamespace(
 			inquiry_type="Trial Lesson",
 			student="STU-001",

@@ -1168,9 +1168,12 @@ def _trial_class_reminder_time(value):
 	return text[:5] if len(text) >= 5 else text
 
 
-def _trial_class_reminder_email_message(context):
+def _trial_class_reminder_email_message(context, heading=None, intro=None):
 	def value(key):
 		return escape_html(context.get(key) or "")
+
+	heading = heading or _("Trial class reminder")
+	intro = intro or _("This is a friendly reminder about your child's upcoming trial class.")
 
 	return """
 		<div style="margin:0;padding:0;background:#f8fafc;font-family:Arial,sans-serif;color:#172033;">
@@ -1178,11 +1181,11 @@ def _trial_class_reminder_email_message(context):
 				<div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;">
 					<div style="padding:22px 24px;background:#172033;color:#ffffff;">
 						<p style="margin:0 0 6px;font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:#f7b6a4;">{school_name}</p>
-						<h1 style="margin:0;font-size:24px;line-height:1.3;">Trial class reminder</h1>
+						<h1 style="margin:0;font-size:24px;line-height:1.3;">{heading}</h1>
 					</div>
 					<div style="padding:24px;">
 						<p style="margin:0 0 18px;font-size:16px;line-height:1.5;">Hello {parent_name},</p>
-						<p style="margin:0 0 18px;font-size:16px;line-height:1.5;">This is a friendly reminder about your child's upcoming trial class.</p>
+						<p style="margin:0 0 18px;font-size:16px;line-height:1.5;">{intro}</p>
 						<table style="width:100%;border-collapse:collapse;margin:0 0 22px;">
 							<tr><td style="padding:9px 0;color:#64748b;">Student</td><td style="padding:9px 0;text-align:right;font-weight:700;">{student_name}</td></tr>
 							<tr><td style="padding:9px 0;color:#64748b;">Course</td><td style="padding:9px 0;text-align:right;font-weight:700;">{course}</td></tr>
@@ -1198,6 +1201,8 @@ def _trial_class_reminder_email_message(context):
 		</div>
 	""".format(
 		school_name=value("school_name"),
+		heading=escape_html(heading),
+		intro=escape_html(intro),
 		parent_name=value("parent_name"),
 		student_name=value("student_name"),
 		course=value("course"),
