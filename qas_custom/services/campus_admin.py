@@ -391,11 +391,16 @@ def get_campus_admin_conversion_sessions_data(inquiry=None, start_date=None, cou
 	)
 
 
-def convert_campus_admin_inquiry_data(inquiry=None, course_session=None):
+def convert_campus_admin_inquiry_data(inquiry=None, course_session=None, internal_note=None):
 	reject_support_view_write()
 	_require_inquiry_access(inquiry)
 	_validate_conversion_session_access(inquiry, course_session)
-	result = convert_inquiry_to_full_term_core(inquiry, course_session, actor=frappe.session.user)
+	result = convert_inquiry_to_full_term_core(
+		inquiry,
+		course_session,
+		actor=frappe.session.user,
+		internal_note=internal_note,
+	)
 	return result["inquiry"]
 
 

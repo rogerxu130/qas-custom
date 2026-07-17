@@ -160,8 +160,12 @@ def campus_admin_get_conversion_sessions(inquiry=None, start_date=None, course=N
 
 
 @frappe.whitelist()
-def campus_admin_convert_inquiry(inquiry=None, course_session=None):
-	return convert_campus_admin_inquiry_data(inquiry=inquiry, course_session=course_session)
+def campus_admin_convert_inquiry(inquiry=None, course_session=None, internal_note=None):
+	return convert_campus_admin_inquiry_data(
+		inquiry=inquiry,
+		course_session=course_session,
+		internal_note=internal_note,
+	)
 
 
 @frappe.whitelist()

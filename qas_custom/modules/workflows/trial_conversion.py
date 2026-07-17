@@ -21,6 +21,9 @@ from qas_custom.modules.inquiry.commands import get_inquiry_for_conversion, mark
 from qas_custom.modules.inquiry.notes import add_conversion_note
 
 
+CONVERSION_INTERNAL_NOTE_MAX_LENGTH = 1000
+
+
 def get_conversion_session_options(inquiry: str | None, start_date=None, course=None, campus=None, limit=80):
 	if not inquiry:
 		frappe.throw(_("Inquiry is required."))
@@ -64,9 +67,15 @@ def get_conversion_session_options(inquiry: str | None, start_date=None, course=
 	return {"items": items}
 
 
-def convert_inquiry_to_full_term_core(inquiry: str | None, course_session: str | None, actor=None):
+def convert_inquiry_to_full_term_core(
+	inquiry: str | None,
+	course_session: str | None,
+	actor=None,
+	internal_note=None,
+):
 	if not course_session:
 		frappe.throw(_("Course session is required."))
+	internal_note = normalize_conversion_internal_note(internal_note)
 
 	inquiry_doc = get_inquiry_for_conversion(inquiry)
 	context = get_session_context(course_session)
@@ -100,6 +109,7 @@ def convert_inquiry_to_full_term_core(inquiry: str | None, course_session: str |
 		start_session=session.name,
 		remaining_session_count=len(remaining_sessions),
 	)
+	apply_conversion_invoice_note(invoice, internal_note)
 	link_invoice_to_enrollment(enrollment, invoice)
 	create_full_term_attendance_entries(remaining_sessions, inquiry_doc.student, enrollment.name)
 	inquiry_doc = mark_converted(inquiry_doc, enrollment, invoice)
@@ -126,3 +136,26 @@ def convert_inquiry_to_full_term_core(inquiry: str | None, course_session: str |
 			"invoice_amount": flt(invoice.grand_total),
 		},
 	}
+
+
+def normalize_conversion_internal_note(internal_note):
+	note = str(internal_note or "").strip()
+	if len(note) > CONVERSION_INTERNAL_NOTE_MAX_LENGTH:
+		frappe.throw(
+			_("Internal note cannot exceed {0} characters.").format(CONVERSION_INTERNAL_NOTE_MAX_LENGTH)
+		)
+	return note
+
+
+def append_conversion_invoice_note(existing_remarks, internal_note):
+	note_line = _("Campus Admin conversion note: {0}").format(internal_note)
+	existing = str(existing_remarks or "").rstrip()
+	return "{0}\n{1}".format(existing, note_line) if existing else note_line
+
+
+def apply_conversion_invoice_note(invoice, internal_note):
+	if not internal_note:
+		return invoice
+	invoice.set("remarks", append_conversion_invoice_note(invoice.get("remarks"), internal_note))
+	invoice.save(ignore_permissions=True)
+	return invoice
