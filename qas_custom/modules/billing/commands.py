@@ -15,6 +15,9 @@ from qas_custom.services.display_labels import (
 )
 
 
+TRIAL_CLASS_FEE_FIELDS = ("trial_class_fee", "trial_fee", "pay_as_you_go_fee")
+
+
 def create_prorata_invoice(inquiry_doc, enrollment, course: str, term: str, start_session: str, remaining_session_count: int):
 	context = get_prorata_invoice_context(
 		inquiry_doc=inquiry_doc,
@@ -149,6 +152,14 @@ def get_course_money(course: str, fieldnames: tuple[str, ...]):
 		if frappe.db.has_column("Course", fieldname):
 			return flt(frappe.db.get_value("Course", course, fieldname) or 0)
 	return 0
+
+
+def get_trial_class_fee(course: str | None):
+	return get_course_money(course, TRIAL_CLASS_FEE_FIELDS) if course else 0
+
+
+def get_trial_class_fee_field():
+	return next((fieldname for fieldname in TRIAL_CLASS_FEE_FIELDS if frappe.db.has_column("Course", fieldname)), None)
 
 
 def get_course_number(course: str, fieldnames: tuple[str, ...]):

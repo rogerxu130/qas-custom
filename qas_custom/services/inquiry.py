@@ -19,6 +19,7 @@ from qas_custom.modules.attendance.commands import (
 	remove_trial_inquiry_attendance_entries,
 )
 from qas_custom.modules.notifications.commands import get_trial_class_reminder_summary, send_trial_class_reminder
+from qas_custom.services.trial_invoice import enqueue_trial_invoice_for_inquiry, get_trial_invoice_status
 from qas_custom.utils.environment import sendmail_or_skip
 
 
@@ -279,6 +280,7 @@ def create_inquiry_core(payload: dict, source="Manual", actor=None, commit=True)
 	inquiry_doc.reminder_status = "Not Required"
 	inquiry_doc.flags.ignore_permissions = True
 	inquiry_doc.insert()
+	enqueue_trial_invoice_for_inquiry(inquiry_doc)
 
 	if review_reason:
 		_send_needs_review_alert(inquiry_doc, review_reason)
@@ -330,6 +332,7 @@ def assign_inquiry_course_session_core(inquiry: str | None, course_session: str 
 	inquiry_doc.course_session = course_session
 	inquiry_doc.status = status or "Booked"
 	inquiry_doc.save(ignore_permissions=True)
+	enqueue_trial_invoice_for_inquiry(inquiry_doc)
 	frappe.db.commit()
 	return build_inquiry_detail(inquiry_doc.name)
 
@@ -431,6 +434,9 @@ def _build_webhook_response(inquiry: str, status: str, duplicate: bool):
 		"course_session": inquiry_payload.get("course_session"),
 		"review_required": inquiry_payload.get("status") == NEEDS_REVIEW_STATUS,
 		"review_reason": review_reason,
+		"trial_invoice": inquiry_payload.get("trial_invoice"),
+		"trial_invoice_status": inquiry_payload.get("trial_invoice_status"),
+		"trial_invoice_message": inquiry_payload.get("trial_invoice_message"),
 	}
 
 
@@ -1306,6 +1312,7 @@ def _build_needs_review_email(inquiry_doc, reason: str):
 
 
 def _build_inquiry_payload(doc):
+	trial_invoice_status = get_trial_invoice_status(doc)
 	return {
 		"id": doc.name,
 		"inquiry_id": doc.name,
@@ -1338,7 +1345,9 @@ def _build_inquiry_payload(doc):
 		"review_reason": doc.review_reason,
 		"confirmation_status": doc.confirmation_status,
 		"reminder_status": doc.reminder_status,
-		"trial_invoice": doc.trial_invoice,
+		"trial_invoice": trial_invoice_status.get("trial_invoice") or doc.trial_invoice,
+		"trial_invoice_status": trial_invoice_status.get("trial_invoice_status"),
+		"trial_invoice_message": trial_invoice_status.get("trial_invoice_message"),
 		"converted_enrollment": doc.converted_enrollment,
 		"converted_invoice": doc.get("converted_invoice"),
 		"inactive_reason": doc.inactive_reason,

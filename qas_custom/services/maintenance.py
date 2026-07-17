@@ -7,6 +7,7 @@ import frappe
 from frappe import _
 from frappe.utils import getdate, now_datetime, today
 
+from qas_custom.modules.billing.commands import get_trial_class_fee, get_trial_class_fee_field
 from qas_custom.utils.environment import sendmail_or_skip
 
 
@@ -20,9 +21,54 @@ ISSUE_DOCTYPE = "QAS Data Issue"
 def run_nightly_maintenance():
 	student_result = sync_student_activity_status()
 	attendance_result = reconcile_attendance_links()
+	trial_fee_result = reconcile_course_trial_fees()
 	return {
 		"student_activity": student_result,
 		"attendance_links": attendance_result,
+		"course_trial_fees": trial_fee_result,
+	}
+
+
+def reconcile_course_trial_fees():
+	if not _doctype_available(ISSUE_DOCTYPE) or not _doctype_available("Course"):
+		return {"skipped": True, "reason": "Course or QAS Data Issue is not available."}
+
+	fields = ["name"]
+	if _has_field("Course", "status"):
+		fields.append("status")
+	fee_field = get_trial_class_fee_field()
+	if not fee_field:
+		return {"skipped": True, "reason": "Course Trial Class Fee field is not available."}
+	fields.append(fee_field)
+
+	filters = {"status": "Active"} if "status" in fields else {}
+	courses = frappe.get_all("Course", filters=filters, fields=fields, limit_page_length=0)
+	new_issue_names = []
+	invalid_courses = []
+	for course in courses:
+		if get_trial_class_fee(course.name) > 0:
+			_resolve_data_issue(_make_issue_key(["course-trial-fee-missing", course.name]))
+			continue
+		invalid_courses.append(course.name)
+		issue_name, created = _upsert_data_issue(_issue(
+			key_parts=["course-trial-fee-missing", course.name],
+			issue_type="Billing Configuration",
+			severity="Warning",
+			source_doctype="Course",
+			source_document=course.name,
+			description=_("Active Course is missing a positive Trial Class Fee, so automatic Trial Invoice creation is blocked."),
+			suggested_action=_("Set a Trial Class Fee greater than zero on the Course."),
+		))
+		if created:
+			new_issue_names.append(issue_name)
+
+	frappe.db.commit()
+	if new_issue_names:
+		_notify_school_admins_of_new_issues(new_issue_names)
+	return {
+		"checked": len(courses),
+		"invalid_courses": invalid_courses,
+		"new_issues": new_issue_names,
 	}
 
 
@@ -327,6 +373,7 @@ def _issue(
 	severity,
 	description,
 	suggested_action,
+	issue_type="Attendance Link Mismatch",
 	source_doctype=None,
 	source_document=None,
 	related_doctype=None,
@@ -336,7 +383,7 @@ def _issue(
 ):
 	return {
 		"issue_key": _make_issue_key(key_parts),
-		"issue_type": "Attendance Link Mismatch",
+		"issue_type": issue_type,
 		"severity": severity,
 		"source_doctype": source_doctype,
 		"source_document": source_document,
@@ -388,6 +435,35 @@ def _upsert_data_issue(issue):
 	return doc.name, created
 
 
+def record_data_issue(issue, notify=True):
+	if not _doctype_available(ISSUE_DOCTYPE):
+		return {"created": False, "skipped": True, "reason": f"{ISSUE_DOCTYPE} is not available."}
+	issue_name, created = _upsert_data_issue(issue)
+	frappe.db.commit()
+	if created and notify:
+		_notify_school_admins_of_new_issues([issue_name])
+	return {"issue": issue_name, "created": created}
+
+
+def resolve_data_issue(issue_key):
+	return _resolve_data_issue(issue_key)
+
+
+def _resolve_data_issue(issue_key):
+	if not issue_key or not _doctype_available(ISSUE_DOCTYPE):
+		return False
+	name = frappe.db.get_value(ISSUE_DOCTYPE, {"issue_key": issue_key}, "name")
+	if not name:
+		return False
+	frappe.db.set_value(
+		ISSUE_DOCTYPE,
+		name,
+		{"status": "Resolved", "resolved_at": now_datetime(), "resolution_note": _("QAS data checks no longer detect this issue.")},
+		update_modified=True,
+	)
+	return True
+
+
 def _notify_school_admins_of_new_issues(issue_names):
 	recipients = _get_school_admin_emails()
 	if not recipients:
@@ -400,7 +476,7 @@ def _notify_school_admins_of_new_issues(issue_names):
 		)
 	)
 	message_lines = [
-		_("QAS nightly data check found {0} new attendance link issue(s).").format(len(issue_names)),
+		_("QAS data checks found {0} new data issue(s).").format(len(issue_names)),
 		"",
 		_("Critical: {0}").format(severity_counts.get("Critical", 0)),
 		_("Warning: {0}").format(severity_counts.get("Warning", 0)),
@@ -412,7 +488,7 @@ def _notify_school_admins_of_new_issues(issue_names):
 		sendmail_or_skip(
 			action="nightly_data_issue_alert",
 			recipients=recipients,
-			subject=_("QAS nightly data issues detected"),
+			subject=_("QAS data issues detected"),
 			message="<br>".join(message_lines),
 			now=False,
 		)

@@ -1318,7 +1318,12 @@ def submit_school_admin_invoice_data(invoice=None, enqueue_notification=False, s
 		notification = _enqueue_invoice_notification(doc, event="approved", store_credit_applied=applied_amount if applied_amount > 0 else None)
 	else:
 		notification = _send_invoice_notification(doc, event="approved", store_credit_applied=applied_amount if applied_amount > 0 else None)
-	receipt_notification = _maybe_send_paid_receipt(doc, source="invoice_submit")
+	if send_notifications:
+		receipt_notification = (
+			_enqueue_paid_receipt(doc, source="invoice_submit")
+			if enqueue_notification
+			else _maybe_send_paid_receipt(doc, source="invoice_submit")
+		)
 	frappe.db.commit()
 	payload = _build_invoice_payload(frappe.get_doc("Sales Invoice", doc.name))
 	payload["store_credit_application"] = application

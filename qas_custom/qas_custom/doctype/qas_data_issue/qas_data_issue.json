@@ -46,7 +46,7 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Issue Type",
-   "options": "Attendance Link Mismatch\nStudent Activity Status",
+   "options": "Attendance Link Mismatch\nStudent Activity Status\nBilling Configuration",
    "reqd": 1
   },
   {
