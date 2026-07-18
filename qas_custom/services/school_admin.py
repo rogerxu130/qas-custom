@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime, timedelta
+import hashlib
 import json
 import mimetypes
 import re
@@ -91,6 +92,8 @@ BULK_INVOICE_SUBMIT_JOB_TTL_SECONDS = 86400
 NON_ATTENDING_ATTENDANCE_STATUSES = {"Cancelled", "Leave"}
 TRIAL_CONFIRMATION_STATUSES = {"Pending", "Text Message Sent", "Customer Confirmed"}
 SCHOOL_ADMIN_LEAVE_ATTENDANCE_STATUSES = ("To be started", "Absent")
+TRANSFER_CANCELLABLE_ATTENDANCE_STATUSES = {"To be started", "Scheduled"}
+TRANSFER_RETAINED_ATTENDANCE_STATUSES = {"Present", "Absent", "Late", "Leave"}
 PARENT_EDIT_FIELDS = ["parent_name", "mobile_number", "phone", "email", "email_id", "address", "status", "customer"]
 PARENT_UPDATE_FIELDS = ["parent_name", "mobile_number", "phone", "address", "status", "customer"]
 PARENT_EMAIL_FIELDS = ("email", "email_id", "contact_email")
@@ -2655,22 +2658,58 @@ def transfer_school_admin_enrollment_data(enrollment=None, payload=None):
 	if not target_timeslot:
 		frappe.throw(_("Target weekly timeslot is required."))
 	doc = frappe.get_doc("Enrollment", enrollment)
-	effective_date = payload.get("effective_date") or today()
-	_cancel_future_enrollment_attendance(doc.name, effective_date=effective_date)
+	effective_date = getdate(payload.get("effective_date") or today())
+	preview = _build_enrollment_transfer_preview(doc, target_timeslot, effective_date)
+	if cint(payload.get("preview_only")):
+		return {"enrollment": _build_enrollment_payload(doc), "transfer": preview}
+	if payload.get("preview_fingerprint") != preview.get("preview_fingerprint"):
+		frappe.throw(_("Attendance or class sessions changed after the preview. Preview the transfer again before continuing."))
+	if preview.get("retained_marked_count") and not cint(payload.get("confirm_retained_marked")):
+		frappe.throw(
+			_("Marked attendance exists on or after the effective date. Preview the transfer and confirm that these records will remain in the original class."),
+		)
+
+	source_timeslot = doc.get("weekly_timeslot")
+	cancelled_count = _cancel_enrollment_attendance_for_sessions(
+		doc.name,
+		preview.get("source_session_ids") or [],
+		statuses=TRANSFER_CANCELLABLE_ATTENDANCE_STATUSES,
+	)
 	doc.weekly_timeslot = target_timeslot
-	target_course = payload.get("course") or frappe.db.get_value("Weekly Timeslot", target_timeslot, "course")
-	target_term = payload.get("term") or frappe.db.get_value("Weekly Timeslot", target_timeslot, "term")
+	target_course = preview.get("target_course")
+	target_term = preview.get("target_term")
 	_set_if_field(doc, "course", target_course)
 	_set_if_field(doc, "term", target_term)
-	_set_if_field(doc, "start_course_session", payload.get("start_course_session"))
+	_set_if_field(doc, "start_course_session", preview.get("target_start_course_session"))
 	if _has_field("Enrollment", "status"):
-		doc.status = payload.get("status") or "Active"
+		doc.status = "Active"
 	_validate_unique_open_enrollment(doc)
 	doc.save(ignore_permissions=True)
-	_create_enrollment_attendance_entries(doc, start_date=effective_date)
-	_add_comment("Enrollment", doc.name, _("Enrollment transferred to {0} by School Admin.").format(target_timeslot))
+	destination = _ensure_transfer_destination_attendance(doc, preview.get("target_session_ids") or [])
+	result = {
+		**preview,
+		"cancelled_count": cancelled_count,
+		"destination_created_count": destination.get("created") or 0,
+		"destination_reactivated_count": destination.get("reactivated") or 0,
+		"destination_retained_count": destination.get("retained") or 0,
+	}
+	_add_comment(
+		"Enrollment",
+		doc.name,
+		_(
+			"Enrollment transferred from {0} to {1} from {2} by {3}. Cancelled {4} unmarked attendance row(s), prepared {5} destination row(s), and retained {6} marked row(s) in the original class."
+		).format(
+			source_timeslot,
+			target_timeslot,
+			effective_date,
+			frappe.session.user,
+			cancelled_count,
+			destination.get("total") or 0,
+			preview.get("retained_marked_count") or 0,
+		),
+	)
 	frappe.db.commit()
-	return _build_enrollment_payload(doc)
+	return {"enrollment": _build_enrollment_payload(doc), "transfer": result}
 
 
 def end_school_admin_enrollment_data(enrollment=None, payload=None):
@@ -5688,6 +5727,191 @@ def _enrollment_has_attendance(enrollment):
 	))
 
 
+def _build_enrollment_transfer_preview(doc, target_timeslot, effective_date):
+	if doc.get("status") != "Active":
+		frappe.throw(_("Only active enrollments can be transferred."))
+	if doc.get("enrollment_type") != "Full-Term":
+		frappe.throw(_("Only Full-Term enrollments can be transferred."))
+	if not doc.get("weekly_timeslot"):
+		frappe.throw(_("The enrollment does not have a current weekly timeslot."))
+	if doc.get("weekly_timeslot") == target_timeslot:
+		frappe.throw(_("Choose a different weekly timeslot for the transfer."))
+	if not frappe.db.exists("Weekly Timeslot", target_timeslot):
+		frappe.throw(_("Target weekly timeslot was not found."))
+
+	target = frappe.db.get_value(
+		"Weekly Timeslot",
+		target_timeslot,
+		["name", "term", "course", "status"],
+		as_dict=True,
+	)
+	if not target or target.get("term") != doc.get("term"):
+		frappe.throw(_("The destination class must belong to the same term as the enrollment."))
+	if target.get("status") and target.get("status") != "Active":
+		frappe.throw(_("The destination weekly timeslot must be active."))
+	duplicate = _existing_target_enrollment(
+		doc.get("student"),
+		doc.get("term"),
+		target_timeslot,
+		statuses=["Planned", "Active"],
+	)
+	if duplicate and duplicate != doc.name:
+		frappe.throw(_("This student already has an open enrollment in the destination class: {0}.").format(duplicate))
+
+	source_sessions = frappe.get_all(
+		"Course Sessions",
+		filters={
+			"weekly_timeslot": doc.get("weekly_timeslot"),
+			"session_date": [">=", effective_date],
+		},
+		fields=["name", "session_date", "status"],
+		order_by="session_date asc, name asc",
+		limit_page_length=0,
+	)
+	target_sessions = frappe.get_all(
+		"Course Sessions",
+		filters={
+			"weekly_timeslot": target_timeslot,
+			"session_date": [">=", effective_date],
+			"status": ["!=", "Cancelled"],
+		},
+		fields=["name", "session_date", "status"],
+		order_by="session_date asc, name asc",
+		limit_page_length=0,
+	)
+	if not target_sessions:
+		frappe.throw(_("The destination class has no sessions on or after the effective date."))
+
+	source_session_ids = [row.get("name") for row in source_sessions if row.get("name")]
+	attendance_rows = []
+	if source_session_ids:
+		attendance_rows = frappe.get_all(
+			"Class Attendance Entry",
+			filters={
+				"source_doctype": "Enrollment",
+				"source_document": doc.name,
+				"course_session": ["in", source_session_ids],
+			},
+			fields=["name", "course_session", "status"],
+			order_by="course_session asc, creation asc",
+			limit_page_length=0,
+		)
+	session_date_by_id = {row.get("name"): row.get("session_date") for row in source_sessions}
+	cancellable_rows = [
+		row for row in attendance_rows
+		if row.get("status") in TRANSFER_CANCELLABLE_ATTENDANCE_STATUSES
+	]
+	retained_marked_rows = [
+		{
+			"name": row.get("name"),
+			"course_session": row.get("course_session"),
+			"session_date": str(session_date_by_id.get(row.get("course_session")) or ""),
+			"status": row.get("status"),
+		}
+		for row in attendance_rows
+		if row.get("status") in TRANSFER_RETAINED_ATTENDANCE_STATUSES
+	]
+	retained_week_keys = {
+		getdate(row.get("session_date")).isocalendar()[:2]
+		for row in retained_marked_rows
+		if row.get("session_date")
+	}
+	eligible_target_sessions = [
+		row for row in target_sessions
+		if getdate(row.get("session_date")).isocalendar()[:2] not in retained_week_keys
+	]
+	preview_fingerprint = hashlib.sha256(json.dumps({
+		"enrollment": doc.name,
+		"source_timeslot": doc.get("weekly_timeslot"),
+		"target_timeslot": target_timeslot,
+		"effective_date": str(effective_date),
+		"source_attendance": sorted(
+			(row.get("name"), row.get("course_session"), row.get("status"))
+			for row in attendance_rows
+		),
+		"target_sessions": [row.get("name") for row in eligible_target_sessions if row.get("name")],
+	}, sort_keys=True).encode("utf-8")).hexdigest()
+	return {
+		"source_timeslot": doc.get("weekly_timeslot"),
+		"target_timeslot": target_timeslot,
+		"target_course": target.get("course"),
+		"target_term": target.get("term"),
+		"effective_date": str(effective_date),
+		"source_session_ids": source_session_ids,
+		"target_session_ids": [row.get("name") for row in eligible_target_sessions if row.get("name")],
+		"target_start_course_session": (
+			eligible_target_sessions[0].get("name") if eligible_target_sessions else target_sessions[0].get("name")
+		),
+		"cancellable_count": len(cancellable_rows),
+		"destination_session_count": len(eligible_target_sessions),
+		"destination_sessions_skipped_for_marked_count": len(target_sessions) - len(eligible_target_sessions),
+		"retained_marked_count": len(retained_marked_rows),
+		"retained_marked_rows": retained_marked_rows,
+		"financial_records_changed": False,
+		"preview_fingerprint": preview_fingerprint,
+	}
+
+
+def _cancel_enrollment_attendance_for_sessions(enrollment, session_ids, statuses=None):
+	if not enrollment or not session_ids or not _doctype_available("Class Attendance Entry"):
+		return 0
+	rows = frappe.get_all(
+		"Class Attendance Entry",
+		filters={
+			"source_doctype": "Enrollment",
+			"source_document": enrollment,
+			"course_session": ["in", session_ids],
+			"status": ["in", sorted(statuses or TRANSFER_CANCELLABLE_ATTENDANCE_STATUSES)],
+		},
+		pluck="name",
+		limit_page_length=0,
+	)
+	for row in rows:
+		frappe.db.set_value("Class Attendance Entry", row, "status", "Cancelled", update_modified=True)
+	return len(rows)
+
+
+def _ensure_transfer_destination_attendance(doc, session_ids):
+	result = {"created": 0, "reactivated": 0, "retained": 0, "total": 0}
+	for session_id in session_ids or []:
+		existing = frappe.db.get_value(
+			"Class Attendance Entry",
+			{
+				"source_doctype": "Enrollment",
+				"source_document": doc.name,
+				"course_session": session_id,
+			},
+			["name", "status"],
+			as_dict=True,
+		)
+		if existing:
+			if existing.get("status") == "Cancelled":
+				frappe.db.set_value(
+					"Class Attendance Entry",
+					existing.get("name"),
+					"status",
+					"To be started",
+					update_modified=True,
+				)
+				result["reactivated"] += 1
+			else:
+				result["retained"] += 1
+			result["total"] += 1
+			continue
+		create_attendance_entry(
+			course_session=session_id,
+			student=doc.student,
+			enrollment_type="Full-Term",
+			source_doctype="Enrollment",
+			source_document=doc.name,
+			status="To be started",
+			comments=f"Added from Enrollment {doc.name} after class transfer",
+		)
+		result["created"] += 1
+		result["total"] += 1
+	return result
+
+
 def _cancel_future_enrollment_attendance(enrollment, effective_date=None):
 	if not _doctype_available("Class Attendance Entry"):
 		return 0
@@ -5699,6 +5923,8 @@ def _cancel_future_enrollment_attendance(enrollment, effective_date=None):
 			pluck="name",
 			limit_page_length=0,
 		)
+		if not session_ids:
+			return 0
 	filters = {
 		"source_doctype": "Enrollment",
 		"source_document": enrollment,
