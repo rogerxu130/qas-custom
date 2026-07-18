@@ -790,8 +790,13 @@ def _session_staff_notification_context(
 	context = _session_staff_course_context(course_session, student)
 	context["event"] = event
 	if event in TRIAL_NOTIFICATION_EVENTS:
-		context["recipients"] = list(dict.fromkeys(context["teacher_recipients"] + context.get("campus_admin_recipients", [])))
+		context["recipients"] = list(context["teacher_recipients"] + context.get("campus_admin_recipients", []))
+		if event == "trial_added" and context["school_email"]:
+			context["recipients"].append(context["school_email"])
+		context["recipients"] = list(dict.fromkeys(context["recipients"]))
 		context["missing_recipients"] = [] if context["teacher_recipients"] else ["teacher email"]
+		if event == "trial_added" and not context["school_email"]:
+			context["missing_recipients"].append("school email")
 	else:
 		context["recipients"] = list(context["teacher_recipients"])
 		if context["school_email"]:

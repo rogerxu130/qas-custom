@@ -57,7 +57,7 @@ class TestSessionStaffNotifications(TestCase):
 		self.assertEqual(mock_enqueue.call_args_list[1].kwargs["course_session"], "CS-002")
 
 	@patch("qas_custom.modules.notifications.commands._session_staff_course_context")
-	def test_trial_added_context_includes_teacher_and_campus_admins_once(self, mock_course_context):
+	def test_trial_added_context_includes_teacher_campus_admins_and_school_once(self, mock_course_context):
 		from qas_custom.modules.notifications.commands import _session_staff_notification_context
 
 		mock_course_context.return_value = {
@@ -68,8 +68,76 @@ class TestSessionStaffNotifications(TestCase):
 
 		context = _session_staff_notification_context("trial_added", "CS-001", "STU-001")
 
+		self.assertEqual(
+			context["recipients"],
+			["teacher@example.com", "admin@example.com", "school@example.com"],
+		)
+		self.assertEqual(context["missing_recipients"], [])
+
+	@patch("qas_custom.modules.notifications.commands._session_staff_course_context")
+	def test_trial_added_context_deduplicates_school_email(self, mock_course_context):
+		from qas_custom.modules.notifications.commands import _session_staff_notification_context
+
+		mock_course_context.return_value = {
+			"teacher_recipients": ["school@example.com"],
+			"campus_admin_recipients": ["admin@example.com", "school@example.com"],
+			"school_email": "school@example.com",
+		}
+
+		context = _session_staff_notification_context("trial_added", "CS-001", "STU-001")
+
+		self.assertEqual(context["recipients"], ["school@example.com", "admin@example.com"])
+
+	@patch("qas_custom.modules.notifications.commands._session_staff_course_context")
+	def test_trial_cancelled_context_does_not_include_school_email(self, mock_course_context):
+		from qas_custom.modules.notifications.commands import _session_staff_notification_context
+
+		mock_course_context.return_value = {
+			"teacher_recipients": ["teacher@example.com"],
+			"campus_admin_recipients": ["admin@example.com"],
+			"school_email": "school@example.com",
+		}
+
+		context = _session_staff_notification_context("trial_cancelled", "CS-001", "STU-001")
+
 		self.assertEqual(context["recipients"], ["teacher@example.com", "admin@example.com"])
 		self.assertNotIn("school@example.com", context["recipients"])
+
+	@patch("qas_custom.modules.notifications.commands._session_staff_course_context")
+	def test_trial_added_context_records_missing_school_without_blocking_other_recipients(self, mock_course_context):
+		from qas_custom.modules.notifications.commands import _session_staff_notification_context
+
+		mock_course_context.return_value = {
+			"teacher_recipients": ["teacher@example.com"],
+			"campus_admin_recipients": ["admin@example.com"],
+			"school_email": "",
+		}
+
+		context = _session_staff_notification_context("trial_added", "CS-001", "STU-001")
+
+		self.assertEqual(context["recipients"], ["teacher@example.com", "admin@example.com"])
+		self.assertEqual(context["missing_recipients"], ["school email"])
+
+	@patch("qas_custom.modules.notifications.trial_parent_notifications.queue_trial_parent_booking_change")
+	@patch("qas_custom.modules.notifications.commands.enqueue_session_staff_notification")
+	@patch("qas_custom.services.inquiry.ensure_inquiry_attendance_entry")
+	def test_needs_review_after_insert_does_not_queue_trial_added(
+		self,
+		_mock_attendance,
+		mock_enqueue,
+		_mock_parent_email,
+	):
+		doc = SimpleNamespace(
+			inquiry_type="Trial Lesson",
+			student="STU-001",
+			status="Needs Review",
+			course_session=None,
+			name="INQ-001",
+		)
+
+		Inquiry.after_insert(doc)
+
+		mock_enqueue.assert_not_called()
 
 	@patch("qas_custom.modules.notifications.commands._get_trial_notification_inquiry")
 	def test_reschedule_cancel_event_remains_current_after_inquiry_moves(self, mock_get_value):
