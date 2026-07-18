@@ -142,7 +142,7 @@ def get_campus_payment_requests_data(status=None, campus=None, query=None, limit
 def get_school_admin_payment_requests_data(status=None, campus=None, query=None, limit=120):
 	_require_school_admin()
 	campuses = [campus] if campus else None
-	return _request_list(campuses=campuses, status=status, query=query, limit=limit)
+	return _request_list(campuses=campuses, status=status, query=query, limit=limit, include_school_admin_identity=True)
 
 
 def resolve_school_admin_payment_request_data(request_name=None, status=None, resolution_note=None, payment_entry=None, store_credit_entry=None):
@@ -170,7 +170,7 @@ def resolve_school_admin_payment_request_data(request_name=None, status=None, re
 	doc.store_credit_reference = store_credit_entry or None
 	doc.save(ignore_permissions=True)
 	frappe.db.commit()
-	return _request_payload(doc)
+	return _request_payload(doc, include_school_admin_identity=True)
 
 
 def get_pending_payment_request_count():
@@ -250,7 +250,7 @@ def send_payment_collection_request_notification_job(request_name):
 		return {"sent": False, "reason": str(exc)}
 
 
-def _request_list(campuses=None, status=None, query=None, limit=80):
+def _request_list(campuses=None, status=None, query=None, limit=80, include_school_admin_identity=False):
 	if not _doctype_available():
 		return {"items": [], "pending_count": 0}
 	filters = {}
@@ -265,6 +265,7 @@ def _request_list(campuses=None, status=None, query=None, limit=80):
 		or_filters = [
 			[REQUEST_DOCTYPE, "name", "like", like],
 			[REQUEST_DOCTYPE, "parent", "like", like],
+			[REQUEST_DOCTYPE, "customer", "like", like],
 			[REQUEST_DOCTYPE, "invoice", "like", like],
 			[REQUEST_DOCTYPE, "campus", "like", like],
 			[REQUEST_DOCTYPE, "submitted_by", "like", like],
@@ -282,7 +283,13 @@ def _request_list(campuses=None, status=None, query=None, limit=80):
 		order_by="submitted_at desc",
 		limit_page_length=min(max(cint(limit or 80), 1), 300),
 	)
-	items = [_request_payload(frappe.get_doc(REQUEST_DOCTYPE, row.get("name"))) for row in rows]
+	items = [
+		_request_payload(
+			frappe.get_doc(REQUEST_DOCTYPE, row.get("name")),
+			include_school_admin_identity=include_school_admin_identity,
+		)
+		for row in rows
+	]
 	items.sort(key=lambda item: item.get("status") != "Pending Review")
 	pending_filters = {"status": "Pending Review"}
 	if campuses:
@@ -306,8 +313,14 @@ def _matching_parent_ids(query):
 	return parents
 
 
-def _request_payload(doc):
-	parent_row = frappe.db.get_value("Parent", doc.parent, ["name", "parent_name"], as_dict=True) or {}
+def _request_payload(doc, include_school_admin_identity=False):
+	parent_fields = ["name", "parent_name"]
+	if include_school_admin_identity:
+		parent_fields.extend(
+			field for field in ["mobile_number", "phone", "email", "email_id", "customer"]
+			if frappe.db.has_column("Parent", field)
+		)
+	parent_row = frappe.db.get_value("Parent", doc.parent, parent_fields, as_dict=True) or {}
 	student_labels = _students_by_parent([doc.parent]).get(doc.parent, [])
 	current_invoice = None
 	warnings = []
@@ -326,7 +339,7 @@ def _request_payload(doc):
 			warnings.append(_("Invoice no longer has an outstanding amount."))
 		elif abs(current_payable - flt(doc.invoice_outstanding_snapshot)) > 0.005:
 			warnings.append(_("Invoice outstanding has changed since this request was submitted."))
-	return {
+	payload = {
 		"name": doc.name,
 		"request_type": doc.request_type,
 		"status": doc.status,
@@ -355,6 +368,13 @@ def _request_payload(doc):
 		"payment_entry_reference": doc.payment_entry_reference,
 		"store_credit_reference": doc.store_credit_reference,
 	}
+	if include_school_admin_identity:
+		payload.update({
+			"parent_email": parent_row.get("email") or parent_row.get("email_id") or "",
+			"parent_phone": parent_row.get("mobile_number") or parent_row.get("phone") or "",
+			"customer": parent_row.get("customer") or doc.customer,
+		})
+	return payload
 
 
 def _campus_scope(requested_campus=None):

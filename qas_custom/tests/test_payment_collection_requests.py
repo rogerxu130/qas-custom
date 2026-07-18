@@ -5,7 +5,11 @@ from unittest.mock import Mock, patch
 import frappe
 
 from qas_custom.services.payment_collection_requests import (
+	_matching_parent_ids,
+	_request_list,
+	_request_payload,
 	create_campus_payment_request_data,
+	get_school_admin_payment_requests_data,
 	get_invoice_payment_request_summaries,
 	resolve_school_admin_payment_request_data,
 	send_payment_collection_request_notification_job,
@@ -24,6 +28,74 @@ class TestPaymentCollectionRequests(TestCase):
 		doc.insert = Mock()
 		return doc
 
+	def _submitted_request(self):
+		return frappe._dict(
+			name="PCR-2026-00001", request_type="Store Credit Top-up", status="Pending Review",
+			campus="Campus A", parent="PAR-1", customer="CUS-1", invoice=None, collected_amount=1500,
+			received_at="2026-07-18 14:30:00", payment_method="EFTPOS", reference_no="",
+			campus_admin_note="", submitted_by="cashier@example.com", submitted_at="2026-07-18 14:31:00",
+			invoice_outstanding_snapshot=0, notification_status="Sent", notification_error="",
+			reviewed_by=None, reviewed_at=None, resolution_note="", payment_entry_reference=None,
+			store_credit_reference=None,
+		)
+
+	@patch("qas_custom.services.payment_collection_requests._students_by_parent", return_value={})
+	def test_school_admin_payload_includes_live_parent_identity(self, _students):
+		db = SimpleNamespace(
+			has_column=Mock(return_value=True),
+			get_value=Mock(return_value=frappe._dict(
+				name="PAR-1", parent_name="Roger Parent", email="parent@example.com",
+				mobile_number="0400000000", customer="CUS-1",
+			)),
+		)
+		with patch("qas_custom.services.payment_collection_requests.frappe.db", db):
+			result = _request_payload(self._submitted_request(), include_school_admin_identity=True)
+
+		self.assertEqual(result["parent_email"], "parent@example.com")
+		self.assertEqual(result["parent_phone"], "0400000000")
+		self.assertEqual(result["customer"], "CUS-1")
+
+	@patch("qas_custom.services.payment_collection_requests._students_by_parent", return_value={})
+	def test_campus_admin_payload_does_not_include_school_admin_identity(self, _students):
+		db = SimpleNamespace(get_value=Mock(return_value=frappe._dict(name="PAR-1", parent_name="Roger Parent")))
+		with patch("qas_custom.services.payment_collection_requests.frappe.db", db):
+			result = _request_payload(self._submitted_request())
+
+		self.assertNotIn("parent_email", result)
+		self.assertNotIn("parent_phone", result)
+
+	@patch("qas_custom.services.payment_collection_requests._matching_parent_ids", return_value=set())
+	@patch("qas_custom.services.payment_collection_requests._doctype_available", return_value=True)
+	@patch("qas_custom.services.payment_collection_requests.frappe.get_all", return_value=[])
+	def test_request_search_matches_customer_id(self, get_all, _doctype, _matching_parents):
+		db = SimpleNamespace(count=Mock(return_value=0))
+		with patch("qas_custom.services.payment_collection_requests.frappe.db", db):
+			_request_list(query="CUS-1")
+
+		self.assertIn(
+			["Payment Collection Request", "customer", "like", "%CUS-1%"],
+			get_all.call_args.kwargs["or_filters"],
+		)
+
+	@patch("qas_custom.services.payment_collection_requests.frappe.get_all")
+	def test_parent_identity_search_includes_email_and_phone(self, get_all):
+		get_all.side_effect = [["PAR-1"], []]
+		db = SimpleNamespace(exists=Mock(return_value=True), has_column=Mock(return_value=True))
+		with patch("qas_custom.services.payment_collection_requests.frappe.db", db):
+			result = _matching_parent_ids("parent@example.com")
+
+		parent_filters = get_all.call_args_list[0].kwargs["or_filters"]
+		self.assertIn(["Parent", "email", "like", "%parent@example.com%"], parent_filters)
+		self.assertIn(["Parent", "mobile_number", "like", "%parent@example.com%"], parent_filters)
+		self.assertEqual(result, {"PAR-1"})
+
+	@patch("qas_custom.services.payment_collection_requests._request_list", return_value={"items": [], "pending_count": 0})
+	@patch("qas_custom.services.payment_collection_requests._require_school_admin")
+	def test_school_admin_list_requests_identity_fields(self, _require, request_list):
+		get_school_admin_payment_requests_data(query="parent@example.com")
+
+		self.assertTrue(request_list.call_args.kwargs["include_school_admin_identity"])
+
 	@patch("qas_custom.services.payment_collection_requests._doctype_available", return_value=True)
 	@patch("qas_custom.services.payment_collection_requests.frappe.get_all")
 	def test_invoice_pending_summaries_are_loaded_in_one_query(self, mock_get_all, _doctype):
@@ -35,7 +107,7 @@ class TestPaymentCollectionRequests(TestCase):
 		self.assertEqual(result["SINV-1"]["pending_payment_request_count"], 2)
 		self.assertEqual(result["SINV-2"]["pending_payment_request_count"], 0)
 
-	@patch("qas_custom.services.payment_collection_requests._request_payload", side_effect=lambda doc: dict(doc))
+	@patch("qas_custom.services.payment_collection_requests._request_payload", side_effect=lambda doc, **_kwargs: dict(doc))
 	@patch("qas_custom.services.payment_collection_requests.now_datetime", return_value="2026-07-17 10:00:00")
 	@patch("qas_custom.services.payment_collection_requests._invoice_payable", return_value=500)
 	@patch("qas_custom.services.payment_collection_requests._validate_invoice_for_parent")
@@ -70,7 +142,7 @@ class TestPaymentCollectionRequests(TestCase):
 		mock_enqueue.assert_called_once()
 		self.assertEqual(result["invoice"], "SINV-1")
 
-	@patch("qas_custom.services.payment_collection_requests._request_payload", side_effect=lambda doc: dict(doc))
+	@patch("qas_custom.services.payment_collection_requests._request_payload", side_effect=lambda doc, **_kwargs: dict(doc))
 	@patch("qas_custom.services.payment_collection_requests.now_datetime", return_value="2026-07-17 10:00:00")
 	@patch("qas_custom.services.payment_collection_requests._validate_invoice_for_parent")
 	@patch("qas_custom.services.payment_collection_requests._campus_parent_ids", return_value={"PAR-1"})
@@ -100,7 +172,7 @@ class TestPaymentCollectionRequests(TestCase):
 		self.assertEqual(request_doc.invoice_outstanding_snapshot, 0)
 		mock_validate_invoice.assert_not_called()
 
-	@patch("qas_custom.services.payment_collection_requests._request_payload", side_effect=lambda doc: dict(doc))
+	@patch("qas_custom.services.payment_collection_requests._request_payload", side_effect=lambda doc, **_kwargs: dict(doc))
 	@patch("qas_custom.services.payment_collection_requests.now_datetime", return_value="2026-07-17 11:00:00")
 	@patch("qas_custom.services.payment_collection_requests._require_school_admin")
 	@patch("qas_custom.services.payment_collection_requests.frappe.get_doc")
