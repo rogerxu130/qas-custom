@@ -34,6 +34,16 @@ from qas_custom.services.support_view import get_support_view_campus_admin_profi
 
 
 POST_VISIT_INQUIRY_STATUSES = ("Completed", "Follow-up", "No-show", "Converted", "Inactive")
+CAMPUS_ADMIN_INQUIRY_RESULT_LIMIT = 200
+CAMPUS_ADMIN_INQUIRY_SEARCH_FIELDS = (
+	"name",
+	"submitted_student_name",
+	"student",
+	"parent",
+	"contact_name",
+	"contact_email",
+	"contact_phone",
+)
 
 
 def get_campus_admin_me_data():
@@ -74,7 +84,17 @@ def get_campus_admin_dashboard_data(from_date=None, to_date=None):
 	}
 
 
-def get_campus_admin_inquiries_data(status=None, inquiry_type=None, from_date=None, to_date=None, campus=None, queue=None):
+def get_campus_admin_inquiries_data(
+	status=None,
+	inquiry_type=None,
+	from_date=None,
+	to_date=None,
+	campus=None,
+	queue=None,
+	query=None,
+	course=None,
+	limit=None,
+):
 	profile = _require_campus_admin_profile()
 	campuses = _filter_requested_campus(profile["campuses"], campus)
 	filters = {
@@ -84,17 +104,35 @@ def get_campus_admin_inquiries_data(status=None, inquiry_type=None, from_date=No
 		filters["status"] = status
 	if inquiry_type:
 		filters["inquiry_type"] = inquiry_type
+	if course:
+		filters["preferred_course"] = course
 	queue_filters, or_filters = _campus_admin_inquiry_queue_filters(queue, status=status)
 	filters.update(queue_filters)
-	if not queue:
-		if from_date and to_date:
-			filters["current_appointment_date"] = ["between", [getdate(from_date), getdate(to_date)]]
-		elif from_date:
-			filters["current_appointment_date"] = [">=", getdate(from_date)]
-		elif to_date:
-			filters["current_appointment_date"] = ["<=", getdate(to_date)]
+	queue_date_filter = filters.pop("current_appointment_date", None)
+	date_filter = _campus_admin_inquiry_date_filter(queue_date_filter, from_date=from_date, to_date=to_date)
+	if date_filter:
+		filters["current_appointment_date"] = date_filter
+	elif date_filter is False:
+		filters["name"] = "__qas_no_matching_inquiry__"
 
-	order_by = "current_appointment_date desc, modified desc" if queue == "post_trial" else "current_appointment_date asc, modified desc"
+	page_limit = min(max(cint(limit or CAMPUS_ADMIN_INQUIRY_RESULT_LIMIT), 1), CAMPUS_ADMIN_INQUIRY_RESULT_LIMIT)
+	order_by = (
+		"current_appointment_date desc, current_appointment_time desc, modified desc"
+		if queue == "post_trial"
+		else "current_appointment_date asc, current_appointment_time asc, modified desc"
+	)
+	matching_names = _campus_admin_inquiry_search_names(
+		filters,
+		or_filters,
+		query,
+		order_by=order_by,
+		limit=page_limit + 1,
+	)
+	if matching_names is not None:
+		if not matching_names:
+			return {"items": [], "has_more": False, "limit": page_limit}
+		filters["name"] = ["in", matching_names]
+
 	rows = frappe.get_all(
 		"Inquiry",
 		filters=filters,
@@ -109,14 +147,163 @@ def get_campus_admin_inquiries_data(status=None, inquiry_type=None, from_date=No
 			"contact_name",
 			"contact_phone",
 			"contact_email",
+			"submitted_student_name",
 			"preferred_course",
 			"course_session",
 			"current_appointment_date",
 			"current_appointment_time",
 		],
 		order_by=order_by,
+		limit_page_length=page_limit + 1,
 	)
-	return {"items": [_build_inquiry_list_item(row) for row in rows]}
+	has_more = len(rows) > page_limit
+	rows = rows[:page_limit]
+	latest_notes = _get_latest_note_map([row.name for row in rows])
+	return {
+		"items": [_build_inquiry_list_item(row, latest_note=latest_notes.get(row.name)) for row in rows],
+		"has_more": has_more,
+		"limit": page_limit,
+	}
+
+
+def get_campus_admin_inquiry_filter_options_data(campus=None):
+	profile = _require_campus_admin_profile()
+	assigned_campuses = list(profile["campuses"])
+	selected_campuses = _filter_requested_campus(assigned_campuses, campus)
+	rows = frappe.get_all(
+		"Inquiry",
+		filters={
+			"campus": ["in", selected_campuses],
+			"preferred_course": ["is", "set"],
+		},
+		fields=["preferred_course"],
+		group_by="preferred_course",
+		order_by="preferred_course asc",
+		limit_page_length=1000,
+	)
+	return {
+		"campuses": assigned_campuses,
+		"courses": [row.preferred_course for row in rows if row.preferred_course],
+	}
+
+
+def _campus_admin_inquiry_date_filter(queue_filter=None, *, from_date=None, to_date=None):
+	start_date = getdate(from_date) if from_date else None
+	end_date = getdate(to_date) if to_date else None
+	if start_date and end_date and start_date > end_date:
+		frappe.throw(_("From date cannot be later than To date."))
+
+	if queue_filter:
+		operator, value = queue_filter
+		value = getdate(value)
+		if operator == ">=":
+			start_date = max(filter(None, [start_date, value]))
+		elif operator == "<":
+			queue_end = add_days(value, -1)
+			end_date = min(filter(None, [end_date, queue_end]))
+		else:
+			return queue_filter
+
+	if start_date and end_date and start_date > end_date:
+		return False
+	if start_date and end_date:
+		return ["between", [start_date, end_date]]
+	if start_date:
+		return [">=", start_date]
+	if end_date:
+		return ["<=", end_date]
+	return None
+
+
+def _campus_admin_inquiry_search_names(filters, queue_or_filters, query, *, order_by, limit):
+	query = str(query or "").strip()
+	if not query:
+		return None
+	if filters.get("name") == "__qas_no_matching_inquiry__":
+		return []
+
+	pattern = f"%{query}%"
+	names = set()
+	if not queue_or_filters:
+		names.update(
+			frappe.get_all(
+				"Inquiry",
+				filters=filters,
+				or_filters=[
+					["Inquiry", fieldname, "like", pattern]
+					for fieldname in CAMPUS_ADMIN_INQUIRY_SEARCH_FIELDS
+				],
+				pluck="name",
+				order_by=order_by,
+				limit_page_length=limit,
+			)
+		)
+	else:
+		for fieldname in CAMPUS_ADMIN_INQUIRY_SEARCH_FIELDS:
+			field_filters = dict(filters)
+			field_filters[fieldname] = ["like", pattern]
+			names.update(
+				frappe.get_all(
+					"Inquiry",
+					filters=field_filters,
+					or_filters=queue_or_filters,
+					pluck="name",
+					order_by=order_by,
+					limit_page_length=limit,
+				)
+			)
+
+	student_ids = _campus_admin_link_matches(
+		"Student",
+		_safe_fields("Student", ["name", "student_name", "student_code"]),
+		pattern,
+		limit=limit,
+	)
+	if student_ids:
+		field_filters = dict(filters)
+		field_filters["student"] = ["in", student_ids]
+		names.update(
+			frappe.get_all(
+				"Inquiry",
+				filters=field_filters,
+				or_filters=queue_or_filters,
+				pluck="name",
+				order_by=order_by,
+				limit_page_length=limit,
+			)
+		)
+
+	parent_ids = _campus_admin_link_matches(
+		"Parent",
+		_safe_fields("Parent", ["name", "parent_name"]),
+		pattern,
+		limit=limit,
+	)
+	if parent_ids:
+		field_filters = dict(filters)
+		field_filters["parent"] = ["in", parent_ids]
+		names.update(
+			frappe.get_all(
+				"Inquiry",
+				filters=field_filters,
+				or_filters=queue_or_filters,
+				pluck="name",
+				order_by=order_by,
+				limit_page_length=limit,
+			)
+		)
+	return list(names)
+
+
+def _campus_admin_link_matches(doctype, fieldnames, pattern, *, limit):
+	if not fieldnames:
+		return []
+	return frappe.get_all(
+		doctype,
+		or_filters=[[doctype, fieldname, "like", pattern] for fieldname in fieldnames],
+		pluck="name",
+		limit_page_length=limit,
+	)
 
 
 def _campus_admin_inquiry_queue_filters(queue, status=None, reference_date=None):
@@ -725,10 +912,10 @@ def _build_inquiry_dashboard_item(row, student=None, latest_note=None):
 	}
 
 
-def _build_inquiry_list_item(row):
+def _build_inquiry_list_item(row, latest_note=None):
 	return {
 		**build_inquiry_summary(row),
-		"latest_note": _get_latest_note_map([row.name]).get(row.name),
+		"latest_note": latest_note,
 	}
 
 

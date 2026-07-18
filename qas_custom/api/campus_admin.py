@@ -21,6 +21,7 @@ from qas_custom.services.campus_admin import (
 	get_campus_admin_conversion_sessions_data,
 	get_campus_admin_dashboard_data,
 	get_campus_admin_inquiries_data,
+	get_campus_admin_inquiry_filter_options_data,
 	get_campus_admin_inquiry_data,
 	get_campus_admin_me_data,
 	get_campus_admin_teacher_directory_data,
@@ -86,7 +87,17 @@ def campus_admin_get_dashboard(from_date=None, to_date=None):
 
 
 @frappe.whitelist()
-def campus_admin_get_inquiries(status=None, inquiry_type=None, from_date=None, to_date=None, campus=None, queue=None):
+def campus_admin_get_inquiries(
+	status=None,
+	inquiry_type=None,
+	from_date=None,
+	to_date=None,
+	campus=None,
+	queue=None,
+	query=None,
+	course=None,
+	limit=None,
+):
 	return get_campus_admin_inquiries_data(
 		status=status,
 		inquiry_type=inquiry_type,
@@ -94,7 +105,15 @@ def campus_admin_get_inquiries(status=None, inquiry_type=None, from_date=None, t
 		to_date=to_date,
 		campus=campus,
 		queue=queue,
+		query=query,
+		course=course,
+		limit=limit,
 	)
+
+
+@frappe.whitelist()
+def campus_admin_get_inquiry_filter_options(campus=None):
+	return get_campus_admin_inquiry_filter_options_data(campus=campus)
 
 
 @frappe.whitelist()

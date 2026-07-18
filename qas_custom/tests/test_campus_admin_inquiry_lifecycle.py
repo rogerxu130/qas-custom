@@ -63,7 +63,10 @@ class TestCampusAdminInquiryLifecycleQueues(TestCase):
 			"qas_custom.services.campus_admin.frappe.get_all",
 			return_value=[],
 		) as get_all:
-			self.assertEqual(get_campus_admin_inquiries_data(queue="post_trial"), {"items": []})
+			self.assertEqual(
+				get_campus_admin_inquiries_data(queue="post_trial"),
+				{"items": [], "has_more": False, "limit": 200},
+			)
 
 		kwargs = get_all.call_args.kwargs
 		self.assertEqual(kwargs["filters"], {"campus": ["in", ["Indooroopilly"]]})
