@@ -49,6 +49,7 @@ from qas_custom.modules.billing.commands import (
 )
 from qas_custom.modules.billing.presentation import build_course_invoice_description, invoice_item_schedule
 from qas_custom.modules.makeup.commands import (
+    cancel_makeup_booking_core,
     get_parent_redeemable_sessions_core,
     redeem_parent_voucher_core,
     submit_parent_leave_request_core,
@@ -3642,6 +3643,20 @@ def redeem_school_admin_voucher_data(parent=None, voucher_id=None, session_id=No
     return result
 
 
+def cancel_school_admin_makeup_booking_data(parent=None, voucher_id=None, reason=None, confirm_cancel=0):
+    _require_school_admin()
+    _parent_doc, _students, voucher = _get_school_admin_voucher_family_context(parent=parent, voucher_id=voucher_id)
+    reason = str(reason or "").strip()
+    try:
+        result = cancel_makeup_booking_core(voucher, confirm_cancel=confirm_cancel)
+        _audit_school_admin_makeup_cancellation_result(result, reason)
+        frappe.db.commit()
+        return result
+    except Exception:
+        frappe.db.rollback()
+        raise
+
+
 def _get_school_admin_family_context(parent=None, student=None):
     context = _resolve_family_context(parent=parent, student=student)
     parent_id = context.get("parent")
@@ -3853,6 +3868,7 @@ def _get_family_voucher_rows(students=None, status=None, limit=80):
         limit=_limit(limit, default=80, max_value=300),
     )
     items = [_normalize_row_payload("Makeup Voucher", row) for row in rows]
+    attendance_map = _get_family_makeup_attendance_map(items)
     session_map = _get_school_admin_session_summary_map(
         [item.get("original_session") for item in items if item.get("original_session")]
         + [item.get("used_on_session") for item in items if item.get("used_on_session")]
@@ -3871,7 +3887,48 @@ def _get_family_voucher_rows(students=None, status=None, limit=80):
         item["used_session_date"] = used_session.get("session_date")
         item["used_day_of_week"] = used_session.get("day_of_week")
         item["used_start_time"] = used_session.get("start_time")
+        attendance = attendance_map.get(item.get("name")) or {}
+        item["makeup_attendance_entry"] = attendance.get("name")
+        item["makeup_attendance_status"] = attendance.get("status")
     return items
+
+
+def _get_family_makeup_attendance_map(vouchers):
+    used_vouchers = [row for row in vouchers if row.get("status") == "Used" and row.get("used_on_session")]
+    voucher_names = [row.get("name") for row in used_vouchers if row.get("name")]
+    if not voucher_names or not _doctype_available(ATTENDANCE_DOCTYPE):
+        return {}
+
+    linked_rows = []
+    for row in frappe.get_all(
+        ATTENDANCE_DOCTYPE,
+        filters={"source_doctype": "Makeup Voucher", "source_document": ["in", voucher_names]},
+        fields=["name", "course_session", "student", "status", "source_document"],
+        limit_page_length=0,
+    ):
+        linked_rows.append({**row, "voucher": row.get("source_document")})
+    if frappe.db.has_column(ATTENDANCE_DOCTYPE, "makeup_voucher"):
+        for row in frappe.get_all(
+            ATTENDANCE_DOCTYPE,
+            filters={"makeup_voucher": ["in", voucher_names]},
+            fields=["name", "course_session", "student", "status", "makeup_voucher"],
+            limit_page_length=0,
+        ):
+            linked_rows.append({**row, "voucher": row.get("makeup_voucher")})
+
+    result = {}
+    for voucher in used_vouchers:
+        student = voucher.get("used_by_student") or voucher.get("student")
+        matches_by_name = {
+            row.get("name"): row
+            for row in linked_rows
+            if row.get("voucher") == voucher.get("name")
+            and row.get("course_session") == voucher.get("used_on_session")
+            and row.get("student") == student
+        }
+        if len(matches_by_name) == 1:
+            result[voucher.get("name")] = next(iter(matches_by_name.values()))
+    return result
 
 
 def _get_school_admin_session_summary_map(session_ids):
@@ -3930,6 +3987,21 @@ def _audit_school_admin_redeem_result(result, reason):
         _add_comment("Makeup Voucher", voucher, _("Redeemed by School Admin {0}. Reason: {1}").format(user, reason))
     if attendance_entry:
         _add_comment("Class Attendance Entry", attendance_entry, _("Created from School Admin voucher redemption by {0}. Reason: {1}").format(user, reason))
+
+
+def _audit_school_admin_makeup_cancellation_result(result, reason):
+    user = frappe.session.user
+    voucher = (result.get("voucher") or {}).get("voucher_id")
+    attendance = result.get("attendance") or {}
+    attendance_entry = attendance.get("attendance_entry")
+    status_before = attendance.get("status_before") or _("blank")
+    comment = _("Makeup booking cancelled by School Admin {0}. Previous attendance status: {1}.").format(user, status_before)
+    if reason:
+        comment = _("{0} Reason: {1}").format(comment, reason)
+    if voucher:
+        _add_comment("Makeup Voucher", voucher, comment)
+    if attendance_entry:
+        _add_comment("Class Attendance Entry", attendance_entry, comment)
 
 
 def update_school_admin_voucher_data(voucher=None, payload=None):

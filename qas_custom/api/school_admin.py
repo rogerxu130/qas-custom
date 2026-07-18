@@ -55,6 +55,7 @@ from qas_custom.services.school_admin import (
 	adjust_school_admin_store_credit_data,
 	activate_school_admin_enrollment_data,
 	bulk_school_admin_invoice_action_data,
+	cancel_school_admin_makeup_booking_data,
 	cancel_school_admin_invoice_data,
 	reopen_school_admin_unpaid_invoice_data,
 	convert_school_admin_inquiry_data,
@@ -860,6 +861,16 @@ def school_admin_get_redeemable_sessions(parent=None, voucher_id=None, student=N
 @frappe.whitelist()
 def school_admin_redeem_voucher(parent=None, voucher_id=None, session_id=None, student=None, reason=None):
     return redeem_school_admin_voucher_data(parent=parent, voucher_id=voucher_id, session_id=session_id, student=student, reason=reason)
+
+
+@frappe.whitelist()
+def school_admin_cancel_makeup_booking(parent=None, voucher_id=None, reason=None, confirm_cancel=0):
+	return cancel_school_admin_makeup_booking_data(
+		parent=parent,
+		voucher_id=voucher_id,
+		reason=reason,
+		confirm_cancel=confirm_cancel,
+	)
 
 
 @frappe.whitelist()

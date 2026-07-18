@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 
 import frappe
-from frappe.utils import add_days, get_time, getdate, now_datetime, today
+from frappe.utils import add_days, cint, get_time, getdate, now_datetime, today
 
 from qas_custom.modules.course_schedule.queries import get_teacher_name_map, get_weekly_timeslot_map
 from qas_custom.modules.attendance.commands import update_attendance_status
@@ -16,6 +16,7 @@ MAKEUP_ENROLLMENT_TYPE = "Makeup"
 DEFAULT_VOUCHER_EXPIRY_DAYS = 90
 REDEEMABLE_EXISTING_ATTENDANCE_STATUSES = {"Cancelled", "Leave"}
 DEFAULT_LEAVE_ATTENDANCE_STATUSES = {"To be started"}
+MARKED_MAKEUP_ATTENDANCE_STATUSES = {"Present", "Late", "Absent"}
 
 
 def submit_parent_leave_request_core(
@@ -216,6 +217,77 @@ def redeem_parent_voucher_core(
 		"session": _build_redeem_session_payload(session_id),
 		"notification": notification,
 	}
+
+
+def cancel_makeup_booking_core(voucher, *, confirm_cancel=False):
+	if voucher.get("status") != "Used":
+		frappe.throw("Only a used makeup voucher can have its booking cancelled.")
+
+	session_id = voucher.get("used_on_session")
+	if not session_id:
+		frappe.throw("This used makeup voucher is missing its booked session.")
+	if not cint(confirm_cancel):
+		frappe.throw("Confirm cancellation of this makeup booking before continuing.")
+	student = _get_voucher_used_by_student(voucher) or voucher.get("student")
+	if not student:
+		frappe.throw("This used makeup voucher is missing its booked student.")
+
+	attendance = _get_makeup_booking_attendance(voucher, session_id, student)
+	attendance_status_before = attendance.get("status") or ""
+	session = _build_redeem_session_payload(session_id)
+
+	attendance.status = "Cancelled"
+	attendance.save(ignore_permissions=True)
+
+	voucher.status = "Valid"
+	voucher.used_on_session = None
+	voucher.used_date = None
+	_set_voucher_used_by_student(voucher, None)
+	voucher.flags.skip_makeup_attendance_sync = True
+	voucher.save(ignore_permissions=True)
+
+	return {
+		"voucher": _build_makeup_voucher_payload(voucher),
+		"attendance": {
+			"attendance_entry": attendance.name,
+			"status_before": attendance_status_before,
+			"status": attendance.get("status"),
+			"requires_marked_attendance_override": attendance_status_before in MARKED_MAKEUP_ATTENDANCE_STATUSES,
+		},
+		"student": student,
+		"session": session,
+	}
+
+
+def _get_makeup_booking_attendance(voucher, session_id: str, student: str):
+	voucher_name = voucher if isinstance(voucher, str) else voucher.name
+	rows_by_name = {}
+	for row in frappe.get_all(
+		ATTENDANCE_DOCTYPE,
+		filters={"source_doctype": "Makeup Voucher", "source_document": voucher_name},
+		fields=["name", "course_session", "student", "status"],
+		limit_page_length=0,
+	):
+		rows_by_name[row.get("name")] = row
+
+	if frappe.db.has_column(ATTENDANCE_DOCTYPE, "makeup_voucher"):
+		for row in frappe.get_all(
+			ATTENDANCE_DOCTYPE,
+			filters={"makeup_voucher": voucher_name},
+			fields=["name", "course_session", "student", "status"],
+			limit_page_length=0,
+		):
+			rows_by_name[row.get("name")] = row
+
+	matches = [
+		row for row in rows_by_name.values()
+		if row.get("course_session") == session_id and row.get("student") == student
+	]
+	if len(matches) != 1:
+		frappe.throw(
+			"The makeup booking attendance could not be identified safely. Refresh the family and review the voucher before trying again."
+		)
+	return frappe.get_doc(ATTENDANCE_DOCTYPE, matches[0].get("name"))
 
 
 def create_makeup_attendance_entry(voucher, session_id: str, student: str, prevent_student_duplicate: bool = False):
@@ -541,7 +613,7 @@ def _get_voucher_used_by_student(voucher):
 	return None
 
 
-def _set_voucher_used_by_student(voucher, student: str):
+def _set_voucher_used_by_student(voucher, student: str | None):
 	if frappe.db.has_column("Makeup Voucher", "used_by_student"):
 		voucher.used_by_student = student
 	elif frappe.db.has_column("Makeup Voucher", "redeemed_student"):
