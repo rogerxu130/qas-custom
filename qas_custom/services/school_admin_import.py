@@ -454,6 +454,12 @@ def run_invoice_enrollment_reset_data(payload=None):
 					(preview.get("input") or {}).get("student_count", 0)
 				),
 			))
+		if _invoice_enrollment_reset_requires_historical_attendance_confirmation(row, preview):
+			preview["errors"].append(_invoice_enrollment_reset_issue(
+				row,
+				"confirm_historical_attendance",
+				_("Confirm that the historical Present or Late attendance will be retained before continuing."),
+			))
 		preview["blocking_error_count"] = len(preview.get("errors") or [])
 		preview["ok"] = preview["blocking_error_count"] == 0
 	if preview.get("blocking_error_count"):
@@ -995,6 +1001,7 @@ def _build_invoice_enrollment_reset_operation(payload=None):
 		"mode": _normalize_spaces(payload.get("mode") or INVOICE_ENROLLMENT_RESET_MODE_CHANGE).lower(),
 		"preview_fingerprint": _normalize_spaces(payload.get("preview_fingerprint")),
 		"confirm_multiple_withdrawal": cint(payload.get("confirm_multiple_withdrawal")),
+		"confirm_historical_attendance": cint(payload.get("confirm_historical_attendance")),
 		"send_notifications": cint(payload.get("send_notifications", 1)),
 		"errors": [],
 	}
@@ -1012,6 +1019,13 @@ def _invoice_enrollment_reset_requires_multiple_withdrawal_confirmation(row, pre
 		row.get("mode") == INVOICE_ENROLLMENT_RESET_MODE_WITHDRAW
 		and cint((preview.get("input") or {}).get("student_count")) > 1
 		and not cint(row.get("confirm_multiple_withdrawal"))
+	)
+
+
+def _invoice_enrollment_reset_requires_historical_attendance_confirmation(row, preview):
+	return (
+		cint((preview.get("counts") or {}).get("historical_attendance_found")) > 0
+		and not cint(row.get("confirm_historical_attendance"))
 	)
 
 
@@ -1053,6 +1067,7 @@ def _invoice_enrollment_reset_preview_snapshot(row, preview):
 		"invoice_status": preview.get("invoice_status"),
 		"invoice_action": preview.get("invoice_action"),
 		"student_count": (preview.get("input") or {}).get("student_count", 0),
+		"historical_attendance_found": (preview.get("counts") or {}).get("historical_attendance_found", 0),
 		"enrollments": [
 			{
 				"enrollment": item.get("enrollment"),
@@ -1060,6 +1075,7 @@ def _invoice_enrollment_reset_preview_snapshot(row, preview):
 				"enrollment_status": item.get("enrollment_status"),
 				"skipped": bool(item.get("skipped")),
 				"attendance_to_cancel": (item.get("counts") or {}).get("attendance_to_cancel", 0),
+				"historical_attendance_found": (item.get("counts") or {}).get("historical_attendance_found", 0),
 			}
 			for item in preview.get("parents") or []
 		],
@@ -1113,6 +1129,9 @@ def _preview_invoice_enrollment_reset(operation):
 		result["input"]["student_count"] = preview.get("student_count") or 0
 
 	result["input"]["manual_action_count"] = _manual_action_count(result.get("parents") or [])
+	result["input"]["requires_historical_attendance_confirmation"] = bool(
+		cint(result["counts"].get("historical_attendance_found"))
+	)
 	result["blocking_error_count"] = len(result["errors"])
 	result["warning_count"] = len(result["warnings"])
 	result["manual_action_count"] = result["input"]["manual_action_count"]
@@ -1181,27 +1200,27 @@ def _preview_invoice_enrollment_reset_row(row):
 			included_students.add(doc.get("student"))
 		row_counts[pending_count_key] += 1
 		historical_count = _count_historical_enrollment_attendance(enrollment)
-		row_errors = []
+		row_warnings = []
 		if historical_count:
 			row_counts["historical_attendance_found"] += historical_count
-			row_errors.append(_invoice_enrollment_reset_issue(
+			row_warnings.append(_invoice_enrollment_reset_issue(
 				child_row,
 				"attendance",
-				_("Invoice reset is blocked because enrollment {0} has {1} historical attendance row(s).").format(enrollment, historical_count),
+				_("Enrollment {0} has {1} historical Present or Late attendance row(s). These records will be retained; confirm to continue.").format(enrollment, historical_count),
 			))
 		attendance_count = _count_future_enrollment_attendance(enrollment, row.get("effective_date"))
 		if attendance_count:
 			row_counts["attendance_to_cancel"] += attendance_count
 		else:
 			row_counts["enrollments_with_no_future_attendance"] += 1
-		errors.extend(row_errors)
+		warnings.extend(row_warnings)
 		parent_rows.append(_invoice_enrollment_reset_payload(
 			child_row,
 			row_counts,
 			invoice_doc=invoice_doc,
 			enrollment_doc=doc,
 			invoice_action=invoice_action,
-			errors=row_errors,
+			warnings=row_warnings,
 			message=_("Enrollment will be {0} with the selected invoice.").format(target_status),
 		))
 		_accumulate_counts(counts, row_counts)
@@ -1280,10 +1299,17 @@ def _run_invoice_enrollment_reset_operation(row, preview):
 		)
 		if reason:
 			comment = _("{0} Reason: {1}").format(comment, reason)
-		_school_admin_add_comment("Enrollment", enrollment, comment)
 		message_parts = [_("Enrollment set to {0}.").format(target_status)]
 		if attendance_cancelled:
 			message_parts.append(_("{0} future attendance rows cancelled.").format(attendance_cancelled))
+		historical_attendance_retained = cint((preview_row.get("counts") or {}).get("historical_attendance_found"))
+		if historical_attendance_retained:
+			message_parts.append(_("{0} historical attendance rows retained.").format(historical_attendance_retained))
+			comment = _("{0} {1} historical Present or Late attendance row(s) retained.").format(
+				comment,
+				historical_attendance_retained,
+			)
+		_school_admin_add_comment("Enrollment", enrollment, comment)
 		if invoice_result.get("message"):
 			message_parts.append(invoice_result.get("message"))
 		result["parents"].append({

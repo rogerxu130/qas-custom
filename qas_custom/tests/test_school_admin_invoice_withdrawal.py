@@ -10,6 +10,7 @@ from qas_custom.services.school_admin_import import (
 	_apply_enrollment_change_invoice_action,
 	_count_historical_enrollment_attendance,
 	_invoice_enrollment_reset_preview_snapshot,
+	_invoice_enrollment_reset_requires_historical_attendance_confirmation,
 	_invoice_enrollment_reset_requires_multiple_withdrawal_confirmation,
 )
 
@@ -44,6 +45,7 @@ class TestSchoolAdminInvoiceWithdrawal(TestCase):
 		self.assertEqual(operation["row"]["reason"], "")
 		self.assertEqual(operation["row"]["errors"], [])
 		self.assertEqual(operation["row"]["send_notifications"], 1)
+		self.assertEqual(operation["row"]["confirm_historical_attendance"], 0)
 
 	def test_reset_can_skip_parent_notification(self):
 		fake_frappe = SimpleNamespace(db=SimpleNamespace(exists=Mock(return_value=True)))
@@ -92,6 +94,24 @@ class TestSchoolAdminInvoiceWithdrawal(TestCase):
 
 		self.assertFalse(_invoice_enrollment_reset_requires_multiple_withdrawal_confirmation(row, preview))
 
+	def test_historical_attendance_requires_confirmation(self):
+		row = {"confirm_historical_attendance": 0}
+		preview = {"counts": {"historical_attendance_found": 1}}
+
+		self.assertTrue(_invoice_enrollment_reset_requires_historical_attendance_confirmation(row, preview))
+
+	def test_historical_attendance_with_confirmation_is_allowed(self):
+		row = {"confirm_historical_attendance": 1}
+		preview = {"counts": {"historical_attendance_found": 1}}
+
+		self.assertFalse(_invoice_enrollment_reset_requires_historical_attendance_confirmation(row, preview))
+
+	def test_no_historical_attendance_needs_no_confirmation(self):
+		row = {"confirm_historical_attendance": 0}
+		preview = {"counts": {"historical_attendance_found": 0}}
+
+		self.assertFalse(_invoice_enrollment_reset_requires_historical_attendance_confirmation(row, preview))
+
 	def test_preview_snapshot_changes_when_linked_student_changes(self):
 		row = {"invoice": "SINV-0001", "reason": "", "effective_date": "2026-07-16"}
 		preview = {
@@ -116,4 +136,22 @@ class TestSchoolAdminInvoiceWithdrawal(TestCase):
 		self.assertNotEqual(
 			_invoice_enrollment_reset_preview_snapshot({"send_notifications": 1}, preview),
 			_invoice_enrollment_reset_preview_snapshot({"send_notifications": 0}, preview),
+		)
+
+	def test_preview_snapshot_changes_when_historical_attendance_changes(self):
+		row = {"invoice": "SINV-0001", "effective_date": "2026-07-16"}
+		preview = {
+			"input": {"student_count": 1},
+			"counts": {"historical_attendance_found": 1},
+			"parents": [{"enrollment": "ENR-0001", "counts": {"historical_attendance_found": 1}}],
+		}
+		changed_preview = {
+			**preview,
+			"counts": {"historical_attendance_found": 2},
+			"parents": [{"enrollment": "ENR-0001", "counts": {"historical_attendance_found": 2}}],
+		}
+
+		self.assertNotEqual(
+			_invoice_enrollment_reset_preview_snapshot(row, preview),
+			_invoice_enrollment_reset_preview_snapshot(row, changed_preview),
 		)
