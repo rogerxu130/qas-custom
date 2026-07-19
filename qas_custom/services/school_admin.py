@@ -2974,7 +2974,12 @@ def get_school_admin_session_video_content_data(course_session=None, video_post=
 	return payload
 
 
-def _get_school_admin_session_content_rows(course_session):
+def _get_school_admin_session_content_rows(
+	course_session,
+	*,
+	photo_method="qas_custom.api.school_admin.school_admin_get_course_session_photo",
+	video_method="qas_custom.api.school_admin.school_admin_get_course_session_video",
+):
 	items = []
 	teacher_ids = set()
 
@@ -3018,7 +3023,12 @@ def _get_school_admin_session_content_rows(course_session):
 			):
 				photo_items[photo.get("parent")].append({
 					"idx": cint(photo.get("idx")),
-					"url": _build_school_admin_photo_url(course_session, photo.get("parent"), photo.get("idx")),
+					"url": _build_school_admin_photo_url(
+						course_session,
+						photo.get("parent"),
+						photo.get("idx"),
+						method=photo_method,
+					),
 				})
 
 		for row in photo_rows:
@@ -3052,7 +3062,11 @@ def _get_school_admin_session_content_rows(course_session):
 				"teacher": row.get("teacher") or "",
 				"file_name": row.get("file_name") or "",
 				"file_size": cint(row.get("file_size")),
-				"video_url": _build_school_admin_video_url(course_session, row.get("name")),
+				"video_url": _build_school_admin_video_url(
+					course_session,
+					row.get("name"),
+					method=video_method,
+				),
 			})
 
 	teacher_map = {}
@@ -3080,16 +3094,27 @@ def _school_admin_content_datetime(value):
 	return str(value) if value else ""
 
 
-def _build_school_admin_photo_url(course_session, photo_post, photo_idx):
-	return "/api/method/qas_custom.api.school_admin.school_admin_get_course_session_photo?" + urlencode({
+def _build_school_admin_photo_url(
+	course_session,
+	photo_post,
+	photo_idx,
+	*,
+	method="qas_custom.api.school_admin.school_admin_get_course_session_photo",
+):
+	return "/api/method/{0}?".format(method) + urlencode({
 		"course_session": course_session,
 		"photo_post": photo_post,
 		"photo_idx": cint(photo_idx),
 	})
 
 
-def _build_school_admin_video_url(course_session, video_post):
-	return "/api/method/qas_custom.api.school_admin.school_admin_get_course_session_video?" + urlencode({
+def _build_school_admin_video_url(
+	course_session,
+	video_post,
+	*,
+	method="qas_custom.api.school_admin.school_admin_get_course_session_video",
+):
+	return "/api/method/{0}?".format(method) + urlencode({
 		"course_session": course_session,
 		"video_post": video_post,
 	})

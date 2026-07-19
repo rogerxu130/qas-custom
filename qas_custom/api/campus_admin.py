@@ -18,6 +18,8 @@ from qas_custom.services.campus_admin import (
 	get_campus_admin_contacts_data,
 	get_campus_admin_course_session_data,
 	get_campus_admin_course_sessions_data,
+	get_campus_admin_session_photo_content_data,
+	get_campus_admin_session_video_content_data,
 	get_campus_admin_conversion_sessions_data,
 	get_campus_admin_dashboard_data,
 	get_campus_admin_inquiries_data,
@@ -158,6 +160,33 @@ def campus_admin_get_course_sessions(
 @frappe.whitelist()
 def campus_admin_get_course_session(course_session=None):
 	return get_campus_admin_course_session_data(course_session=course_session)
+
+
+@frappe.whitelist()
+def campus_admin_get_course_session_photo(course_session=None, photo_post=None, photo_idx=None):
+	payload = get_campus_admin_session_photo_content_data(
+		course_session=course_session,
+		photo_post=photo_post,
+		photo_idx=photo_idx,
+	)
+	frappe.local.response.filename = payload["filename"]
+	frappe.local.response.filecontent = payload["content"]
+	frappe.local.response.content_type = payload["content_type"]
+	frappe.local.response.display_content_as = "inline"
+	frappe.local.response.type = "download"
+
+
+@frappe.whitelist()
+def campus_admin_get_course_session_video(course_session=None, video_post=None):
+	payload = get_campus_admin_session_video_content_data(
+		course_session=course_session,
+		video_post=video_post,
+	)
+	frappe.local.response.filename = payload["filename"]
+	frappe.local.response.filecontent = payload["content"]
+	frappe.local.response.content_type = payload["content_type"]
+	frappe.local.response.display_content_as = payload["display_content_as"]
+	frappe.local.response.type = "download"
 
 
 @frappe.whitelist()

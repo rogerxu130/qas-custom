@@ -24,7 +24,9 @@ from qas_custom.services.school_admin import (
 	_course_session_sort_key,
 	_document_payload,
 	_get_course_session_rows,
+	_get_school_admin_file_content,
 	_get_school_admin_attendance_rows,
+	_get_school_admin_session_content_rows,
 	_get_timeslot_summary,
 	_roster_course_session_attendance_rows,
 	_visible_course_session_attendance_rows,
@@ -498,6 +500,51 @@ def get_campus_admin_course_session_data(course_session=None):
 	payload["teacher"] = payload.get("teacher_override") or timeslot_teacher
 	_attach_campus_admin_teacher_labels([payload])
 	payload["teacher_assignment_source"] = "Session override" if payload.get("teacher_override") else "Weekly timeslot"
+	payload["class_content"] = _get_school_admin_session_content_rows(
+		course_session,
+		photo_method="qas_custom.api.campus_admin.campus_admin_get_course_session_photo",
+		video_method="qas_custom.api.campus_admin.campus_admin_get_course_session_video",
+	)
+	return payload
+
+
+def get_campus_admin_session_photo_content_data(course_session=None, photo_post=None, photo_idx=None):
+	profile = _require_campus_admin_profile()
+	if not course_session or not photo_post:
+		frappe.throw(_("Course session and photo post are required."))
+	_get_campus_admin_course_session_access(course_session, profile["campuses"])
+
+	photo_post_doc = frappe.get_doc("Session Photo Post", photo_post)
+	if photo_post_doc.get("course_session") != course_session or photo_post_doc.get("status") != "Published":
+		raise frappe.PermissionError
+
+	target_idx = cint(photo_idx)
+	if target_idx <= 0:
+		raise frappe.PermissionError
+	photo_row = next((row for row in photo_post_doc.photos or [] if cint(row.idx) == target_idx), None)
+	if not photo_row or not getattr(photo_row, "image", None):
+		raise frappe.DoesNotExistError
+	return _get_school_admin_file_content(photo_row.image)
+
+
+def get_campus_admin_session_video_content_data(course_session=None, video_post=None):
+	profile = _require_campus_admin_profile()
+	if not course_session or not video_post:
+		frappe.throw(_("Course session and video post are required."))
+	_get_campus_admin_course_session_access(course_session, profile["campuses"])
+
+	video_post_doc = frappe.get_doc("Session Video Post", video_post)
+	if video_post_doc.get("course_session") != course_session or video_post_doc.get("status") != "Published":
+		raise frappe.PermissionError
+	if not video_post_doc.get("video"):
+		raise frappe.DoesNotExistError
+
+	payload = _get_school_admin_file_content(
+		video_post_doc.get("video"),
+		fallback_filename=video_post_doc.get("file_name"),
+		fallback_content_type=video_post_doc.get("mime_type"),
+	)
+	payload["display_content_as"] = "inline"
 	return payload
 
 
