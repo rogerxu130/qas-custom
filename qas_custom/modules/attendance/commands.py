@@ -52,6 +52,7 @@ def ensure_trial_inquiry_attendance_entry(inquiry_doc):
 		status=DEFAULT_ATTENDANCE_STATUS,
 		comments=f"Added from Inquiry {inquiry_doc.name}",
 		prevent_student_duplicate=True,
+		reactivate_cancelled_duplicate=True,
 	)
 
 

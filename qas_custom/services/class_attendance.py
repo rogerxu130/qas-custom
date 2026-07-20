@@ -24,6 +24,7 @@ def create_attendance_entry(
 	comments: str | None = None,
 	makeup_voucher: str | None = None,
 	prevent_student_duplicate: bool = False,
+	reactivate_cancelled_duplicate: bool = False,
 ):
 	if not course_session:
 		frappe.throw(_("Course session is required."))
@@ -32,8 +33,22 @@ def create_attendance_entry(
 	if not enrollment_type:
 		frappe.throw(_("Enrollment type is required before adding attendance."))
 
-	if prevent_student_duplicate and has_student_session_conflict(student, course_session):
-		frappe.throw(_("This student is already listed for this session."))
+	if prevent_student_duplicate:
+		existing_student_entry = get_student_session_attendance_entry(student, course_session)
+		if existing_student_entry:
+			if (
+				reactivate_cancelled_duplicate
+				and existing_student_entry.get("status") == "Cancelled"
+				and existing_student_entry.get("enrollment_type") == enrollment_type
+			):
+				return reactivate_cancelled_attendance_entry(
+					existing_student_entry.get("name"),
+					status=status,
+					comments=comments,
+					source_doctype=source_doctype,
+					source_document=source_document,
+				)
+			frappe.throw(_("This student is already listed for this session."))
 
 	existing = (
 		get_attendance_entry_by_source(source_doctype, source_document, course_session=course_session)
@@ -156,15 +171,44 @@ def default_attendance_fields():
 
 
 def has_student_session_conflict(student: str, course_session: str):
-	return bool(
-		frappe.db.exists(
-			ATTENDANCE_DOCTYPE,
-			{
-				"student": student,
-				"course_session": course_session,
-			},
-		)
+	return bool(get_student_session_attendance_entry(student, course_session))
+
+
+def get_student_session_attendance_entry(student: str, course_session: str):
+	return frappe.db.get_value(
+		ATTENDANCE_DOCTYPE,
+		{
+			"student": student,
+			"course_session": course_session,
+		},
+		["name", "status", "enrollment_type"],
+		as_dict=True,
 	)
+
+
+def reactivate_cancelled_attendance_entry(
+	attendance_entry: str,
+	*,
+	status: str | None,
+	comments: str | None,
+	source_doctype: str | None,
+	source_document: str | None,
+):
+	doc = frappe.get_doc(ATTENDANCE_DOCTYPE, attendance_entry)
+	if doc.get("status") != "Cancelled":
+		frappe.throw(_("This student is already listed for this session."))
+
+	if doc.meta.has_field("previous_status"):
+		doc.previous_status = "Cancelled"
+	doc.status = status or DEFAULT_ATTENDANCE_STATUS
+	doc.comments = comments
+	doc.source_doctype = source_doctype
+	doc.source_document = source_document
+	for fieldname in ("marked_by", "marked_at"):
+		if doc.meta.has_field(fieldname):
+			doc.set(fieldname, None)
+	doc.save(ignore_permissions=True)
+	return doc.name
 
 
 def infer_source_from_legacy_row(row):
