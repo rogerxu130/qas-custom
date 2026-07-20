@@ -28,7 +28,7 @@ def execute():
 
 
 def _backfill_manual_invoices():
-	required_fields = ["qas_is_manual_invoice", "qas_invoice_type", "source_doctype", "source_document", "enrollment"]
+	required_fields = ["qas_is_manual_invoice", "qas_invoice_type", "source_doctype", "source_document"]
 	if not all(frappe.db.has_column("Sales Invoice", fieldname) for fieldname in required_fields):
 		return
 	frappe.db.sql(
@@ -39,6 +39,5 @@ def _backfill_manual_invoices():
 		  AND COALESCE(qas_invoice_type, '') = 'Other'
 		  AND COALESCE(source_doctype, '') = ''
 		  AND COALESCE(source_document, '') = ''
-		  AND COALESCE(enrollment, '') = ''
 		"""
 	)

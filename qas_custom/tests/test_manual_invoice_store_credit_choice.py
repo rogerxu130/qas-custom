@@ -1,8 +1,11 @@
+from types import SimpleNamespace
 from unittest import TestCase
+from unittest.mock import Mock, patch
 
 import frappe
 
 from qas_custom.modules.billing.store_credit import _store_credit_application_eligibility
+from qas_custom.patches.v2026_07_20_add_manual_invoice_marker import _backfill_manual_invoices
 
 
 class TestManualInvoiceStoreCreditChoice(TestCase):
@@ -37,3 +40,16 @@ class TestManualInvoiceStoreCreditChoice(TestCase):
 			_store_credit_application_eligibility(other_invoice),
 			(False, "Invoice is not course-related."),
 		)
+
+	def test_manual_invoice_backfill_only_uses_production_columns(self):
+		db = Mock()
+		db.has_column.return_value = True
+		with patch(
+			"qas_custom.patches.v2026_07_20_add_manual_invoice_marker.frappe",
+			SimpleNamespace(db=db),
+		):
+			_backfill_manual_invoices()
+
+		query = db.sql.call_args.args[0]
+		self.assertIn("qas_is_manual_invoice", query)
+		self.assertNotIn("enrollment", query)
