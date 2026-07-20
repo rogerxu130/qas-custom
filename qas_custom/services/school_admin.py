@@ -1231,6 +1231,11 @@ def create_school_admin_manual_invoice_data(payload=None):
 	_set_if_field(invoice, "source_document", payload.get("source_document"))
 	_set_if_field(invoice, "billing_note", payload.get("billing_note"))
 	_set_if_field(invoice, "source_type", payload.get("source_type") or "Manual")
+	_set_if_field(
+		invoice,
+		"qas_apply_store_credit_on_submit",
+		cint(payload.get("apply_store_credit_on_submit", 1)),
+	)
 	_set_if_field(invoice, "remarks", payload.get("remarks"))
 	_apply_invoice_payment_payload(invoice, payload)
 	apply_invoice_payment_snapshot(invoice)
@@ -1250,6 +1255,7 @@ def update_school_admin_draft_invoice_data(invoice=None, payload=None):
 	doc = frappe.get_doc("Sales Invoice", invoice)
 	if cint(doc.docstatus) != 0:
 		frappe.throw(_("Only draft invoices can be edited."))
+	is_manual_invoice = (doc.get("source_type") or "").strip().lower() == "manual"
 
 	for fieldname in ["customer", "due_date", "remarks"]:
 		if fieldname in payload:
@@ -1270,6 +1276,12 @@ def update_school_admin_draft_invoice_data(invoice=None, payload=None):
 	]:
 		if fieldname in payload:
 			_set_if_field(doc, fieldname, payload.get(fieldname))
+	if "apply_store_credit_on_submit" in payload and is_manual_invoice:
+		_set_if_field(
+			doc,
+			"qas_apply_store_credit_on_submit",
+			cint(payload.get("apply_store_credit_on_submit")),
+		)
 	_apply_invoice_payment_payload(doc, payload)
 	apply_invoice_payment_snapshot(doc)
 	if "items" in payload:

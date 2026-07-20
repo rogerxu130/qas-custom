@@ -415,8 +415,9 @@ def apply_store_credit_to_unpaid_invoices(parent: str | None = None, customer: s
 
 
 def apply_store_credit_to_invoice(invoice_doc, *, reason: str | None = None, notes: str | None = None):
-	if not _is_course_invoice(invoice_doc):
-		return {"applied": 0, "balance": 0, "skipped": True, "reason": "Invoice is not course-related."}
+	eligible, ineligible_reason = _store_credit_application_eligibility(invoice_doc)
+	if not eligible:
+		return {"applied": 0, "balance": 0, "skipped": True, "reason": ineligible_reason}
 
 	parent, customer = resolve_parent_customer(parent=invoice_doc.get("parent"), customer=invoice_doc.customer)
 	available = get_store_credit_balance(parent=parent, customer=customer)
@@ -828,6 +829,18 @@ def _is_course_invoice(invoice_doc) -> bool:
 		if line_type in COURSE_LINE_TYPES:
 			return True
 	return False
+
+
+def _store_credit_application_eligibility(invoice_doc) -> tuple[bool, str | None]:
+	source_type = invoice_doc.get("source_type") if hasattr(invoice_doc, "get") else None
+	if (source_type or "").strip().lower() == "manual":
+		apply_on_submit = invoice_doc.get("qas_apply_store_credit_on_submit") if hasattr(invoice_doc, "get") else None
+		if cint(apply_on_submit):
+			return True, None
+		return False, "Store Credit is disabled for this manual Invoice."
+	if _is_course_invoice(invoice_doc):
+		return True, None
+	return False, "Invoice is not course-related."
 
 
 def _legacy_balance(parent: str | None = None, customer: str | None = None):
