@@ -7,6 +7,7 @@ from frappe.utils import flt, formatdate, get_time, getdate
 
 from qas_custom.modules.billing.invoice_amounts import resolve_invoice_print_amounts
 from qas_custom.modules.billing.invoice_settings import get_invoice_payment_context, get_invoice_settings
+from qas_custom.modules.billing.store_credit import get_invoice_total_amount
 from qas_custom.services.display_labels import get_student_parent_name
 
 DEFAULT_PARENT_PORTAL_URL = "https://portal.queenslandartschool.com"
@@ -63,7 +64,7 @@ def build_parent_invoice_context(
 		"recipient_name": _invoice_recipient_name(invoice_doc),
 		"posting_date": formatdate(invoice_doc.get("posting_date")) if invoice_doc.get("posting_date") else "",
 		"due_date": formatdate(invoice_doc.get("due_date")) if invoice_doc.get("due_date") else "",
-		"total": flt(invoice_doc.get("grand_total") or invoice_doc.get("rounded_total") or 0),
+		"total": get_invoice_total_amount(invoice_doc),
 		"store_credit_applied": store_credit,
 		"payable_amount": payable,
 		"invoice_link": portal_link,

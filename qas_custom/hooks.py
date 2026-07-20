@@ -143,6 +143,7 @@ doc_events = {
 		"before_insert": "qas_custom.modules.notifications.guard.suppress_legacy_invoice_email_queue",
 	},
 	"Sales Invoice": {
+		"before_validate": "qas_custom.modules.billing.store_credit.enforce_exact_draft_invoice_total",
 		"before_insert": "qas_custom.modules.notifications.guard.disable_sales_invoice_auto_notifications",
 		"before_submit": "qas_custom.modules.notifications.guard.disable_sales_invoice_auto_notifications",
 		"on_submit": "qas_custom.modules.billing.store_credit.apply_store_credit_on_sales_invoice_submit",

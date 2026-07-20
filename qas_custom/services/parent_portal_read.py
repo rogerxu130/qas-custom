@@ -7,7 +7,11 @@ from frappe.utils import getdate, get_time, now_datetime, today
 
 from qas_custom.modules.billing.invoice_settings import get_invoice_payment_context
 from qas_custom.modules.billing.presentation import build_parent_invoice_item
-from qas_custom.modules.billing.store_credit import get_invoice_payable_amount, get_invoice_store_credit_applied
+from qas_custom.modules.billing.store_credit import (
+    get_invoice_payable_amount,
+    get_invoice_store_credit_applied,
+    get_invoice_total_amount,
+)
 from qas_custom.modules.course_schedule.queries import (
     get_teacher_name_map as _get_teacher_name_map,
     get_weekly_timeslot_map as _get_weekly_timeslot_map,
@@ -322,6 +326,7 @@ def get_parent_invoices_data():
                 "posting_date": doc.posting_date,
                 "due_date": doc.due_date,
                 "grand_total": float(doc.grand_total or 0),
+                "invoice_total": float(get_invoice_total_amount(doc) or 0),
                 "outstanding_amount": float(doc.outstanding_amount or 0),
                 "store_credit_applied": store_credit_applied,
                 "payable_amount": payable_amount,

@@ -484,8 +484,25 @@ def get_invoice_store_credit_applied(invoice: str) -> float:
 	return _invoice_store_credit_applied(invoice)
 
 
+def get_invoice_total_amount(invoice_doc) -> float:
+	docstatus = cint(_doc_field(invoice_doc, "docstatus") or 0)
+	grand_total = flt(_doc_field(invoice_doc, "grand_total") or 0)
+	rounded_total = flt(_doc_field(invoice_doc, "rounded_total") or 0)
+	if docstatus != 0 and rounded_total > 0:
+		return rounded_total
+	return grand_total or rounded_total
+
+
+def enforce_exact_draft_invoice_total(doc, method=None):
+	if not doc or cint(doc.get("docstatus") or 0) != 0:
+		return
+	meta = getattr(doc, "meta", None)
+	if meta and meta.get_field("disable_rounded_total"):
+		doc.set("disable_rounded_total", 1)
+
+
 def _store_credit_remaining_amount(invoice_doc, *, already_applied: float = 0) -> float:
-	total = flt(_doc_field(invoice_doc, "rounded_total") or _doc_field(invoice_doc, "grand_total") or 0)
+	total = get_invoice_total_amount(invoice_doc)
 	total_remaining = max(0, total - flt(already_applied))
 	docstatus = cint(_doc_field(invoice_doc, "docstatus") or 0)
 	if docstatus == 1:
@@ -496,7 +513,7 @@ def _store_credit_remaining_amount(invoice_doc, *, already_applied: float = 0) -
 
 def get_invoice_payable_amount(invoice_doc) -> float:
 	invoice_name = _doc_field(invoice_doc, "name")
-	total = flt(_doc_field(invoice_doc, "grand_total") or _doc_field(invoice_doc, "rounded_total") or 0)
+	total = get_invoice_total_amount(invoice_doc)
 	outstanding = _invoice_outstanding_amount(invoice_doc)
 	docstatus = cint(_doc_field(invoice_doc, "docstatus") or 0)
 	applied = get_invoice_store_credit_applied(invoice_name)

@@ -28,6 +28,7 @@ from qas_custom.modules.billing.store_credit import (
 	get_store_credit_bonus_for_source,
 	get_invoice_payable_amount,
 	get_invoice_store_credit_applied,
+	get_invoice_total_amount,
 	get_store_credit_summary,
 	grant_store_credit_bonus_for_amount,
 	grant_store_credit_bonus_for_payment_entry,
@@ -4698,6 +4699,7 @@ def _search_invoice_direct_names(query, limit):
 			"status",
 			"docstatus",
 			"grand_total",
+			"rounded_total",
 			"outstanding_amount",
 		],
 	)
@@ -5048,6 +5050,7 @@ def _get_invoice_rows(status=None, customer=None, parent=None, students=None, so
 			"status",
 			"docstatus",
 			"grand_total",
+			"rounded_total",
 			"outstanding_amount",
 			"parent",
 			"student",
@@ -5169,6 +5172,7 @@ def _invoice_credit_payload(doc_or_row):
 	return {
 		"store_credit_applied": store_credit_applied,
 		"payable_amount": payable_amount,
+		"invoice_total": get_invoice_total_amount(doc_or_row),
 		"invoice_link": _invoice_link(invoice_name) if invoice_name else None,
 		"payment_link": _invoice_payment_link(invoice_name) if invoice_name else None,
 	}

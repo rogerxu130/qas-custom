@@ -6,6 +6,7 @@ from frappe.utils import cint, flt
 from qas_custom.modules.billing.store_credit import (
 	get_invoice_payable_amount,
 	get_invoice_store_credit_applied,
+	get_invoice_total_amount,
 )
 
 
@@ -17,7 +18,7 @@ def resolve_invoice_print_amounts(
 	sync_snapshot: bool = True,
 ):
 	doc = frappe.get_doc("Sales Invoice", invoice_doc) if isinstance(invoice_doc, str) else invoice_doc
-	total = flt(doc.get("grand_total") or doc.get("rounded_total") or 0)
+	total = get_invoice_total_amount(doc)
 	outstanding = _invoice_outstanding_amount(doc, total)
 	ledger_credit = flt(get_invoice_store_credit_applied(doc.name))
 	snapshot_credit = flt(doc.get("qas_store_credit_applied") or 0)
