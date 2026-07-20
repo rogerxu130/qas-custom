@@ -1231,6 +1231,7 @@ def create_school_admin_manual_invoice_data(payload=None):
 	_set_if_field(invoice, "source_document", payload.get("source_document"))
 	_set_if_field(invoice, "billing_note", payload.get("billing_note"))
 	_set_if_field(invoice, "source_type", payload.get("source_type") or "Manual")
+	_set_if_field(invoice, "qas_is_manual_invoice", 1)
 	_set_if_field(
 		invoice,
 		"qas_apply_store_credit_on_submit",
@@ -1255,7 +1256,7 @@ def update_school_admin_draft_invoice_data(invoice=None, payload=None):
 	doc = frappe.get_doc("Sales Invoice", invoice)
 	if cint(doc.docstatus) != 0:
 		frappe.throw(_("Only draft invoices can be edited."))
-	is_manual_invoice = (doc.get("source_type") or "").strip().lower() == "manual"
+	is_manual_invoice = cint(doc.get("qas_is_manual_invoice")) or (doc.get("source_type") or "").strip().lower() == "manual"
 
 	for fieldname in ["customer", "due_date", "remarks"]:
 		if fieldname in payload:
@@ -5101,8 +5102,11 @@ def _apply_invoice_source_filter(filters, source):
 		filters["source_inquiry"] = ["is", "set"]
 	elif source == "Enrollment" and _has_field("Sales Invoice", "enrollment"):
 		filters["enrollment"] = ["is", "set"]
-	elif source == "Manual" and _has_field("Sales Invoice", "source_type"):
-		filters["source_type"] = "Manual"
+	elif source == "Manual":
+		if _has_field("Sales Invoice", "qas_is_manual_invoice"):
+			filters["qas_is_manual_invoice"] = 1
+		elif _has_field("Sales Invoice", "source_type"):
+			filters["source_type"] = "Manual"
 
 
 def _invoice_names_for_students(students):

@@ -833,7 +833,8 @@ def _is_course_invoice(invoice_doc) -> bool:
 
 def _store_credit_application_eligibility(invoice_doc) -> tuple[bool, str | None]:
 	source_type = invoice_doc.get("source_type") if hasattr(invoice_doc, "get") else None
-	if (source_type or "").strip().lower() == "manual":
+	is_manual_invoice = invoice_doc.get("qas_is_manual_invoice") if hasattr(invoice_doc, "get") else None
+	if cint(is_manual_invoice) or (source_type or "").strip().lower() == "manual":
 		apply_on_submit = invoice_doc.get("qas_apply_store_credit_on_submit") if hasattr(invoice_doc, "get") else None
 		if cint(apply_on_submit):
 			return True, None

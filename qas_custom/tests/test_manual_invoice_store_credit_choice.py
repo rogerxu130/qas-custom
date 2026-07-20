@@ -8,7 +8,7 @@ from qas_custom.modules.billing.store_credit import _store_credit_application_el
 class TestManualInvoiceStoreCreditChoice(TestCase):
 	def test_manual_other_invoice_can_explicitly_apply_store_credit(self):
 		invoice = frappe._dict(
-			source_type="Manual",
+			qas_is_manual_invoice=1,
 			qas_invoice_type="Other",
 			qas_apply_store_credit_on_submit=1,
 			items=[],
