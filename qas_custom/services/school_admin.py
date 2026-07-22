@@ -1052,8 +1052,10 @@ def get_school_admin_inquiries_data(
 		limit_start=page_start,
 		limit_page_length=page_limit,
 	)
+	items = [_build_inquiry_list_item(row) for row in rows]
+	_attach_inquiry_teacher_labels(items)
 	return {
-		"items": [_build_inquiry_list_item(row) for row in rows],
+		"items": items,
 		"total": total,
 		"limit_start": page_start,
 		"limit": page_limit,
@@ -5058,6 +5060,80 @@ def _build_inquiry_list_item(row):
 	payload = build_inquiry_summary(row)
 	payload["latest_note"] = _get_latest_inquiry_note(row.name)
 	return payload
+
+
+def _attach_inquiry_teacher_labels(items):
+	for item in items:
+		item["teacher"] = ""
+		item["teacher_display"] = ""
+		item["teacher_assignment_source"] = ""
+
+	session_ids = sorted({item.get("course_session") for item in items if item.get("course_session")})
+	if not session_ids:
+		return items
+
+	session_rows = frappe.get_all(
+		"Course Sessions",
+		filters={"name": ["in", session_ids]},
+		fields=["name", "weekly_timeslot", "teacher_override"],
+		limit_page_length=0,
+	)
+	session_map = {row.get("name"): row for row in session_rows}
+	timeslot_ids = sorted(
+		{
+			row.get("weekly_timeslot")
+			for row in session_rows
+			if row.get("weekly_timeslot") and not row.get("teacher_override")
+		}
+	)
+	timeslot_rows = (
+		frappe.get_all(
+			"Weekly Timeslot",
+			filters={"name": ["in", timeslot_ids]},
+			fields=["name", "teacher"],
+			limit_page_length=0,
+		)
+		if timeslot_ids
+		else []
+	)
+	timeslot_map = {row.get("name"): row for row in timeslot_rows}
+
+	teacher_ids = set()
+	for session in session_rows:
+		teacher = session.get("teacher_override")
+		if not teacher:
+			teacher = (timeslot_map.get(session.get("weekly_timeslot")) or {}).get("teacher")
+		if teacher:
+			teacher_ids.add(teacher)
+	teacher_rows = (
+		frappe.get_all(
+			"Teacher",
+			filters={"name": ["in", sorted(teacher_ids)]},
+			fields=["name", "teacher_name"],
+			limit_page_length=0,
+		)
+		if teacher_ids
+		else []
+	)
+	teacher_map = {
+		row.get("name"): row.get("teacher_name") or row.get("name")
+		for row in teacher_rows
+	}
+
+	for item in items:
+		session = session_map.get(item.get("course_session"))
+		if not session:
+			continue
+		teacher = session.get("teacher_override")
+		if teacher:
+			source = "Session override"
+		else:
+			teacher = (timeslot_map.get(session.get("weekly_timeslot")) or {}).get("teacher")
+			source = "Weekly timeslot" if teacher else ""
+		item["teacher"] = teacher or ""
+		item["teacher_display"] = teacher_map.get(teacher, teacher or "")
+		item["teacher_assignment_source"] = source
+	return items
 
 
 def _get_latest_inquiry_note(inquiry):

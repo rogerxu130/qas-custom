@@ -4,7 +4,10 @@ from unittest.mock import Mock, patch
 
 from frappe.utils import getdate
 
-from qas_custom.services.school_admin import get_school_admin_inquiries_data
+from qas_custom.services.school_admin import (
+	_attach_inquiry_teacher_labels,
+	get_school_admin_inquiries_data,
+)
 
 
 class TestSchoolAdminInquiryList(TestCase):
@@ -41,6 +44,47 @@ class TestSchoolAdminInquiryList(TestCase):
 		)
 		self.assertEqual(result["total"], 1)
 		self.assertFalse(result["has_more"])
+		self.assertEqual(result["items"][0]["teacher_display"], "")
+
+	def test_teacher_labels_use_session_override_then_weekly_teacher_in_bulk(self):
+		items = [
+			{"id": "INQ-001", "course_session": "CS-001"},
+			{"id": "INQ-002", "course_session": "CS-002"},
+			{"id": "INQ-003", "course_session": "CS-MISSING"},
+			{"id": "INQ-004", "course_session": ""},
+		]
+		fake_frappe = SimpleNamespace(
+			get_all=Mock(
+				side_effect=[
+					[
+						{"name": "CS-001", "weekly_timeslot": "WT-001", "teacher_override": "TEACHER-OVERRIDE"},
+						{"name": "CS-002", "weekly_timeslot": "WT-002", "teacher_override": ""},
+					],
+					[{"name": "WT-002", "teacher": "TEACHER-WEEKLY"}],
+					[
+						{"name": "TEACHER-OVERRIDE", "teacher_name": "Joanne"},
+						{"name": "TEACHER-WEEKLY", "teacher_name": "Marco"},
+					],
+				]
+			)
+		)
+
+		with patch("qas_custom.services.school_admin.frappe", fake_frappe):
+			_attach_inquiry_teacher_labels(items)
+
+		self.assertEqual(items[0]["teacher"], "TEACHER-OVERRIDE")
+		self.assertEqual(items[0]["teacher_display"], "Joanne")
+		self.assertEqual(items[0]["teacher_assignment_source"], "Session override")
+		self.assertEqual(items[1]["teacher"], "TEACHER-WEEKLY")
+		self.assertEqual(items[1]["teacher_display"], "Marco")
+		self.assertEqual(items[1]["teacher_assignment_source"], "Weekly timeslot")
+		self.assertEqual(items[2]["teacher_display"], "")
+		self.assertEqual(items[3]["teacher_display"], "")
+		self.assertEqual(fake_frappe.get_all.call_count, 3)
+		self.assertEqual(
+			fake_frappe.get_all.call_args_list[0].kwargs["filters"]["name"],
+			["in", ["CS-001", "CS-002", "CS-MISSING"]],
+		)
 
 	def test_pagination_returns_stable_metadata_and_offset(self):
 		fake_frappe = SimpleNamespace(
