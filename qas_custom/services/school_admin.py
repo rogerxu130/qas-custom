@@ -85,6 +85,18 @@ from qas_custom.services.teacher_directory import get_active_teacher_directory_d
 ADMIN_ROLES = {"School Admin", "System Manager"}
 INQUIRY_OPEN_STATUSES = ["New", "Needs Review", "Booked", "Rescheduled", "No-show"]
 INQUIRY_POST_VISIT_STATUSES = ["Completed", "Follow-up"]
+INQUIRY_STATUSES = {
+	"New",
+	"Needs Review",
+	"Booked",
+	"Rescheduled",
+	"Cancelled",
+	"Completed",
+	"No-show",
+	"Follow-up",
+	"Converted",
+	"Inactive",
+}
 ACTIVE_TERM_STATUSES = ["Upcoming", "Active"]
 ACTIVE_TIMESLOT_STATUSES = ["Active"]
 COURSE_LABEL_FIELDS = ["name", "course_name", "course_name_zh"]
@@ -937,12 +949,17 @@ def get_school_admin_inquiries_data(
 	to_date=None,
 	queue=None,
 	query=None,
+	limit_start=0,
 	limit=80,
 ):
 	_require_school_admin()
 	filters = {}
 	query = str(query or "").strip()
+	status = str(status or "").strip()
+	order_queue = None if status else queue
 	if status:
+		if status not in INQUIRY_STATUSES:
+			frappe.throw(_("Unsupported inquiry status filter."))
 		filters["status"] = status
 	elif queue == "post_visit":
 		filters["status"] = ["in", INQUIRY_POST_VISIT_STATUSES]
@@ -1002,15 +1019,32 @@ def get_school_admin_inquiries_data(
 			"modified",
 		],
 	)
+	page_limit = _limit(limit, default=80, max_value=200)
+	page_start = max(cint(limit_start), 0)
+	count_rows = frappe.get_all(
+		"Inquiry",
+		filters=filters,
+		or_filters=or_filters,
+		fields=["count(name) as total"],
+		limit=1,
+	)
+	total = cint(count_rows[0].get("total")) if count_rows else 0
 	rows = frappe.get_all(
 		"Inquiry",
 		filters=filters,
 		or_filters=or_filters,
 		fields=fields,
-		order_by=_inquiry_order_by(queue),
-		limit=_limit(limit, default=80, max_value=200),
+		order_by=_inquiry_order_by(order_queue),
+		limit_start=page_start,
+		limit_page_length=page_limit,
 	)
-	return {"items": [_build_inquiry_list_item(row) for row in rows]}
+	return {
+		"items": [_build_inquiry_list_item(row) for row in rows],
+		"total": total,
+		"limit_start": page_start,
+		"limit": page_limit,
+		"has_more": page_start + len(rows) < total,
+	}
 
 
 def get_school_admin_inquiry_data(inquiry=None):
@@ -5010,8 +5044,8 @@ def _get_latest_inquiry_note(inquiry):
 
 def _inquiry_order_by(queue):
 	if not queue or queue == "post_visit":
-		return "current_appointment_date desc, modified desc"
-	return "current_appointment_date asc, current_appointment_time asc, modified desc"
+		return "current_appointment_date desc, modified desc, name desc"
+	return "current_appointment_date asc, current_appointment_time asc, modified desc, name asc"
 
 
 def _get_invoice_rows(status=None, customer=None, parent=None, students=None, source=None, names=None, limit=80):
