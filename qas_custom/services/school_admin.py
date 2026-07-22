@@ -1350,6 +1350,7 @@ def delete_school_admin_draft_invoice_data(invoice=None):
 	doc = frappe.get_doc("Sales Invoice", invoice)
 	if cint(doc.docstatus) != 0:
 		frappe.throw(_("Only draft invoices can be deleted. Cancel submitted invoices instead."))
+	_detach_invoice_operation_report_links(doc.name)
 	_clear_deleted_invoice_enrollment_snapshot(doc)
 	deleted = doc.name
 	frappe.delete_doc("Sales Invoice", deleted, ignore_permissions=True)
@@ -1481,6 +1482,10 @@ def cancel_school_admin_invoice_data(invoice=None, reason=None, allow_empty_reas
 		payload = _build_invoice_payload(doc)
 		payload["cancellation_notification"] = _skipped_invoice_notification("Invoice was already cancelled; no duplicate notification was sent.")
 		return payload
+	if cint(doc.docstatus) == 0:
+		frappe.throw(_("Draft invoices cannot be cancelled. Delete the draft instead."))
+	if cint(doc.docstatus) != 1:
+		frappe.throw(_("Only submitted invoices can be cancelled."))
 	if cint(doc.docstatus) == 1:
 		if not payment_mutations_enabled():
 			frappe.throw(_(payment_block_reason()))
@@ -1514,14 +1519,6 @@ def cancel_school_admin_invoice_data(invoice=None, reason=None, allow_empty_reas
 		payload["cancellation_store_credit"] = paid_credit.name if paid_credit else None
 		payload["cancellation_notification"] = notification
 		return payload
-
-	_mark_draft_invoice_cancelled(doc, reason)
-	_clear_deleted_invoice_enrollment_snapshot(doc, action="cancelled")
-	frappe.db.commit()
-	payload = _build_invoice_payload(frappe.get_doc("Sales Invoice", invoice))
-	payload["cancellation_notification"] = _skipped_invoice_notification("Draft invoices do not send cancellation notifications.")
-	return payload
-
 
 def reopen_school_admin_unpaid_invoice_data(invoice=None, reason=None):
 	"""Cancel an unpaid invoice and return its amendment as the editable draft."""
@@ -1771,11 +1768,29 @@ def bulk_school_admin_invoice_action_data(payload=None):
 	if action == "cancel" and not reason:
 		frappe.throw(_("Cancellation reason is required."))
 
-	results = []
+	invoice_names = []
+	seen_invoice_names = set()
 	for invoice in invoices:
 		invoice_name = (invoice or "").strip()
-		if not invoice_name:
+		if not invoice_name or invoice_name in seen_invoice_names:
 			continue
+		seen_invoice_names.add(invoice_name)
+		invoice_names.append(invoice_name)
+	if not invoice_names:
+		frappe.throw(_("At least one invoice is required."))
+	if action == "cancel":
+		ineligible = []
+		for invoice_name in invoice_names:
+			doc = frappe.get_doc("Sales Invoice", invoice_name)
+			if cint(doc.docstatus) != 1:
+				ineligible.append(invoice_name)
+		if ineligible:
+			frappe.throw(
+				_("Bulk cancellation accepts submitted invoices only. Remove: {0}.").format(", ".join(ineligible))
+			)
+
+	results = []
+	for invoice_name in invoice_names:
 		try:
 			if action == "submit":
 				result = submit_school_admin_invoice_data(invoice=invoice_name, enqueue_notification=True)
@@ -5293,19 +5308,6 @@ def _sync_invoice_student_summary(invoice):
 	_set_if_field(invoice, "student_summary", summary)
 
 
-def _mark_draft_invoice_cancelled(doc, reason):
-	comment = _("Draft invoice marked cancelled by School Admin.")
-	if reason:
-		comment = _("{0} Reason: {1}").format(comment, reason)
-	_add_comment("Sales Invoice", doc.name, comment)
-	if _has_field("Sales Invoice", "status"):
-		frappe.db.set_value("Sales Invoice", doc.name, "status", "Cancelled", update_modified=True)
-	if _has_field("Sales Invoice", "cancel_reason"):
-		frappe.db.set_value("Sales Invoice", doc.name, "cancel_reason", reason, update_modified=False)
-	elif _has_field("Sales Invoice", "cancellation_reason"):
-		frappe.db.set_value("Sales Invoice", doc.name, "cancellation_reason", reason, update_modified=False)
-
-
 def _run_school_admin_invoice_mutation(callback):
 	original_user = frappe.session.user or "Administrator"
 	try:
@@ -5415,6 +5417,36 @@ def _create_invoice_cancellation_store_credit(doc, amount, reason):
 	)
 	_add_comment("Sales Invoice", doc.name, _("Paid amount moved to store credit: {0}.").format(amount))
 	return credit
+
+
+def _detach_invoice_operation_report_links(invoice):
+	if not invoice or not _doctype_available("QAS Operation Report Row"):
+		return []
+	rows = frappe.get_all(
+		"QAS Operation Report Row",
+		filters={"invoice": invoice},
+		fields=["name", "parent", "message", "reference_doctype", "reference_name", "raw_row_json"],
+		limit_page_length=0,
+	)
+	detached = []
+	for row in rows:
+		message = str(row.get("message") or "").strip()
+		reference_text = " ".join(
+			str(row.get(fieldname) or "")
+			for fieldname in ("reference_doctype", "reference_name", "message", "raw_row_json")
+		)
+		updates = {"invoice": None}
+		if invoice not in reference_text:
+			audit_note = _("Draft invoice {0} was deleted; its original reference is retained in this operation report.").format(invoice)
+			updates["message"] = f"{message}\n{audit_note}".strip()
+		frappe.db.set_value(
+			"QAS Operation Report Row",
+			row.get("name"),
+			updates,
+			update_modified=False,
+		)
+		detached.append({"row": row.get("name"), "report": row.get("parent")})
+	return detached
 
 
 def _clear_deleted_invoice_enrollment_snapshot(doc, action="deleted"):

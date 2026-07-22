@@ -21,11 +21,10 @@ from qas_custom.services.inquiry import (
 from qas_custom.services.parent_customer import ensure_parent_customer
 from qas_custom.services.school_admin import (
 	_add_comment as _school_admin_add_comment,
-	_clear_deleted_invoice_enrollment_snapshot,
 	_existing_invoice_for_enrollment,
-	_mark_draft_invoice_cancelled,
 	_require_school_admin,
 	cancel_school_admin_invoice_data,
+	delete_school_admin_draft_invoice_data,
 )
 from qas_custom.utils.environment import payment_block_reason, payment_mutations_enabled
 
@@ -863,14 +862,12 @@ def _apply_enrollment_change_invoice_action(invoice_action, reason, allow_empty_
 			"manual_action_required": True,
 			"count_key": "invoices_manual_adjustment_reported",
 		}
-	if action == "cancel_draft":
-		doc = frappe.get_doc("Sales Invoice", invoice)
-		_mark_draft_invoice_cancelled(doc, reason)
-		_clear_deleted_invoice_enrollment_snapshot(doc, action="cancelled")
+	if action == "delete_draft":
+		delete_school_admin_draft_invoice_data(invoice=invoice)
 		return {
 			"action": action,
-			"message": _("Draft invoice was marked Cancelled."),
-			"invoice_status": "Cancelled",
+			"message": _("Draft invoice was deleted."),
+			"invoice_status": "Deleted",
 			"manual_action_required": False,
 			"count_key": "invoices_cancelled",
 		}
@@ -1351,7 +1348,7 @@ def _classify_invoice_enrollment_reset_invoice(row, invoice_doc):
 		}
 	if cint(invoice_doc.docstatus) == 0:
 		counts["invoices_to_cancel"] += 1
-		return {"action": "cancel_draft", "invoice": invoice_doc.name, "invoice_status": invoice_status, "counts": counts}
+		return {"action": "delete_draft", "invoice": invoice_doc.name, "invoice_status": invoice_status, "counts": counts}
 	if cint(invoice_doc.docstatus) == 1 and payment_mutations_enabled():
 		counts["invoices_to_cancel"] += 1
 		return {"action": "cancel_submitted", "invoice": invoice_doc.name, "invoice_status": invoice_status, "counts": counts}
@@ -1527,7 +1524,7 @@ def _decrement_count(counts, key, amount=1):
 
 
 def _mark_invoice_action_completed_in_counts(counts, action):
-	if action in ("cancel_draft", "cancel_submitted"):
+	if action in ("delete_draft", "cancel_submitted"):
 		_decrement_count(counts, "invoices_to_cancel")
 	elif action == "manual_adjustment":
 		_decrement_count(counts, "invoices_require_manual_adjustment")
@@ -1910,7 +1907,7 @@ def _classify_enrollment_cancellation_invoice(row, enrollment_doc):
 
 	if cint(doc.docstatus) == 0:
 		counts["invoices_to_cancel"] += 1
-		return {"action": "cancel_draft", "invoice": invoice_name, "invoice_status": invoice_status, "counts": counts}
+		return {"action": "delete_draft", "invoice": invoice_name, "invoice_status": invoice_status, "counts": counts}
 	if cint(doc.docstatus) == 1 and payment_mutations_enabled():
 		counts["invoices_to_cancel"] += 1
 		return {"action": "cancel_submitted", "invoice": invoice_name, "invoice_status": invoice_status, "counts": counts}
@@ -1947,14 +1944,12 @@ def _apply_enrollment_cancellation_invoice_action(invoice_action, reason):
 			"manual_action_required": True,
 			"count_key": "invoices_manual_adjustment_reported",
 		}
-	if action == "cancel_draft":
-		doc = frappe.get_doc("Sales Invoice", invoice)
-		_mark_draft_invoice_cancelled(doc, reason)
-		_clear_deleted_invoice_enrollment_snapshot(doc, action="cancelled")
+	if action == "delete_draft":
+		delete_school_admin_draft_invoice_data(invoice=invoice)
 		return {
 			"action": action,
-			"message": _("Draft invoice was marked Cancelled."),
-			"invoice_status": "Cancelled",
+			"message": _("Draft invoice was deleted."),
+			"invoice_status": "Deleted",
 			"manual_action_required": False,
 			"count_key": "invoices_cancelled",
 		}
@@ -2160,7 +2155,7 @@ def _invoice_action_label(action):
 		"none": "No invoice",
 		"already_cancelled": "Already cancelled",
 		"manual_adjustment": "Manual adjustment required",
-		"cancel_draft": "Cancel draft invoice",
+		"delete_draft": "Delete draft invoice",
 		"cancel_submitted": "Cancel submitted invoice",
 	}.get(action or "", action or "")
 

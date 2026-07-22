@@ -76,6 +76,18 @@ class TestSchoolAdminInvoiceWithdrawal(TestCase):
 			send_notifications=0,
 		)
 
+	@patch("qas_custom.services.school_admin_import.delete_school_admin_draft_invoice_data")
+	@patch("qas_custom.services.school_admin_import._", side_effect=lambda value: value)
+	def test_draft_invoice_action_uses_dedicated_delete(self, _mock_translate, mock_delete):
+		result = _apply_enrollment_change_invoice_action(
+			{"action": "delete_draft", "invoice": "SINV-0002"},
+			"Created by mistake",
+		)
+
+		mock_delete.assert_called_once_with(invoice="SINV-0002")
+		self.assertEqual(result["action"], "delete_draft")
+		self.assertEqual(result["invoice_status"], "Deleted")
+
 	def test_one_student_with_multiple_enrollments_does_not_require_confirmation(self):
 		row = {"mode": INVOICE_ENROLLMENT_RESET_MODE_WITHDRAW, "confirm_multiple_withdrawal": 0}
 		preview = {"input": {"student_count": 1, "enrollment_count": 3}}
