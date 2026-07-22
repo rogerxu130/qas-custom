@@ -11,6 +11,7 @@ from qas_custom.services.announcements import (
 	get_school_admin_announcements_data,
 	publish_school_admin_announcement_data,
 	save_school_admin_announcement_data,
+	search_school_admin_announcement_students_data,
 )
 from qas_custom.services.support_view import create_support_view_token, get_support_view_targets
 from qas_custom.services.school_admin_import import (
@@ -184,6 +185,11 @@ def school_admin_get_dashboard():
 @frappe.whitelist()
 def school_admin_get_announcements(status=None, limit=80):
 	return get_school_admin_announcements_data(status=status, limit=limit)
+
+
+@frappe.whitelist()
+def school_admin_search_announcement_students(query=None, limit=20):
+	return search_school_admin_announcement_students_data(query=query, limit=limit)
 
 
 @frappe.whitelist()

@@ -36,6 +36,7 @@ def get_school_admin_announcements_data(status=None, limit=80):
 			"term",
 			"course",
 			"course_session",
+			"student",
 			"publish_at",
 			"expires_at",
 			"send_email_on_publish",
@@ -48,6 +49,23 @@ def get_school_admin_announcements_data(status=None, limit=80):
 		limit=_limit(limit, default=80, max_value=200),
 	)
 	return {"items": [_normalise_row(row) for row in rows]}
+
+
+def search_school_admin_announcement_students_data(query=None, limit=20):
+	_require_school_admin()
+	query = str(query or "").strip()
+	if len(query) < 2:
+		frappe.throw(_("Search query must be at least 2 characters."))
+
+	fields = _student_search_fields()
+	search_fields = [field for field in ["name", "student_name", "first_name", "last_name", "student_code"] if field in fields]
+	rows_by_name = {}
+	for operator, value in [("=", query), ("like", f"{query}%"), ("like", f"%{query}%")]:
+		or_filters = [["Student", field, operator, value] for field in search_fields]
+		for row in frappe.get_all("Student", or_filters=or_filters, fields=fields, limit=50):
+			rows_by_name.setdefault(row.name, row)
+	rows = sorted(rows_by_name.values(), key=lambda row: _student_search_rank(row, query))[:_limit(limit, default=20, max_value=50)]
+	return {"items": [_announcement_student_preview(row) for row in rows]}
 
 
 def get_school_admin_announcement_data(announcement=None):
@@ -282,6 +300,7 @@ def _apply_announcement_payload(doc, payload):
 		"term",
 		"course",
 		"course_session",
+		"student",
 		"body",
 		"publish_at",
 		"expires_at",
@@ -305,6 +324,8 @@ def _validate_announcement(doc):
 		frappe.throw(_("Term and course are required for a term course announcement."))
 	if doc.audience_type == "Course Session" and not doc.course_session:
 		frappe.throw(_("Course session is required for a course session announcement."))
+	if doc.audience_type == "Single Student" and not doc.student:
+		frappe.throw(_("Student is required for a single student announcement."))
 
 
 def _resolve_announcement_recipients(doc):
@@ -316,7 +337,25 @@ def _resolve_announcement_recipients(doc):
 		return _enrollment_parent_recipients({"term": doc.term, "course": doc.course})
 	if doc.audience_type == "Course Session":
 		return _session_parent_recipients(doc.course_session)
+	if doc.audience_type == "Single Student":
+		return _dedupe_recipients([_single_student_recipient(doc.student)])
 	return []
+
+
+def _single_student_recipient(student):
+	if not student or not frappe.db.exists("Student", student):
+		frappe.throw(_("The selected Student was not found."))
+	parent = _student_parent(student)
+	if not parent:
+		frappe.throw(_("The selected Student is not linked to a Parent/Family."))
+	if not frappe.db.exists("Parent", parent):
+		frappe.throw(_("The Parent/Family linked to the selected Student was not found."))
+	return _recipient_from_parent_name(
+		parent,
+		student=student,
+		audience_source="Single Student",
+		source_document=student,
+	)
 
 
 def _all_parent_recipients():
@@ -411,6 +450,60 @@ def _student_parent(student):
 			if value:
 				return value
 	return None
+
+
+def _student_search_fields():
+	fields = ["name"]
+	for fieldname in [
+		"student_name",
+		"first_name",
+		"last_name",
+		"student_code",
+		"date_of_birth",
+		"status",
+		"guardian",
+		"parent",
+	]:
+		if frappe.db.has_column("Student", fieldname):
+			fields.append(fieldname)
+	return fields
+
+
+def _student_search_rank(row, query):
+	needle = str(query or "").strip().lower()
+	values = [str(row.get(field) or "").strip().lower() for field in ["name", "student_name", "student_code", "first_name", "last_name"]]
+	if needle in values:
+		match_rank = 0
+	elif any(value.startswith(needle) for value in values if value):
+		match_rank = 1
+	else:
+		match_rank = 2
+	display = str(row.get("student_name") or row.get("name") or "").lower()
+	return match_rank, display, str(row.get("name") or "").lower()
+
+
+def _announcement_student_preview(row):
+	student = row.get("name")
+	parent = row.get("guardian") or row.get("parent") or _student_parent(student)
+	parent_row = frappe.db.get_value("Parent", parent, _parent_fields(), as_dict=True) if parent else None
+	email = ""
+	if parent_row:
+		email = _first_value(parent_row, ["email", "email_id", "contact_email"])
+		if not email and parent_row.get("linked_user"):
+			email = frappe.db.get_value("User", parent_row.get("linked_user"), "email") or parent_row.get("linked_user")
+	return {
+		"student": student,
+		"student_name": row.get("student_name") or student,
+		"student_code": row.get("student_code"),
+		"date_of_birth": row.get("date_of_birth"),
+		"status": row.get("status"),
+		"parent": parent,
+		"parent_name": parent_row.get("parent_name") if parent_row else "",
+		"parent_email": email or "",
+		"customer": parent_row.get("customer") if parent_row else "",
+		"eligible": bool(parent_row),
+		"error": "" if parent_row else "No linked Parent/Family found.",
+	}
 
 
 def _parent_fields():
