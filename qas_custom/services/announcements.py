@@ -14,6 +14,7 @@ ADMIN_ROLES = {"School Admin", "System Manager"}
 ANNOUNCEMENT_DOCTYPE = "School Announcement"
 RECIPIENT_DOCTYPE = "School Announcement Recipient"
 DEFAULT_PARENT_PORTAL_URL = "https://portal.queenslandartschool.com"
+ANNOUNCEMENT_BCC_BATCH_SIZE = 50
 
 
 def get_school_admin_announcements_data(status=None, limit=80):
@@ -221,46 +222,81 @@ def send_school_announcement_email_job(announcement: str):
 		RECIPIENT_DOCTYPE,
 		filters={"announcement": announcement, "email_status": "Queued"},
 		fields=["name", "email"],
-		limit=1000,
+		limit=0,
 	)
 	sent = 0
 	failed = 0
+	grouped_rows = {}
+	missing_email_rows = []
 	for row in rows:
+		email = str(row.get("email") or "").strip()
+		if not email:
+			missing_email_rows.append(row.get("name"))
+			continue
+		group = grouped_rows.setdefault(email.lower(), {"email": email, "rows": []})
+		group["rows"].append(row.get("name"))
+
+	if missing_email_rows:
+		_set_announcement_recipient_email_status(
+			missing_email_rows,
+			"Failed",
+			error="No parent email found.",
+		)
+		failed += len(missing_email_rows)
+		frappe.db.commit()
+
+	groups = list(grouped_rows.values())
+	for start in range(0, len(groups), ANNOUNCEMENT_BCC_BATCH_SIZE):
+		batch = groups[start : start + ANNOUNCEMENT_BCC_BATCH_SIZE]
+		batch_emails = [group["email"] for group in batch]
+		batch_rows = [row_name for group in batch for row_name in group["rows"]]
 		try:
 			result = sendmail_or_skip(
 				action="school_announcement_email",
-				recipients=[row.email],
+				recipients=[],
+				bcc=batch_emails,
 				subject=doc.email_subject or doc.title,
 				message=_announcement_email_message(doc),
 				reference_doctype=ANNOUNCEMENT_DOCTYPE,
 				reference_name=doc.name,
 			)
 			if result and result.get("skipped"):
-				frappe.db.set_value(
-					RECIPIENT_DOCTYPE,
-					row.name,
-					{"email_status": "Skipped", "email_error": result.get("reason") or email_block_reason()},
-					update_modified=True,
+				_set_announcement_recipient_email_status(
+					batch_rows,
+					"Skipped",
+					error=result.get("reason") or email_block_reason(),
 				)
-				continue
-			frappe.db.set_value(
-				RECIPIENT_DOCTYPE,
-				row.name,
-				{"email_status": "Sent", "email_sent_at": now_datetime(), "email_error": ""},
-				update_modified=True,
-			)
-			sent += 1
+			else:
+				_set_announcement_recipient_email_status(
+					batch_rows,
+					"Sent",
+					sent_at=now_datetime(),
+				)
+				sent += len(batch_rows)
 		except Exception:
 			frappe.log_error(frappe.get_traceback(), f"QAS announcement email failed: {announcement}")
-			frappe.db.set_value(
-				RECIPIENT_DOCTYPE,
-				row.name,
-				{"email_status": "Failed", "email_error": "Email send failed."},
-				update_modified=True,
+			_set_announcement_recipient_email_status(
+				batch_rows,
+				"Failed",
+				error="Email send failed.",
 			)
-			failed += 1
-	frappe.db.commit()
+			failed += len(batch_rows)
+		frappe.db.commit()
 	return {"sent": sent, "failed": failed}
+
+
+def _set_announcement_recipient_email_status(row_names, status, error="", sent_at=None):
+	if not row_names:
+		return
+	values = {"email_status": status, "email_error": error}
+	if sent_at:
+		values["email_sent_at"] = sent_at
+	frappe.db.set_value(
+		RECIPIENT_DOCTYPE,
+		{"name": ["in", row_names]},
+		values,
+		update_modified=True,
+	)
 
 
 def _announcement_email_message(doc):

@@ -10,6 +10,7 @@ from qas_custom.services.announcements import (
 	_student_search_rank,
 	_validate_announcement,
 	search_school_admin_announcement_students_data,
+	send_school_announcement_email_job,
 )
 
 
@@ -104,3 +105,93 @@ class TestSingleStudentAnnouncements(TestCase):
 		self.assertEqual(result["parent_name"], "Parent One")
 		self.assertEqual(result["parent_email"], "parent@example.com")
 		self.assertEqual(result["customer"], "CUS-1")
+
+
+class TestAnnouncementBccEmailDelivery(TestCase):
+	def _run_job(self, rows, send_side_effect=None):
+		doc = frappe._dict(
+			name="ANN-2026-00001",
+			title="Term update",
+			email_subject="Term update email",
+		)
+		db = SimpleNamespace(
+			exists=Mock(return_value=True),
+			set_value=Mock(),
+			commit=Mock(),
+		)
+		fake_frappe = SimpleNamespace(
+			db=db,
+			get_doc=Mock(return_value=doc),
+			get_all=Mock(return_value=rows),
+			get_traceback=Mock(return_value="traceback"),
+			log_error=Mock(),
+		)
+		sendmail = Mock(side_effect=send_side_effect)
+		if send_side_effect is None:
+			sendmail.return_value = None
+		with patch("qas_custom.services.announcements.frappe", fake_frappe), patch(
+			"qas_custom.services.announcements.sendmail_or_skip",
+			sendmail,
+		), patch(
+			"qas_custom.services.announcements._announcement_email_message",
+			return_value="<p>Term update</p>",
+		), patch(
+			"qas_custom.services.announcements.now_datetime",
+			return_value="2026-07-22 12:00:00",
+		):
+			result = send_school_announcement_email_job(doc.name)
+		return result, sendmail, db, fake_frappe
+
+	def test_queued_emails_are_split_into_bcc_batches_of_fifty(self):
+		rows = [
+			frappe._dict(name=f"ANR-{index:03d}", email=f"parent{index:03d}@example.com")
+			for index in range(120)
+		]
+
+		result, sendmail, db, _fake_frappe = self._run_job(rows)
+
+		self.assertEqual([len(call.kwargs["bcc"]) for call in sendmail.call_args_list], [50, 50, 20])
+		for call in sendmail.call_args_list:
+			self.assertEqual(call.kwargs["recipients"], [])
+			self.assertNotIn("cc", call.kwargs)
+			self.assertEqual(call.kwargs["subject"], "Term update email")
+			self.assertEqual(call.kwargs["reference_name"], "ANN-2026-00001")
+		self.assertEqual(result, {"sent": 120, "failed": 0})
+		self.assertEqual(db.set_value.call_count, 3)
+		self.assertEqual(db.commit.call_count, 3)
+
+	def test_duplicate_addresses_are_bcced_once_and_all_rows_are_updated(self):
+		rows = [
+			frappe._dict(name="ANR-001", email=" Parent@Example.com "),
+			frappe._dict(name="ANR-002", email="parent@example.com"),
+			frappe._dict(name="ANR-003", email=""),
+		]
+
+		result, sendmail, db, _fake_frappe = self._run_job(rows)
+
+		self.assertEqual(sendmail.call_count, 1)
+		self.assertEqual(sendmail.call_args.kwargs["bcc"], ["Parent@Example.com"])
+		missing_call, sent_call = db.set_value.call_args_list
+		self.assertEqual(missing_call.args[1], {"name": ["in", ["ANR-003"]]})
+		self.assertEqual(missing_call.args[2]["email_status"], "Failed")
+		self.assertEqual(sent_call.args[1], {"name": ["in", ["ANR-001", "ANR-002"]]})
+		self.assertEqual(sent_call.args[2]["email_status"], "Sent")
+		self.assertEqual(result, {"sent": 2, "failed": 1})
+
+	def test_failed_bcc_batch_does_not_block_later_batches(self):
+		rows = [
+			frappe._dict(name=f"ANR-{index:03d}", email=f"parent{index:03d}@example.com")
+			for index in range(60)
+		]
+
+		result, sendmail, db, fake_frappe = self._run_job(rows, send_side_effect=[RuntimeError("queue failed"), None])
+
+		self.assertEqual(sendmail.call_count, 2)
+		failed_call, sent_call = db.set_value.call_args_list
+		self.assertEqual(failed_call.args[2]["email_status"], "Failed")
+		self.assertEqual(len(failed_call.args[1]["name"][1]), 50)
+		self.assertEqual(sent_call.args[2]["email_status"], "Sent")
+		self.assertEqual(len(sent_call.args[1]["name"][1]), 10)
+		self.assertEqual(result, {"sent": 10, "failed": 50})
+		fake_frappe.log_error.assert_called_once()
+		self.assertEqual(db.commit.call_count, 2)
