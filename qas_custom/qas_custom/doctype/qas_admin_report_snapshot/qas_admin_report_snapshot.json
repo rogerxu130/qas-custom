@@ -1,0 +1,138 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "QARS-.YYYY.-.#####",
+ "doctype": "DocType",
+ "document_type": "Document",
+ "engine": "InnoDB",
+ "field_order": [
+  "term",
+  "status",
+  "is_latest",
+  "requested_by",
+  "requested_at",
+  "started_at",
+  "completed_at",
+  "counts_section",
+  "family_row_count",
+  "unmarked_row_count",
+  "skipped_count",
+  "failure_reason"
+ ],
+ "fields": [
+  {
+   "fieldname": "term",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Term",
+   "options": "Term",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Queued\nRunning\nCompleted\nFailed",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "is_latest",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Latest Successful Snapshot",
+   "read_only": 1
+  },
+  {
+   "fieldname": "requested_by",
+   "fieldtype": "Link",
+   "label": "Requested By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "requested_at",
+   "fieldtype": "Datetime",
+   "in_standard_filter": 1,
+   "label": "Requested At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "started_at",
+   "fieldtype": "Datetime",
+   "label": "Started At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "completed_at",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Completed At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "counts_section",
+   "fieldtype": "Section Break",
+   "label": "Counts"
+  },
+  {
+   "fieldname": "family_row_count",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Family Rows",
+   "read_only": 1
+  },
+  {
+   "fieldname": "unmarked_row_count",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Unmarked Attendance Rows",
+   "read_only": 1
+  },
+  {
+   "fieldname": "skipped_count",
+   "fieldtype": "Int",
+   "label": "Skipped Records",
+   "read_only": 1
+  },
+  {
+   "fieldname": "failure_reason",
+   "fieldtype": "Small Text",
+   "label": "Failure Reason",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "module": "QAS Custom",
+ "name": "QAS Admin Report Snapshot",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "select": 1,
+   "write": 1
+  },
+  {
+   "export": 1,
+   "read": 1,
+   "report": 1,
+   "role": "School Admin",
+   "select": 1
+  }
+ ],
+ "sort_field": "requested_at",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

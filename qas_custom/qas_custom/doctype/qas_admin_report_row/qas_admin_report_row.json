@@ -1,0 +1,325 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "QARR-.YYYY.-.#####",
+ "doctype": "DocType",
+ "document_type": "Document",
+ "engine": "InnoDB",
+ "field_order": [
+  "snapshot",
+  "report_type",
+  "term",
+  "family_section",
+  "parent_record",
+  "parent_name",
+  "parent_email",
+  "parent_phone",
+  "student",
+  "student_name",
+  "attendance_section",
+  "attendance_classification",
+  "present_late_count",
+  "absent_count",
+  "leave_count",
+  "cancelled_count",
+  "attendance_total",
+  "attendance_entry",
+  "session_section",
+  "course_session",
+  "session_date",
+  "session_start_time",
+  "session_end_time",
+  "overdue_days",
+  "campus",
+  "course",
+  "weekly_timeslot",
+  "teacher",
+  "class_label",
+  "invoice_section",
+  "invoice_classification",
+  "outstanding_amount",
+  "invoice_names_json",
+  "details_section",
+  "student_details_json",
+  "search_text"
+ ],
+ "fields": [
+  {
+   "fieldname": "snapshot",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Snapshot",
+   "options": "QAS Admin Report Snapshot",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "report_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Report Type",
+   "options": "Family Summary\nUnmarked Attendance",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "term",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Term",
+   "options": "Term",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "family_section",
+   "fieldtype": "Section Break",
+   "label": "Family"
+  },
+  {
+   "fieldname": "parent_record",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Parent",
+   "options": "Parent",
+   "read_only": 1
+  },
+  {
+   "fieldname": "parent_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Parent Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "parent_email",
+   "fieldtype": "Data",
+   "label": "Parent Email",
+   "read_only": 1
+  },
+  {
+   "fieldname": "parent_phone",
+   "fieldtype": "Data",
+   "label": "Parent Phone",
+   "read_only": 1
+  },
+  {
+   "fieldname": "student",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Student",
+   "options": "Student",
+   "read_only": 1
+  },
+  {
+   "fieldname": "student_name",
+   "fieldtype": "Data",
+   "label": "Student Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "attendance_section",
+   "fieldtype": "Section Break",
+   "label": "Attendance"
+  },
+  {
+   "fieldname": "attendance_classification",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Attendance Classification",
+   "options": "Attended\nAbsent\nLeave\nCancelled only\nNo attendance records",
+   "read_only": 1
+  },
+  {
+   "fieldname": "present_late_count",
+   "fieldtype": "Int",
+   "label": "Present or Late",
+   "read_only": 1
+  },
+  {
+   "fieldname": "absent_count",
+   "fieldtype": "Int",
+   "label": "Absent",
+   "read_only": 1
+  },
+  {
+   "fieldname": "leave_count",
+   "fieldtype": "Int",
+   "label": "Leave",
+   "read_only": 1
+  },
+  {
+   "fieldname": "cancelled_count",
+   "fieldtype": "Int",
+   "label": "Cancelled",
+   "read_only": 1
+  },
+  {
+   "fieldname": "attendance_total",
+   "fieldtype": "Int",
+   "label": "Attendance Total",
+   "read_only": 1
+  },
+  {
+   "fieldname": "attendance_entry",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Attendance Entry",
+   "options": "Class Attendance Entry",
+   "read_only": 1
+  },
+  {
+   "fieldname": "session_section",
+   "fieldtype": "Section Break",
+   "label": "Session"
+  },
+  {
+   "fieldname": "course_session",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Course Session",
+   "options": "Course Sessions",
+   "read_only": 1
+  },
+  {
+   "fieldname": "session_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Session Date",
+   "read_only": 1
+  },
+  {
+   "fieldname": "session_start_time",
+   "fieldtype": "Time",
+   "label": "Session Start Time",
+   "read_only": 1
+  },
+  {
+   "fieldname": "session_end_time",
+   "fieldtype": "Time",
+   "label": "Session End Time",
+   "read_only": 1
+  },
+  {
+   "fieldname": "overdue_days",
+   "fieldtype": "Int",
+   "in_standard_filter": 1,
+   "label": "Overdue Days",
+   "read_only": 1
+  },
+  {
+   "fieldname": "campus",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Campus",
+   "options": "Campus",
+   "read_only": 1
+  },
+  {
+   "fieldname": "course",
+   "fieldtype": "Link",
+   "label": "Course",
+   "options": "Course",
+   "read_only": 1
+  },
+  {
+   "fieldname": "weekly_timeslot",
+   "fieldtype": "Link",
+   "label": "Weekly Timeslot",
+   "options": "Weekly Timeslot",
+   "read_only": 1
+  },
+  {
+   "fieldname": "teacher",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Teacher",
+   "options": "Teacher",
+   "read_only": 1
+  },
+  {
+   "fieldname": "class_label",
+   "fieldtype": "Data",
+   "label": "Class Label",
+   "read_only": 1
+  },
+  {
+   "fieldname": "invoice_section",
+   "fieldtype": "Section Break",
+   "label": "Invoice"
+  },
+  {
+   "fieldname": "invoice_classification",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Invoice Classification",
+   "options": "Outstanding\nNot Outstanding\nDraft Invoice\nNo Invoice",
+   "read_only": 1
+  },
+  {
+   "fieldname": "outstanding_amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Outstanding Amount",
+   "read_only": 1
+  },
+  {
+   "fieldname": "invoice_names_json",
+   "fieldtype": "Code",
+   "label": "Invoices",
+   "options": "JSON",
+   "read_only": 1
+  },
+  {
+   "fieldname": "details_section",
+   "fieldtype": "Section Break",
+   "label": "Details"
+  },
+  {
+   "fieldname": "student_details_json",
+   "fieldtype": "Code",
+   "label": "Student Details",
+   "options": "JSON",
+   "read_only": 1
+  },
+  {
+   "fieldname": "search_text",
+   "fieldtype": "Small Text",
+   "label": "Search Text",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "module": "QAS Custom",
+ "name": "QAS Admin Report Row",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "select": 1,
+   "write": 1
+  },
+  {
+   "export": 1,
+   "read": 1,
+   "report": 1,
+   "role": "School Admin",
+   "select": 1
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "ASC",
+ "states": [],
+ "track_changes": 0
+}

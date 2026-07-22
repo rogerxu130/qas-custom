@@ -14,6 +14,12 @@ from qas_custom.services.announcements import (
 	search_school_admin_announcement_students_data,
 )
 from qas_custom.services.support_view import create_support_view_token, get_support_view_targets
+from qas_custom.services.school_admin_reporting import (
+	get_school_admin_reporting_family_detail_data,
+	get_school_admin_reporting_rows_data,
+	get_school_admin_reporting_snapshot_data,
+	start_school_admin_reporting_generation_data,
+)
 from qas_custom.services.school_admin_import import (
 	get_import_run_data,
 	get_import_runs_data,
@@ -315,6 +321,46 @@ def school_admin_get_operation_reports(report_type=None, source=None, limit=20):
 @frappe.whitelist()
 def school_admin_get_operation_report(operation_report=None):
 	return get_operation_report_data(operation_report=operation_report)
+
+
+@frappe.whitelist()
+def school_admin_get_reporting_snapshot(term=None):
+	return get_school_admin_reporting_snapshot_data(term=term)
+
+
+@frappe.whitelist()
+def school_admin_start_reporting_generation(term=None):
+	return start_school_admin_reporting_generation_data(term=term)
+
+
+@frappe.whitelist()
+def school_admin_get_reporting_rows(
+	term=None,
+	report_type=None,
+	attendance=None,
+	invoice=None,
+	campus=None,
+	teacher=None,
+	query=None,
+	page=1,
+	page_length=50,
+):
+	return get_school_admin_reporting_rows_data(
+		term=term,
+		report_type=report_type,
+		attendance=attendance,
+		invoice=invoice,
+		campus=campus,
+		teacher=teacher,
+		query=query,
+		page=page,
+		page_length=page_length,
+	)
+
+
+@frappe.whitelist()
+def school_admin_get_reporting_family_detail(row=None):
+	return get_school_admin_reporting_family_detail_data(row=row)
 
 
 @frappe.whitelist()
