@@ -6,6 +6,7 @@ import frappe
 
 from qas_custom.services.announcements import (
 	_announcement_student_preview,
+	_message_html,
 	_resolve_announcement_recipients,
 	_student_search_rank,
 	_validate_announcement,
@@ -15,6 +16,19 @@ from qas_custom.services.announcements import (
 
 
 class TestSingleStudentAnnouncements(TestCase):
+	def test_message_html_linkifies_plain_urls(self):
+		result = _message_html("Read the guide:\nhttps://example.com/guide")
+
+		self.assertIn('<a href="https://example.com/guide"', result)
+		self.assertIn("<br>", result)
+
+	def test_message_html_removes_unsafe_markup(self):
+		result = _message_html('<p>Hello</p><script>alert(1)</script><a href="javascript:alert(2)">Bad</a>')
+
+		self.assertIn("<p>Hello</p>", result)
+		self.assertNotIn("<script", result)
+		self.assertNotIn("javascript:", result)
+
 	def test_single_student_audience_requires_student(self):
 		doc = frappe._dict(title="Test", body="Message", audience_type="Single Student", student="")
 

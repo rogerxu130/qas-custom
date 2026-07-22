@@ -4,7 +4,7 @@ import json
 
 import frappe
 from frappe import _
-from frappe.utils import cint, escape_html, get_datetime, now_datetime
+from frappe.utils import cint, escape_html, get_datetime, now_datetime, strip_html
 
 from qas_custom.utils.environment import email_block_reason, outbound_email_enabled, sendmail_or_skip
 from qas_custom.services.support_view import get_support_view_parent
@@ -205,7 +205,7 @@ def get_parent_announcements_data(limit=30):
 			{
 				"name": announcement.name,
 				"title": announcement.title,
-				"body": announcement.body,
+				"body": _message_html(announcement.body),
 				"audience_type": announcement.audience_type,
 				"publish_at": announcement.publish_at,
 				"published_at": announcement.published_at,
@@ -314,10 +314,20 @@ def _announcement_email_message(doc):
 
 
 def _message_html(value):
+	import bleach
+
 	text = str(value or "")
-	if "<" in text and ">" in text:
-		return text
-	return escape_html(text).replace("\n", "<br>")
+	sanitized = bleach.clean(
+		text,
+		tags={"p", "br", "strong", "b", "em", "i", "ul", "ol", "li", "a"},
+		attributes={"a": ["href", "title", "target", "rel"]},
+		protocols={"http", "https"},
+		strip=True,
+		strip_comments=True,
+	)
+	if "<" not in text and ">" not in text:
+		sanitized = sanitized.replace("\n", "<br>")
+	return bleach.linkify(sanitized, callbacks=[])
 
 
 def _parent_portal_base_url():
@@ -345,14 +355,17 @@ def _apply_announcement_payload(doc, payload):
 		"email_body",
 	]:
 		if fieldname in payload:
-			doc.set(fieldname, payload.get(fieldname))
+			value = payload.get(fieldname)
+			if fieldname in {"body", "email_body"}:
+				value = _message_html(value)
+			doc.set(fieldname, value)
 	_validate_announcement(doc)
 
 
 def _validate_announcement(doc):
 	if not doc.title:
 		frappe.throw(_("Announcement title is required."))
-	if not doc.body:
+	if not strip_html(doc.body or "").strip():
 		frappe.throw(_("Announcement body is required."))
 	if doc.audience_type == "Term" and not doc.term:
 		frappe.throw(_("Term is required for a term announcement."))
