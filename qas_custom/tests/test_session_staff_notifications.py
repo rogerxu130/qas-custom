@@ -121,8 +121,10 @@ class TestSessionStaffNotifications(TestCase):
 	@patch("qas_custom.modules.notifications.trial_parent_notifications.queue_trial_parent_booking_change")
 	@patch("qas_custom.modules.notifications.commands.enqueue_session_staff_notification")
 	@patch("qas_custom.services.inquiry.ensure_inquiry_attendance_entry")
+	@patch("qas_custom.modules.notifications.inquiry_admin_notifications.queue_inquiry_admin_notification")
 	def test_needs_review_after_insert_does_not_queue_trial_added(
 		self,
+		mock_admin,
 		_mock_attendance,
 		mock_enqueue,
 		_mock_parent_email,
@@ -138,6 +140,7 @@ class TestSessionStaffNotifications(TestCase):
 		Inquiry.after_insert(doc)
 
 		mock_enqueue.assert_not_called()
+		mock_admin.assert_called_once_with(doc)
 
 	@patch("qas_custom.modules.notifications.commands._get_trial_notification_inquiry")
 	def test_reschedule_cancel_event_remains_current_after_inquiry_moves(self, mock_get_value):

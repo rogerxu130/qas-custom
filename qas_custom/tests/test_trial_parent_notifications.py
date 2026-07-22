@@ -330,6 +330,7 @@ class TestTrialParentWorkers(TestCase):
 
 
 class TestTrialParentControllerAndSwitches(TestCase):
+	@patch("qas_custom.modules.notifications.inquiry_admin_notifications.queue_inquiry_admin_notification")
 	@patch("qas_custom.modules.notifications.commands.enqueue_session_staff_notification")
 	@patch("qas_custom.modules.notifications.trial_parent_notifications.queue_trial_parent_booking_change")
 	@patch("qas_custom.services.inquiry.ensure_inquiry_attendance_entry")
@@ -338,11 +339,13 @@ class TestTrialParentControllerAndSwitches(TestCase):
 		mock_attendance,
 		mock_parent,
 		_mock_staff,
+		mock_admin,
 	):
 		doc = inquiry()
 		Inquiry.after_insert(doc)
 		mock_attendance.assert_called_once_with(doc)
 		mock_parent.assert_called_once_with(doc)
+		mock_admin.assert_called_once_with(doc)
 
 	@patch("qas_custom.modules.notifications.trial_parent_notifications.frappe.conf", {})
 	def test_switches_default_to_enabled(self):

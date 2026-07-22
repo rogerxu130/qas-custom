@@ -8,12 +8,14 @@ class Inquiry(Document):
 		sync_inquiry_course_session(self)
 
 	def after_insert(self):
-		from qas_custom.services.inquiry import ensure_inquiry_attendance_entry
 		from qas_custom.modules.notifications.commands import enqueue_session_staff_notification
+		from qas_custom.modules.notifications.inquiry_admin_notifications import queue_inquiry_admin_notification
 		from qas_custom.modules.notifications.trial_parent_notifications import queue_trial_parent_booking_change
+		from qas_custom.services.inquiry import ensure_inquiry_attendance_entry
 
 		ensure_inquiry_attendance_entry(self)
 		queue_trial_parent_booking_change(self)
+		queue_inquiry_admin_notification(self)
 		if self.inquiry_type == "Trial Lesson" and self.course_session and self.student:
 			enqueue_session_staff_notification(
 				"trial_added",
