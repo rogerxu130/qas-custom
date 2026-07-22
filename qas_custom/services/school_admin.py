@@ -956,10 +956,19 @@ def get_school_admin_inquiries_data(
 	filters = {}
 	query = str(query or "").strip()
 	status = str(status or "").strip()
-	order_queue = None if status else queue
+	queue = str(queue or "").strip()
+	order_queue = queue
 	if status:
 		if status not in INQUIRY_STATUSES:
 			frappe.throw(_("Unsupported inquiry status filter."))
+		if queue == "needs_scheduling" and status != "Needs Review":
+			return {
+				"items": [],
+				"total": 0,
+				"limit_start": max(cint(limit_start), 0),
+				"limit": _limit(limit, default=80, max_value=200),
+				"has_more": False,
+			}
 		filters["status"] = status
 	elif queue == "post_visit":
 		filters["status"] = ["in", INQUIRY_POST_VISIT_STATUSES]
@@ -976,6 +985,11 @@ def get_school_admin_inquiries_data(
 		filters["confirmation_status"] = confirmation_status
 	if campus:
 		filters["campus"] = campus
+	if queue == "upcoming":
+		from_date = from_date or nowdate()
+		to_date = to_date or add_days(nowdate(), 90)
+	elif queue == "post_visit":
+		to_date = to_date or nowdate()
 	if from_date and to_date:
 		filters["current_appointment_date"] = ["between", [getdate(from_date), getdate(to_date)]]
 	elif from_date:
