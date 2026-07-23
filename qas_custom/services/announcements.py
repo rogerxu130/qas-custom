@@ -3,10 +3,11 @@ from __future__ import annotations
 import json
 
 import frappe
-from frappe import _
+from frappe import _, safe_encode
+from frappe.email.doctype.email_queue.email_queue import QueueBuilder
 from frappe.utils import cint, escape_html, get_datetime, now_datetime, strip_html
 
-from qas_custom.utils.environment import email_block_reason, outbound_email_enabled, sendmail_or_skip
+from qas_custom.utils.environment import email_block_reason, outbound_email_enabled
 from qas_custom.services.support_view import get_support_view_parent
 
 
@@ -15,6 +16,7 @@ ANNOUNCEMENT_DOCTYPE = "School Announcement"
 RECIPIENT_DOCTYPE = "School Announcement Recipient"
 DEFAULT_PARENT_PORTAL_URL = "https://portal.queenslandartschool.com"
 ANNOUNCEMENT_BCC_BATCH_SIZE = 50
+ANNOUNCEMENT_VISIBLE_RECIPIENT = "queenslandartschool@gmail.com"
 
 
 def get_school_admin_announcements_data(status=None, limit=80):
@@ -251,9 +253,7 @@ def send_school_announcement_email_job(announcement: str):
 		batch_emails = [group["email"] for group in batch]
 		batch_rows = [row_name for group in batch for row_name in group["rows"]]
 		try:
-			result = sendmail_or_skip(
-				action="school_announcement_email",
-				recipients=[],
+			result = _send_announcement_bcc_batch(
 				bcc=batch_emails,
 				subject=doc.email_subject or doc.title,
 				message=_announcement_email_message(doc),
@@ -283,6 +283,49 @@ def send_school_announcement_email_job(announcement: str):
 			failed += len(batch_rows)
 		frappe.db.commit()
 	return {"sent": sent, "failed": failed}
+
+
+def _send_announcement_bcc_batch(*, bcc, subject, message, reference_doctype, reference_name):
+	"""Send one SMTP message with parents only in the envelope BCC list.
+
+	Frappe's standard Email Queue expands To, CC, and BCC into child recipients and
+	sends one SMTP transaction per child. Announcements require one SMTP transaction
+	per batch, so this deliberately builds the normal Frappe MIME message but sends
+	the complete envelope directly through the configured outgoing account.
+	"""
+	if not outbound_email_enabled():
+		return {"skipped": True, "reason": email_block_reason()}
+
+	builder = QueueBuilder(
+		recipients=[ANNOUNCEMENT_VISIBLE_RECIPIENT],
+		bcc=list(bcc or []),
+		subject=subject,
+		message=message,
+		reference_doctype=reference_doctype,
+		reference_name=reference_name,
+		expose_recipients="header",
+		add_unsubscribe_link=0,
+	)
+	email_account = builder.get_outgoing_email_account()
+	mail = builder.prepare_email_content()
+	mail.set_message_id(None, False)
+	raw_message = safe_encode(mail.as_string())
+	envelope_recipients = list(
+		dict.fromkeys([ANNOUNCEMENT_VISIBLE_RECIPIENT, *mail.bcc])
+	)
+	smtp_server = email_account.get_smtp_server()
+	try:
+		smtp_server.session.sendmail(
+			from_addr=mail.sender,
+			to_addrs=envelope_recipients,
+			msg=raw_message,
+		)
+		if email_account.append_emails_to_sent_folder:
+			email_account.append_email_to_sent_folder(raw_message)
+	finally:
+		smtp_server.quit()
+
+	return {"sent": len(mail.bcc)}
 
 
 def _set_announcement_recipient_email_status(row_names, status, error="", sent_at=None):

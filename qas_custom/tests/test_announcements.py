@@ -5,9 +5,11 @@ from unittest.mock import Mock, patch
 import frappe
 
 from qas_custom.services.announcements import (
+	ANNOUNCEMENT_VISIBLE_RECIPIENT,
 	_announcement_student_preview,
 	_message_html,
 	_resolve_announcement_recipients,
+	_send_announcement_bcc_batch,
 	_student_search_rank,
 	_validate_announcement,
 	search_school_admin_announcement_students_data,
@@ -140,12 +142,12 @@ class TestAnnouncementBccEmailDelivery(TestCase):
 			get_traceback=Mock(return_value="traceback"),
 			log_error=Mock(),
 		)
-		sendmail = Mock(side_effect=send_side_effect)
+		send_batch = Mock(side_effect=send_side_effect)
 		if send_side_effect is None:
-			sendmail.return_value = None
+			send_batch.return_value = {"sent": len(rows)}
 		with patch("qas_custom.services.announcements.frappe", fake_frappe), patch(
-			"qas_custom.services.announcements.sendmail_or_skip",
-			sendmail,
+			"qas_custom.services.announcements._send_announcement_bcc_batch",
+			send_batch,
 		), patch(
 			"qas_custom.services.announcements._announcement_email_message",
 			return_value="<p>Term update</p>",
@@ -154,7 +156,7 @@ class TestAnnouncementBccEmailDelivery(TestCase):
 			return_value="2026-07-22 12:00:00",
 		):
 			result = send_school_announcement_email_job(doc.name)
-		return result, sendmail, db, fake_frappe
+		return result, send_batch, db, fake_frappe
 
 	def test_queued_emails_are_split_into_bcc_batches_of_fifty(self):
 		rows = [
@@ -162,12 +164,10 @@ class TestAnnouncementBccEmailDelivery(TestCase):
 			for index in range(120)
 		]
 
-		result, sendmail, db, _fake_frappe = self._run_job(rows)
+		result, send_batch, db, _fake_frappe = self._run_job(rows)
 
-		self.assertEqual([len(call.kwargs["bcc"]) for call in sendmail.call_args_list], [50, 50, 20])
-		for call in sendmail.call_args_list:
-			self.assertEqual(call.kwargs["recipients"], [])
-			self.assertNotIn("cc", call.kwargs)
+		self.assertEqual([len(call.kwargs["bcc"]) for call in send_batch.call_args_list], [50, 50, 20])
+		for call in send_batch.call_args_list:
 			self.assertEqual(call.kwargs["subject"], "Term update email")
 			self.assertEqual(call.kwargs["reference_name"], "ANN-2026-00001")
 		self.assertEqual(result, {"sent": 120, "failed": 0})
@@ -181,10 +181,10 @@ class TestAnnouncementBccEmailDelivery(TestCase):
 			frappe._dict(name="ANR-003", email=""),
 		]
 
-		result, sendmail, db, _fake_frappe = self._run_job(rows)
+		result, send_batch, db, _fake_frappe = self._run_job(rows)
 
-		self.assertEqual(sendmail.call_count, 1)
-		self.assertEqual(sendmail.call_args.kwargs["bcc"], ["Parent@Example.com"])
+		self.assertEqual(send_batch.call_count, 1)
+		self.assertEqual(send_batch.call_args.kwargs["bcc"], ["Parent@Example.com"])
 		missing_call, sent_call = db.set_value.call_args_list
 		self.assertEqual(missing_call.args[1], {"name": ["in", ["ANR-003"]]})
 		self.assertEqual(missing_call.args[2]["email_status"], "Failed")
@@ -198,9 +198,12 @@ class TestAnnouncementBccEmailDelivery(TestCase):
 			for index in range(60)
 		]
 
-		result, sendmail, db, fake_frappe = self._run_job(rows, send_side_effect=[RuntimeError("queue failed"), None])
+		result, send_batch, db, fake_frappe = self._run_job(
+			rows,
+			send_side_effect=[RuntimeError("SMTP batch failed"), {"sent": 10}],
+		)
 
-		self.assertEqual(sendmail.call_count, 2)
+		self.assertEqual(send_batch.call_count, 2)
 		failed_call, sent_call = db.set_value.call_args_list
 		self.assertEqual(failed_call.args[2]["email_status"], "Failed")
 		self.assertEqual(len(failed_call.args[1]["name"][1]), 50)
@@ -209,3 +212,66 @@ class TestAnnouncementBccEmailDelivery(TestCase):
 		self.assertEqual(result, {"sent": 10, "failed": 50})
 		fake_frappe.log_error.assert_called_once()
 		self.assertEqual(db.commit.call_count, 2)
+
+	@patch("qas_custom.services.announcements.outbound_email_enabled", return_value=True)
+	@patch("qas_custom.services.announcements.QueueBuilder")
+	def test_true_bcc_batch_uses_one_smtp_transaction(self, queue_builder, _email_enabled):
+		mail = SimpleNamespace(
+			bcc=["parent1@example.com", "parent2@example.com"],
+			sender="Queensland Art School <queenslandartschool@gmail.com>",
+			set_message_id=Mock(),
+			as_string=Mock(
+				return_value=(
+					"From: Queensland Art School <queenslandartschool@gmail.com>\r\n"
+					f"To: {ANNOUNCEMENT_VISIBLE_RECIPIENT}\r\n"
+					"Subject: Term update\r\n\r\nMessage"
+				)
+			),
+		)
+		smtp_server = SimpleNamespace(
+			session=SimpleNamespace(sendmail=Mock()),
+			quit=Mock(),
+		)
+		email_account = SimpleNamespace(
+			append_emails_to_sent_folder=1,
+			append_email_to_sent_folder=Mock(),
+			get_smtp_server=Mock(return_value=smtp_server),
+		)
+		builder = SimpleNamespace(
+			get_outgoing_email_account=Mock(return_value=email_account),
+			prepare_email_content=Mock(return_value=mail),
+		)
+		queue_builder.return_value = builder
+
+		result = _send_announcement_bcc_batch(
+			bcc=mail.bcc,
+			subject="Term update",
+			message="<p>Message</p>",
+			reference_doctype="School Announcement",
+			reference_name="ANN-2026-00001",
+		)
+
+		queue_builder.assert_called_once_with(
+			recipients=[ANNOUNCEMENT_VISIBLE_RECIPIENT],
+			bcc=mail.bcc,
+			subject="Term update",
+			message="<p>Message</p>",
+			reference_doctype="School Announcement",
+			reference_name="ANN-2026-00001",
+			expose_recipients="header",
+			add_unsubscribe_link=0,
+		)
+		smtp_server.session.sendmail.assert_called_once()
+		send_call = smtp_server.session.sendmail.call_args.kwargs
+		self.assertEqual(
+			send_call["to_addrs"],
+			[
+				ANNOUNCEMENT_VISIBLE_RECIPIENT,
+				"parent1@example.com",
+				"parent2@example.com",
+			],
+		)
+		self.assertNotIn(b"Bcc:", send_call["msg"])
+		email_account.append_email_to_sent_folder.assert_called_once_with(send_call["msg"])
+		smtp_server.quit.assert_called_once()
+		self.assertEqual(result, {"sent": 2})
