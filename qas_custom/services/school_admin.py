@@ -1265,6 +1265,28 @@ def get_school_admin_invoice_data(invoice=None):
 def create_school_admin_manual_invoice_data(payload=None):
 	_require_school_admin()
 	payload = _get_payload(payload)
+	invoice = _create_school_admin_manual_invoice_doc(payload)
+	_add_comment("Sales Invoice", invoice.name, "Manual invoice created by School Admin.")
+	frappe.db.commit()
+	return _build_invoice_payload(invoice)
+
+
+def preview_school_admin_replacement_trial_invoice_data(inquiry=None):
+	_require_school_admin()
+	from qas_custom.services.trial_invoice import preview_replacement_trial_invoice
+
+	return preview_replacement_trial_invoice(inquiry)
+
+
+def create_school_admin_replacement_trial_invoice_data(inquiry=None):
+	_require_school_admin()
+	from qas_custom.services.trial_invoice import create_replacement_trial_invoice_draft
+
+	return create_replacement_trial_invoice_draft(inquiry)
+
+
+def _create_school_admin_manual_invoice_doc(payload):
+	"""Create and insert a manual invoice without committing the surrounding transaction."""
 	customer = payload.get("customer")
 	items = payload.get("items") or []
 	if not customer:
@@ -1300,9 +1322,7 @@ def create_school_admin_manual_invoice_data(payload=None):
 	_apply_invoice_items(invoice, items)
 	_sync_invoice_student_summary(invoice)
 	_run_school_admin_invoice_mutation(lambda: invoice.insert(ignore_permissions=True))
-	_add_comment("Sales Invoice", invoice.name, "Manual invoice created by School Admin.")
-	frappe.db.commit()
-	return _build_invoice_payload(invoice)
+	return invoice
 
 
 def update_school_admin_draft_invoice_data(invoice=None, payload=None):

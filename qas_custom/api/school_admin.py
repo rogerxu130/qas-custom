@@ -73,6 +73,7 @@ from qas_custom.services.school_admin import (
 	create_school_admin_family_invoice_data,
 	create_school_admin_course_session_attendance_data,
 	create_school_admin_manual_invoice_data,
+	create_school_admin_replacement_trial_invoice_data,
 	create_school_admin_term_invoices_data,
 	create_school_admin_term_attendance_data,
 	create_school_admin_term_data,
@@ -119,6 +120,7 @@ from qas_custom.services.school_admin import (
 	mark_school_admin_inquiry_inactive_data,
 	mark_school_admin_inquiry_no_show_data,
 	populate_school_admin_term_data,
+	preview_school_admin_replacement_trial_invoice_data,
 	reschedule_school_admin_inquiry_data,
 	redeem_school_admin_voucher_data,
 	resend_school_admin_invoice_data,
@@ -600,6 +602,16 @@ def school_admin_get_invoice(invoice=None):
 @frappe.whitelist()
 def school_admin_create_manual_invoice(payload=None):
 	return create_school_admin_manual_invoice_data(payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_preview_replacement_trial_invoice(inquiry=None):
+	return preview_school_admin_replacement_trial_invoice_data(inquiry=inquiry)
+
+
+@frappe.whitelist()
+def school_admin_create_replacement_trial_invoice(inquiry=None):
+	return create_school_admin_replacement_trial_invoice_data(inquiry=inquiry)
 
 
 @frappe.whitelist()

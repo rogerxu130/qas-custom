@@ -11,6 +11,7 @@ from qas_custom.services.maintenance import _issue, _make_issue_key, record_data
 
 ELIGIBLE_INQUIRY_STATUSES = {"Booked", "Rescheduled"}
 TRIAL_INVOICE_JOB = "qas_custom.services.trial_invoice.create_trial_invoice_job"
+REPLACEMENT_TRIAL_INVOICE_LOCK_PREFIX = "qas-replacement-trial-invoice"
 
 
 def enqueue_trial_invoice_for_inquiry(inquiry_doc):
@@ -63,6 +64,13 @@ def _create_trial_invoice(inquiry: str):
 			resolve_data_issue(_trial_invoice_issue_key(doc.name))
 			frappe.db.commit()
 			return _status_payload(doc, "linked", _("Trial Invoice {0} is already submitted.").format(invoice_name), invoice=invoice_name)
+		if invoice_doc.get("source_type") == "Replacement Trial Inquiry":
+			return _status_payload(
+				doc,
+				"queued",
+				_("Replacement Trial Invoice {0} is waiting for School Admin review and submission.").format(invoice_name),
+				invoice=invoice_name,
+			)
 	else:
 		context = _trial_invoice_context(doc)
 		invoice_name = _create_draft_trial_invoice(doc, context)
@@ -109,6 +117,96 @@ def get_trial_invoice_status(inquiry_doc):
 	return _status_payload(doc, "skipped", _("Trial Invoice is not required until a Trial Lesson is booked."))
 
 
+def preview_replacement_trial_invoice(inquiry: str):
+	doc = _replacement_inquiry_doc(inquiry)
+	classification = _classify_replacement_invoices(doc, _inquiry_invoice_rows(doc))
+	payload = {
+		"state": classification["state"],
+		"can_create": classification["state"] == "ready",
+		"message": classification["message"],
+		"current_invoice": _replacement_invoice_summary(classification.get("invoice")),
+		"replacement": None,
+	}
+	if classification["state"] == "existing_draft":
+		payload["existing_draft"] = payload["current_invoice"]
+		return payload
+	if classification["state"] != "ready":
+		return payload
+
+	context = _replacement_trial_invoice_context(doc)
+	payload["replacement"] = _replacement_booking_payload(doc, context)
+	return payload
+
+
+def create_replacement_trial_invoice_draft(inquiry: str):
+	if not inquiry:
+		frappe.throw(_("Inquiry is required."))
+	lock_name = "{0}:{1}".format(REPLACEMENT_TRIAL_INVOICE_LOCK_PREFIX, inquiry)
+	with frappe.cache.lock(lock_name, timeout=60, blocking_timeout=10):
+		return _create_replacement_trial_invoice_draft(inquiry)
+
+
+def _create_replacement_trial_invoice_draft(inquiry: str):
+	preview = preview_replacement_trial_invoice(inquiry)
+	if preview["state"] == "blocked":
+		frappe.throw(_(preview["message"]))
+	if preview["state"] == "existing_draft":
+		invoice = preview.get("existing_draft") or {}
+		invoice_name = invoice.get("name")
+		if invoice_name:
+			_link_invoice(inquiry, invoice_name)
+			frappe.db.commit()
+		return {
+			"created": False,
+			"invoice": invoice,
+			"message": _("Existing Draft Invoice {0} was reused.").format(invoice_name),
+		}
+		frappe.throw(_("The existing replacement Draft Invoice could not be found."))
+
+	doc = _replacement_inquiry_doc(inquiry)
+	context = _replacement_trial_invoice_context(doc)
+	savepoint = "replacement_trial_invoice"
+	frappe.db.savepoint(savepoint)
+	try:
+		# Repeat the classification inside the lock and transaction immediately
+		# before creating a financial document.
+		classification = _classify_replacement_invoices(doc, _inquiry_invoice_rows(doc))
+		if classification["state"] == "blocked":
+			frappe.throw(_(classification["message"]))
+		if classification["state"] == "existing_draft":
+			existing = _replacement_invoice_summary(classification.get("invoice"))
+			_link_invoice(doc.name, existing.get("name"))
+			frappe.db.commit()
+			return {
+				"created": False,
+				"invoice": existing,
+				"message": _("Existing Draft Invoice {0} was reused.").format(existing.get("name")),
+			}
+
+		old_invoice = classification.get("invoice")
+		invoice_name = _create_draft_trial_invoice(doc, context, replacement=True)
+		_link_invoice(doc.name, invoice_name)
+		_record_replacement_trial_invoice_audit(doc, old_invoice, invoice_name)
+		resolve_data_issue(_trial_invoice_issue_key(doc.name))
+		resolve_data_issue(_reschedule_fee_issue_key(doc.name))
+		frappe.db.commit()
+	except Exception:
+		frappe.db.rollback(save_point=savepoint)
+		raise
+
+	invoice = frappe.db.get_value(
+		"Sales Invoice",
+		invoice_name,
+		["name", "docstatus", "status", "grand_total", "rounded_total", "outstanding_amount", "creation"],
+		as_dict=True,
+	)
+	return {
+		"created": True,
+		"invoice": _replacement_invoice_summary(invoice),
+		"message": _("Replacement Trial Invoice {0} was created as a Draft. No parent email was sent.").format(invoice_name),
+	}
+
+
 def _trial_invoice_context(inquiry_doc):
 	session = frappe.db.get_value(
 		"Course Sessions",
@@ -140,9 +238,22 @@ def _trial_invoice_context(inquiry_doc):
 	}
 
 
-def _create_draft_trial_invoice(inquiry_doc, context):
-	from qas_custom.services.school_admin import create_school_admin_manual_invoice_data
+def _create_draft_trial_invoice(inquiry_doc, context, replacement=False):
+	from qas_custom.services.school_admin import _add_comment, _create_school_admin_manual_invoice_doc
 
+	payload = _trial_invoice_draft_payload(inquiry_doc, context, replacement=replacement)
+	invoice = _create_school_admin_manual_invoice_doc(payload)
+	_add_comment(
+		"Sales Invoice",
+		invoice.name,
+		_("Replacement Trial Invoice created from Inquiry {0}.").format(inquiry_doc.name)
+		if replacement
+		else _("Trial Invoice generated automatically from Inquiry {0}.").format(inquiry_doc.name),
+	)
+	return invoice.name
+
+
+def _trial_invoice_draft_payload(inquiry_doc, context, replacement=False):
 	student_name = get_student_parent_name(inquiry_doc.student) or inquiry_doc.student
 	student_code = get_student_display_code(inquiry_doc.student) or inquiry_doc.student
 	session = context["session"]
@@ -155,7 +266,7 @@ def _create_draft_trial_invoice(inquiry_doc, context):
 		format_time(timeslot.get("end_time")),
 		context.get("campus") or _("Campus not set"),
 	)
-	payload = create_school_admin_manual_invoice_data({
+	return {
 		"customer": context["customer"],
 		"parent": inquiry_doc.parent,
 		"student": inquiry_doc.student,
@@ -163,9 +274,17 @@ def _create_draft_trial_invoice(inquiry_doc, context):
 		"qas_invoice_type": "Other",
 		"source_doctype": "Inquiry",
 		"source_document": inquiry_doc.name,
-		"source_type": "Trial Inquiry",
-		"billing_note": _("Trial Invoice generated automatically from Inquiry {0}.").format(inquiry_doc.name),
-		"remarks": _("Automatically generated Trial Invoice for Inquiry {0}.").format(inquiry_doc.name),
+		"source_type": "Replacement Trial Inquiry" if replacement else "Trial Inquiry",
+		"billing_note": (
+			_("Replacement Trial Invoice generated from Inquiry {0}.").format(inquiry_doc.name)
+			if replacement
+			else _("Trial Invoice generated automatically from Inquiry {0}.").format(inquiry_doc.name)
+		),
+		"remarks": (
+			_("Replacement Trial Invoice generated from Inquiry {0}.").format(inquiry_doc.name)
+			if replacement
+			else _("Automatically generated Trial Invoice for Inquiry {0}.").format(inquiry_doc.name)
+		),
 		"items": [{
 			"item_code": context["item_code"],
 			"item_name": _("Trial Lesson - {0}").format(context["course"]),
@@ -180,8 +299,153 @@ def _create_draft_trial_invoice(inquiry_doc, context):
 			"course_session": get_course_session_snapshot_label(inquiry_doc.course_session),
 			"session_count": 1,
 		}],
-	})
-	return payload.get("name")
+	}
+
+
+def _replacement_inquiry_doc(inquiry: str):
+	if not inquiry:
+		frappe.throw(_("Inquiry is required."))
+	doc = frappe.get_doc("Inquiry", inquiry)
+	if not _is_eligible(doc):
+		frappe.throw(_("Only a Booked or Rescheduled Trial Lesson with a Course Session can generate a replacement Invoice."))
+	if not doc.get("parent"):
+		frappe.throw(_("The Inquiry is missing its Parent."))
+	if not doc.get("student"):
+		frappe.throw(_("The Inquiry is missing its Student."))
+	return doc
+
+
+def _replacement_trial_invoice_context(inquiry_doc):
+	context = _trial_invoice_context(inquiry_doc)
+	if not context.get("campus"):
+		frappe.throw(_("The booked Course Session is missing its Campus."))
+	return context
+
+
+def _replacement_booking_payload(inquiry_doc, context):
+	session = context["session"]
+	timeslot = context["timeslot"]
+	return {
+		"inquiry": inquiry_doc.name,
+		"student": inquiry_doc.student,
+		"student_name": get_student_parent_name(inquiry_doc.student) or inquiry_doc.student,
+		"course": context["course"],
+		"course_session": inquiry_doc.course_session,
+		"session_label": get_course_session_snapshot_label(inquiry_doc.course_session),
+		"session_date": session.get("session_date"),
+		"start_time": timeslot.get("start_time"),
+		"end_time": timeslot.get("end_time"),
+		"campus": context.get("campus"),
+		"trial_fee": flt(context["fee"]),
+	}
+
+
+def _inquiry_invoice_rows(inquiry_doc):
+	fields = ["name", "docstatus", "status", "grand_total", "rounded_total", "outstanding_amount", "creation"]
+	rows = frappe.get_all(
+		"Sales Invoice",
+		filters={"source_doctype": "Inquiry", "source_document": inquiry_doc.name},
+		fields=fields,
+		order_by="creation desc",
+		limit_page_length=0,
+	)
+	names = {row.get("name") for row in rows}
+	linked_invoice = inquiry_doc.get("trial_invoice")
+	if linked_invoice and linked_invoice not in names:
+		linked = frappe.db.get_value("Sales Invoice", linked_invoice, fields, as_dict=True)
+		if linked:
+			rows.insert(0, linked)
+	return rows
+
+
+def _classify_replacement_invoices(inquiry_doc, invoice_rows):
+	rows = [frappe._dict(row) for row in invoice_rows if row and row.get("name")]
+	linked_invoice = inquiry_doc.get("trial_invoice")
+	rows.sort(key=lambda row: str(row.get("creation") or ""), reverse=True)
+	if linked_invoice:
+		rows.sort(key=lambda row: row.get("name") != linked_invoice)
+
+	active_submitted = [row for row in rows if cint(row.get("docstatus")) == 1 and not _invoice_is_cancelled(row)]
+	if active_submitted:
+		invoice = _preferred_invoice(active_submitted, linked_invoice)
+		return {
+			"state": "blocked",
+			"invoice": invoice,
+			"message": _(
+				"Invoice {0} is still active with status {1}. Cancel it manually before generating a replacement."
+			).format(invoice.get("name"), invoice.get("status") or _("Submitted")),
+		}
+
+	drafts = [row for row in rows if cint(row.get("docstatus")) == 0 and not _invoice_is_cancelled(row)]
+	if len(drafts) > 1:
+		return {
+			"state": "blocked",
+			"invoice": _preferred_invoice(drafts, linked_invoice),
+			"message": _("Multiple Draft Invoices already exist for this Inquiry. Review them before continuing."),
+		}
+	if drafts:
+		invoice = drafts[0]
+		return {
+			"state": "existing_draft",
+			"invoice": invoice,
+			"message": _("Draft Invoice {0} already exists for this Inquiry.").format(invoice.get("name")),
+		}
+
+	cancelled = [row for row in rows if _invoice_is_cancelled(row)]
+	if not cancelled:
+		return {
+			"state": "blocked",
+			"invoice": None,
+			"message": _("No cancelled Trial Invoice was found. This action only creates a replacement after manual cancellation."),
+		}
+	invoice = _preferred_invoice(cancelled, linked_invoice)
+	return {
+		"state": "ready",
+		"invoice": invoice,
+		"message": _("Cancelled Invoice {0} can be replaced with a new Draft.").format(invoice.get("name")),
+	}
+
+
+def _preferred_invoice(rows, linked_invoice):
+	return next((row for row in rows if row.get("name") == linked_invoice), rows[0])
+
+
+def _invoice_is_cancelled(invoice):
+	return cint(invoice.get("docstatus")) == 2 or str(invoice.get("status") or "").lower() == "cancelled"
+
+
+def _replacement_invoice_summary(invoice):
+	if not invoice:
+		return None
+	docstatus = cint(invoice.get("docstatus"))
+	status = "Cancelled" if _invoice_is_cancelled(invoice) else invoice.get("status") or ("Draft" if docstatus == 0 else "Submitted")
+	amount = flt(invoice.get("rounded_total") or invoice.get("grand_total") or 0)
+	return {
+		"name": invoice.get("name"),
+		"docstatus": docstatus,
+		"status": status,
+		"amount": amount,
+		"outstanding_amount": flt(invoice.get("outstanding_amount") or 0),
+	}
+
+
+def _record_replacement_trial_invoice_audit(inquiry_doc, old_invoice, new_invoice):
+	from qas_custom.services.school_admin import _add_comment
+
+	old_invoice_name = old_invoice.get("name") if old_invoice else None
+	_add_comment(
+		"Inquiry",
+		inquiry_doc.name,
+		_("Replacement Trial Invoice {0} created after cancelled Invoice {1}.").format(
+			new_invoice, old_invoice_name or _("not linked")
+		),
+	)
+	if old_invoice_name:
+		_add_comment(
+			"Sales Invoice",
+			old_invoice_name,
+			_("Replacement Draft Invoice {0} was created from Inquiry {1}.").format(new_invoice, inquiry_doc.name),
+		)
 
 
 def _find_inquiry_invoice(inquiry: str):
