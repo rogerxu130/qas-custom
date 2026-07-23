@@ -1,7 +1,7 @@
 {
  "actions": [],
  "allow_rename": 1,
- "autoname": "format:MV-{course}-{student}-{issue_date}-{####}",
+ "autoname": "MV-.YYYY.-.#####",
  "doctype": "DocType",
  "engine": "InnoDB",
  "fields": [

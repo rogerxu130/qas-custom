@@ -1,7 +1,7 @@
 {
  "actions": [],
  "allow_rename": 1,
- "autoname": "format:LV-{student}-{course_session}-{####}",
+ "autoname": "LV-.YYYY.-.#####",
  "doctype": "DocType",
  "engine": "InnoDB",
  "fields": [
