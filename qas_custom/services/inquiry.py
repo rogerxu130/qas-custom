@@ -749,7 +749,17 @@ def _get_or_create_user_for_parent(email: str | None, parent_name: str | None):
 	if frappe.db.exists("Role", "Parent"):
 		user_doc.append("roles", {"role": "Parent"})
 	user_doc.flags.ignore_permissions = True
-	user_doc.insert()
+	try:
+		user_doc.insert()
+	except frappe.DuplicateEntryError as exc:
+		duplicate_doctype = exc.args[0] if len(exc.args) > 0 else None
+		duplicate_name = str(exc.args[1] or "").strip().lower() if len(exc.args) > 1 else None
+		if duplicate_doctype != "User" or duplicate_name != email:
+			raise
+		user = frappe.db.exists("User", email) or frappe.db.get_value("User", {"email": email}, "name")
+		if user:
+			return user
+		raise
 	return user_doc.name
 
 

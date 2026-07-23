@@ -2,6 +2,8 @@ from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
+import frappe
+
 from qas_custom.services.inquiry import _assert_no_duplicate_trial_inquiry, _get_or_create_user_for_parent
 from qas_custom.services.school_admin import (
 	_manual_trial_existing_family_payload,
@@ -136,3 +138,75 @@ class TestSchoolAdminManualTrial(TestCase):
 		self.assertEqual(user_doc.send_welcome_email, 0)
 		user_doc.append.assert_called_once_with("roles", {"role": "Parent"})
 		user_doc.insert.assert_called_once()
+
+	def test_duplicate_user_insert_reuses_user_created_by_concurrent_request(self):
+		user_doc = SimpleNamespace(
+			name="parent@example.com",
+			flags=SimpleNamespace(),
+			append=Mock(),
+			insert=Mock(side_effect=frappe.DuplicateEntryError("User", "parent@example.com")),
+		)
+		user_lookups = iter([None, "parent@example.com"])
+
+		def exists(doctype, _name):
+			if doctype == "User":
+				return next(user_lookups)
+			return doctype == "Role"
+
+		fake_frappe = SimpleNamespace(
+			DuplicateEntryError=frappe.DuplicateEntryError,
+			db=SimpleNamespace(exists=Mock(side_effect=exists), get_value=Mock(return_value=None)),
+			new_doc=Mock(return_value=user_doc),
+		)
+		with patch("qas_custom.services.inquiry.frappe", fake_frappe):
+			result = _get_or_create_user_for_parent("parent@example.com", "Parent Name")
+
+		self.assertEqual(result, "parent@example.com")
+		user_doc.insert.assert_called_once()
+
+	def test_duplicate_user_insert_is_reraised_when_user_still_cannot_be_found(self):
+		duplicate_error = frappe.DuplicateEntryError("User", "parent@example.com")
+		user_doc = SimpleNamespace(
+			name="parent@example.com",
+			flags=SimpleNamespace(),
+			append=Mock(),
+			insert=Mock(side_effect=duplicate_error),
+		)
+		fake_frappe = SimpleNamespace(
+			DuplicateEntryError=frappe.DuplicateEntryError,
+			db=SimpleNamespace(
+				exists=Mock(side_effect=lambda doctype, _name: doctype == "Role"),
+				get_value=Mock(return_value=None),
+			),
+			new_doc=Mock(return_value=user_doc),
+		)
+		with patch("qas_custom.services.inquiry.frappe", fake_frappe):
+			with self.assertRaises(frappe.DuplicateEntryError) as raised:
+				_get_or_create_user_for_parent("parent@example.com", "Parent Name")
+
+		self.assertIs(raised.exception, duplicate_error)
+
+	def test_unrelated_duplicate_insert_is_not_hidden_by_existing_user(self):
+		duplicate_error = frappe.DuplicateEntryError("Has Role", "ROLE-ROW-001")
+		user_doc = SimpleNamespace(
+			name="parent@example.com",
+			flags=SimpleNamespace(),
+			append=Mock(),
+			insert=Mock(side_effect=duplicate_error),
+		)
+		user_lookups = iter([None])
+		fake_frappe = SimpleNamespace(
+			DuplicateEntryError=frappe.DuplicateEntryError,
+			db=SimpleNamespace(
+				exists=Mock(
+					side_effect=lambda doctype, _name: next(user_lookups) if doctype == "User" else doctype == "Role"
+				),
+				get_value=Mock(return_value=None),
+			),
+			new_doc=Mock(return_value=user_doc),
+		)
+		with patch("qas_custom.services.inquiry.frappe", fake_frappe):
+			with self.assertRaises(frappe.DuplicateEntryError) as raised:
+				_get_or_create_user_for_parent("parent@example.com", "Parent Name")
+
+		self.assertIs(raised.exception, duplicate_error)
