@@ -111,6 +111,7 @@ from qas_custom.services.school_admin import (
 	get_school_admin_vouchers_data,
 	get_school_admin_weekly_timeslot_data,
 	get_school_admin_weekly_timeslots_data,
+	link_school_admin_inquiry_enrollment_data,
 	mark_school_admin_invoice_paid_data,
 	start_school_admin_bulk_invoice_submit_job_data,
 	mark_school_admin_inquiry_completed_data,
@@ -572,6 +573,11 @@ def school_admin_get_conversion_sessions(inquiry=None, start_date=None, course=N
 @frappe.whitelist()
 def school_admin_convert_inquiry(inquiry=None, course_session=None):
 	return convert_school_admin_inquiry_data(inquiry=inquiry, course_session=course_session)
+
+
+@frappe.whitelist()
+def school_admin_link_inquiry_enrollment(inquiry=None, enrollment=None):
+	return link_school_admin_inquiry_enrollment_data(inquiry=inquiry, enrollment=enrollment)
 
 
 @frappe.whitelist()

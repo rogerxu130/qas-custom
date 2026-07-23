@@ -18,10 +18,11 @@ from qas_custom.modules.enrollment.commands import (
 	link_invoice_to_enrollment,
 )
 from qas_custom.modules.inquiry.commands import get_inquiry_for_conversion, mark_converted
-from qas_custom.modules.inquiry.notes import add_conversion_note
+from qas_custom.modules.inquiry.notes import add_conversion_note, add_system_note
 
 
 CONVERSION_INTERNAL_NOTE_MAX_LENGTH = 1000
+LINKABLE_ENROLLMENT_STATUSES = {"Planned", "Active"}
 
 
 def get_conversion_session_options(inquiry: str | None, start_date=None, course=None, campus=None, limit=80):
@@ -136,6 +137,91 @@ def convert_inquiry_to_full_term_core(
 			"invoice_amount": flt(invoice.grand_total),
 		},
 	}
+
+
+def link_existing_enrollment_core(inquiry: str | None, enrollment: str | None, actor=None):
+	if not inquiry:
+		frappe.throw(_("Inquiry is required."))
+	if not enrollment:
+		frappe.throw(_("Enrollment is required."))
+
+	inquiry_doc = frappe.get_doc("Inquiry", inquiry)
+	if inquiry_doc.inquiry_type != "Trial Lesson":
+		frappe.throw(_("Only Trial Lesson inquiries can be converted."))
+
+	converted_enrollment = str(inquiry_doc.get("converted_enrollment") or "").strip()
+	if inquiry_doc.status == "Converted":
+		if converted_enrollment == enrollment:
+			from qas_custom.services.inquiry import build_inquiry_detail
+
+			return build_inquiry_detail(inquiry_doc.name)
+		frappe.throw(
+			_("This Inquiry is already converted to Enrollment {0}.").format(
+				converted_enrollment or _("Unknown")
+			)
+		)
+	if converted_enrollment:
+		frappe.throw(_("This Inquiry already references converted Enrollment {0}.").format(converted_enrollment))
+	if inquiry_doc.status not in {"Completed", "Follow-up"}:
+		frappe.throw(_("Only Completed or Follow-up inquiries can be linked to an existing Enrollment."))
+	if not inquiry_doc.get("student"):
+		frappe.throw(_("Student is required before converting a Trial Lesson Inquiry."))
+	if not inquiry_doc.get("parent"):
+		frappe.throw(_("Parent is required before converting a Trial Lesson Inquiry."))
+
+	enrollment_doc = frappe.get_doc("Enrollment", enrollment)
+	if enrollment_doc.get("status") not in LINKABLE_ENROLLMENT_STATUSES:
+		frappe.throw(_("The existing Enrollment must be Planned or Active."))
+	if enrollment_doc.get("student") != inquiry_doc.student:
+		frappe.throw(_("The existing Enrollment must belong to the same Student as the Inquiry."))
+	if enrollment_doc.get("parent") and inquiry_doc.get("parent") and enrollment_doc.parent != inquiry_doc.parent:
+		frappe.throw(_("The existing Enrollment must belong to the same Parent as the Inquiry."))
+
+	source_inquiry = str(enrollment_doc.get("source_inquiry") or "").strip()
+	if source_inquiry and source_inquiry != inquiry_doc.name:
+		frappe.throw(
+			_("Enrollment {0} is already linked to Inquiry {1}.").format(enrollment_doc.name, source_inquiry)
+		)
+	conflicting_inquiry = frappe.db.get_value(
+		"Inquiry",
+		{
+			"name": ["!=", inquiry_doc.name],
+			"status": "Converted",
+			"converted_enrollment": enrollment_doc.name,
+		},
+		"name",
+	)
+	if conflicting_inquiry:
+		frappe.throw(
+			_("Enrollment {0} is already used by converted Inquiry {1}.").format(
+				enrollment_doc.name,
+				conflicting_inquiry,
+			)
+		)
+
+	if enrollment_doc.meta.has_field("source_inquiry") and not source_inquiry:
+		enrollment_doc.source_inquiry = inquiry_doc.name
+		enrollment_doc.save(ignore_permissions=True)
+
+	inquiry_doc.status = "Converted"
+	inquiry_doc.converted_enrollment = enrollment_doc.name
+	if inquiry_doc.meta.has_field("converted_invoice"):
+		inquiry_doc.converted_invoice = enrollment_doc.get("invoice") or ""
+	inquiry_doc.save(ignore_permissions=True)
+	add_system_note(
+		inquiry_doc=inquiry_doc,
+		note=_(
+			"School Admin linked existing Enrollment {0}; no new Enrollment, invoice, or attendance was created."
+		).format(enrollment_doc.name),
+		source_doctype="Enrollment",
+		source_document=enrollment_doc.name,
+		actor=actor,
+	)
+	frappe.db.commit()
+
+	from qas_custom.services.inquiry import build_inquiry_detail
+
+	return build_inquiry_detail(inquiry_doc.name)
 
 
 def normalize_conversion_internal_note(internal_note):

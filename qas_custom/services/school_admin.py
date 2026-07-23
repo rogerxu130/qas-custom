@@ -16,6 +16,7 @@ from frappe.utils import add_days, cint, flt, get_time, getdate, now_datetime, n
 from qas_custom.services.billing_enrollment import (
 	convert_inquiry_to_full_term_core,
 	get_conversion_session_options,
+	link_existing_enrollment_core,
 	mark_inquiry_inactive_core,
 )
 from qas_custom.modules.attendance.commands import create_full_term_attendance_entries, update_attendance_status
@@ -1232,6 +1233,11 @@ def get_school_admin_conversion_sessions_data(inquiry=None, start_date=None, cou
 def convert_school_admin_inquiry_data(inquiry=None, course_session=None):
 	_require_school_admin()
 	return convert_inquiry_to_full_term_core(inquiry, course_session, actor=frappe.session.user)
+
+
+def link_school_admin_inquiry_enrollment_data(inquiry=None, enrollment=None):
+	_require_school_admin()
+	return link_existing_enrollment_core(inquiry, enrollment, actor=frappe.session.user)
 
 
 def get_school_admin_invoices_data(status=None, customer=None, parent=None, student=None, source=None, limit=80):
