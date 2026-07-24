@@ -139,7 +139,12 @@ def convert_inquiry_to_full_term_core(
 	}
 
 
-def link_existing_enrollment_core(inquiry: str | None, enrollment: str | None, actor=None):
+def link_existing_enrollment_core(
+	inquiry: str | None,
+	enrollment: str | None,
+	actor=None,
+	operator_label=None,
+):
 	if not inquiry:
 		frappe.throw(_("Inquiry is required."))
 	if not enrollment:
@@ -211,8 +216,8 @@ def link_existing_enrollment_core(inquiry: str | None, enrollment: str | None, a
 	add_system_note(
 		inquiry_doc=inquiry_doc,
 		note=_(
-			"School Admin linked existing Enrollment {0}; no new Enrollment, invoice, or attendance was created."
-		).format(enrollment_doc.name),
+			"{0} linked existing Enrollment {1}; no new Enrollment, invoice, or attendance was created."
+		).format(operator_label or _("School Admin"), enrollment_doc.name),
 		source_doctype="Enrollment",
 		source_document=enrollment_doc.name,
 		actor=actor,

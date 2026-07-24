@@ -18,6 +18,7 @@ from qas_custom.services.campus_admin import (
 	get_campus_admin_contacts_data,
 	get_campus_admin_course_session_data,
 	get_campus_admin_course_sessions_data,
+	get_campus_admin_linkable_enrollments_data,
 	get_campus_admin_session_photo_content_data,
 	get_campus_admin_session_video_content_data,
 	get_campus_admin_conversion_sessions_data,
@@ -34,6 +35,7 @@ from qas_custom.services.campus_admin import (
 	mark_campus_admin_inquiry_no_show_data,
 	reopen_campus_admin_inquiry_data,
 	send_campus_admin_trial_class_reminder_data,
+	link_campus_admin_inquiry_enrollment_data,
 	update_campus_admin_student_teaching_notes_data,
 )
 
@@ -235,12 +237,22 @@ def campus_admin_get_conversion_sessions(inquiry=None, start_date=None, course=N
 
 
 @frappe.whitelist()
+def campus_admin_get_linkable_enrollments(inquiry=None):
+	return get_campus_admin_linkable_enrollments_data(inquiry=inquiry)
+
+
+@frappe.whitelist()
 def campus_admin_convert_inquiry(inquiry=None, course_session=None, internal_note=None):
 	return convert_campus_admin_inquiry_data(
 		inquiry=inquiry,
 		course_session=course_session,
 		internal_note=internal_note,
 	)
+
+
+@frappe.whitelist()
+def campus_admin_link_inquiry_enrollment(inquiry=None, enrollment=None):
+	return link_campus_admin_inquiry_enrollment_data(inquiry=inquiry, enrollment=enrollment)
 
 
 @frappe.whitelist()

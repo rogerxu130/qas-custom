@@ -10,6 +10,10 @@ from qas_custom.services.billing_enrollment import (
 	get_conversion_session_options,
 	mark_inquiry_inactive_core,
 )
+from qas_custom.modules.workflows.trial_conversion import (
+	LINKABLE_ENROLLMENT_STATUSES,
+	link_existing_enrollment_core,
+)
 from qas_custom.services.class_attendance import get_attendance_entries
 from qas_custom.services.display_labels import get_makeup_voucher_label, get_student_display_name
 from qas_custom.services.inquiry import (
@@ -776,6 +780,94 @@ def get_campus_admin_conversion_sessions_data(inquiry=None, start_date=None, cou
 	)
 
 
+def get_campus_admin_linkable_enrollments_data(inquiry=None):
+	profile = _require_inquiry_access(inquiry)
+	inquiry_doc, inquiry_term = _get_inquiry_link_context(
+		inquiry,
+		allowed_statuses={"Completed", "Follow-up"},
+	)
+	timeslots = frappe.get_all(
+		"Weekly Timeslot",
+		filters={
+			"campus": ["in", profile["campuses"]],
+			"term": inquiry_term,
+		},
+		fields=[
+			"name",
+			"term",
+			"course",
+			"campus",
+			"classroom",
+			"teacher",
+			"day_of_week",
+			"start_time",
+			"end_time",
+		],
+		order_by="campus asc, course asc, day_of_week asc, start_time asc",
+		limit_page_length=0,
+	)
+	if not timeslots:
+		return {"items": [], "term": inquiry_term}
+
+	timeslot_map = {row.name: row for row in timeslots}
+	enrollments = frappe.get_all(
+		"Enrollment",
+		filters={
+			"student": inquiry_doc.student,
+			"term": inquiry_term,
+			"status": ["in", sorted(LINKABLE_ENROLLMENT_STATUSES)],
+			"weekly_timeslot": ["in", list(timeslot_map)],
+		},
+		fields=[
+			"name",
+			"student",
+			"parent",
+			"term",
+			"course",
+			"weekly_timeslot",
+			"status",
+			"invoice",
+			"source_inquiry",
+		],
+		order_by="status asc, course asc, modified desc",
+		limit_page_length=0,
+	)
+	if not enrollments:
+		return {"items": [], "term": inquiry_term}
+
+	enrollment_names = [row.name for row in enrollments]
+	conflicting_rows = frappe.get_all(
+		"Inquiry",
+		filters={
+			"name": ["!=", inquiry_doc.name],
+			"status": "Converted",
+			"converted_enrollment": ["in", enrollment_names],
+		},
+		fields=["name", "converted_enrollment"],
+		limit_page_length=0,
+	)
+	conflicting_enrollments = {row.converted_enrollment for row in conflicting_rows if row.converted_enrollment}
+
+	items = []
+	for enrollment in enrollments:
+		if enrollment.get("source_inquiry") and enrollment.source_inquiry != inquiry_doc.name:
+			continue
+		if enrollment.name in conflicting_enrollments:
+			continue
+		if (
+			enrollment.get("parent")
+			and inquiry_doc.get("parent")
+			and enrollment.parent != inquiry_doc.parent
+		):
+			continue
+		timeslot = timeslot_map.get(enrollment.weekly_timeslot)
+		if not timeslot:
+			continue
+		items.append(_campus_admin_linkable_enrollment_payload(enrollment, timeslot))
+
+	return {"items": items, "term": inquiry_term}
+
+
 def convert_campus_admin_inquiry_data(inquiry=None, course_session=None, internal_note=None):
 	reject_support_view_write()
 	_require_inquiry_access(inquiry)
@@ -787,6 +879,18 @@ def convert_campus_admin_inquiry_data(inquiry=None, course_session=None, interna
 		internal_note=internal_note,
 	)
 	return result["inquiry"]
+
+
+def link_campus_admin_inquiry_enrollment_data(inquiry=None, enrollment=None):
+	reject_support_view_write()
+	profile = _require_inquiry_access(inquiry)
+	_validate_linkable_enrollment_access(inquiry, enrollment, profile)
+	return link_existing_enrollment_core(
+		inquiry,
+		enrollment,
+		actor=frappe.session.user,
+		operator_label=_("Campus Admin"),
+	)
 
 
 def mark_campus_admin_inquiry_inactive_data(inquiry=None, inactive_reason=None):
@@ -850,6 +954,120 @@ def _validate_conversion_session_access(inquiry, course_session):
 	timeslot = frappe.db.get_value("Weekly Timeslot", session.weekly_timeslot, ["campus"], as_dict=True)
 	if not timeslot or timeslot.campus not in profile["campuses"]:
 		frappe.throw(_("You do not have access to the selected session."), frappe.PermissionError)
+
+
+def _get_inquiry_link_context(inquiry, allowed_statuses=None):
+	inquiry_doc = frappe.get_doc("Inquiry", inquiry)
+	if inquiry_doc.inquiry_type != "Trial Lesson":
+		frappe.throw(_("Only Trial Lesson inquiries can be converted."))
+	if allowed_statuses and inquiry_doc.status not in allowed_statuses:
+		frappe.throw(_("Only Completed or Follow-up inquiries can be linked to an existing Enrollment."))
+	if not inquiry_doc.get("student"):
+		frappe.throw(_("Student is required before converting a Trial Lesson Inquiry."))
+	if not inquiry_doc.get("course_session"):
+		frappe.throw(_("The Trial Lesson Inquiry does not have a Course Session."))
+
+	session = frappe.db.get_value(
+		"Course Sessions",
+		inquiry_doc.course_session,
+		["weekly_timeslot"],
+		as_dict=True,
+	)
+	if not session or not session.get("weekly_timeslot"):
+		frappe.throw(_("The Trial Lesson Course Session was not found."))
+	timeslot = frappe.db.get_value(
+		"Weekly Timeslot",
+		session.weekly_timeslot,
+		["term"],
+		as_dict=True,
+	)
+	if not timeslot or not timeslot.get("term"):
+		frappe.throw(_("The Trial Lesson Course Session is missing a Term."))
+	return inquiry_doc, timeslot.term
+
+
+def _validate_linkable_enrollment_access(inquiry, enrollment, profile):
+	if not enrollment:
+		frappe.throw(_("Enrollment is required."))
+
+	inquiry_doc = frappe.get_doc("Inquiry", inquiry)
+	idempotent_link = (
+		inquiry_doc.status == "Converted"
+		and inquiry_doc.get("converted_enrollment") == enrollment
+	)
+	inquiry_doc, inquiry_term = _get_inquiry_link_context(
+		inquiry,
+		allowed_statuses={"Completed", "Follow-up", "Converted"},
+	)
+
+	enrollment_doc = frappe.get_doc("Enrollment", enrollment)
+	if not enrollment_doc.get("weekly_timeslot"):
+		frappe.throw(_("The existing Enrollment does not have a Weekly Timeslot."))
+
+	timeslot = frappe.db.get_value(
+		"Weekly Timeslot",
+		enrollment_doc.weekly_timeslot,
+		["campus", "term"],
+		as_dict=True,
+	)
+	if not timeslot:
+		frappe.throw(_("The existing Enrollment Weekly Timeslot was not found."))
+	if timeslot.get("campus") not in profile["campuses"]:
+		frappe.throw(_("You do not have access to the selected Enrollment campus."), frappe.PermissionError)
+	if idempotent_link:
+		return
+	if enrollment_doc.get("status") not in LINKABLE_ENROLLMENT_STATUSES:
+		frappe.throw(_("The existing Enrollment must be Planned or Active."))
+	if enrollment_doc.get("student") != inquiry_doc.student:
+		frappe.throw(_("The existing Enrollment must belong to the same Student as the Inquiry."))
+	if enrollment_doc.get("term") != inquiry_term:
+		frappe.throw(_("The existing Enrollment must belong to the same Term as the Inquiry."))
+	if (
+		enrollment_doc.get("parent")
+		and inquiry_doc.get("parent")
+		and enrollment_doc.parent != inquiry_doc.parent
+	):
+		frappe.throw(_("The existing Enrollment must belong to the same Parent as the Inquiry."))
+	if timeslot.get("term") != inquiry_term:
+		frappe.throw(_("The existing Enrollment class must belong to the same Term as the Inquiry."))
+
+
+def _campus_admin_linkable_enrollment_payload(enrollment, timeslot):
+	parts = [
+		enrollment.name,
+		enrollment.get("course") or timeslot.get("course"),
+		timeslot.get("campus"),
+		timeslot.get("day_of_week"),
+		_format_linkable_enrollment_time(timeslot.get("start_time")),
+		enrollment.get("term"),
+		enrollment.get("status"),
+		_("Invoice {0}").format(enrollment.invoice) if enrollment.get("invoice") else _("No invoice"),
+	]
+	return {
+		"id": enrollment.name,
+		"name": enrollment.name,
+		"student": enrollment.get("student"),
+		"parent": enrollment.get("parent"),
+		"term": enrollment.get("term"),
+		"course": enrollment.get("course") or timeslot.get("course"),
+		"weekly_timeslot": enrollment.get("weekly_timeslot"),
+		"status": enrollment.get("status"),
+		"invoice": enrollment.get("invoice"),
+		"campus": timeslot.get("campus"),
+		"classroom": timeslot.get("classroom"),
+		"teacher": timeslot.get("teacher"),
+		"day_of_week": timeslot.get("day_of_week"),
+		"start_time": timeslot.get("start_time"),
+		"end_time": timeslot.get("end_time"),
+		"label": " · ".join(str(part) for part in parts if part),
+	}
+
+
+def _format_linkable_enrollment_time(value):
+	if not value:
+		return None
+	value = str(value)
+	return value[:5] if len(value) >= 5 else value
 
 
 def _get_reopen_status(inquiry_doc):
