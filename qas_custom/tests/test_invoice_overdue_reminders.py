@@ -84,8 +84,20 @@ class TestOverdueReminderScheduler(TestCase):
 		mock_queue,
 	):
 		mock_candidates.return_value = [
-			{"name": "INV-001", "due_date": "2026-07-08"},
-			{"name": "INV-002", "due_date": "2026-07-08"},
+			{
+				"name": "INV-001",
+				"due_date": "2026-07-08",
+				"outstanding_amount": 120,
+				"docstatus": 1,
+				"is_return": 0,
+			},
+			{
+				"name": "INV-002",
+				"due_date": "2026-07-08",
+				"outstanding_amount": 120,
+				"docstatus": 1,
+				"is_return": 0,
+			},
 		]
 		mock_history.return_value = {
 			"INV-001": [],

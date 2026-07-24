@@ -40,6 +40,11 @@ from qas_custom.services.school_admin_import import (
 	run_store_credit_import_data,
 	run_trial_inquiry_import_data,
 )
+from qas_custom.services.term_overdue_invoice_reminders import (
+	get_term_overdue_invoice_reminder_job_data,
+	get_term_overdue_invoice_reminder_preview_data,
+	start_term_overdue_invoice_reminder_job_data,
+)
 from qas_custom.services.school_admin import (
 	update_school_admin_student_data,
 	update_school_admin_parent_data,
@@ -597,6 +602,21 @@ def school_admin_get_invoices(status=None, customer=None, parent=None, student=N
 @frappe.whitelist()
 def school_admin_get_invoice(invoice=None):
 	return get_school_admin_invoice_data(invoice=invoice)
+
+
+@frappe.whitelist()
+def school_admin_get_term_overdue_invoice_reminder_preview(term=None):
+	return get_term_overdue_invoice_reminder_preview_data(term=term)
+
+
+@frappe.whitelist()
+def school_admin_start_term_overdue_invoice_reminder_job(payload=None):
+	return start_term_overdue_invoice_reminder_job_data(payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_get_term_overdue_invoice_reminder_job(job_id=None):
+	return get_term_overdue_invoice_reminder_job_data(job_id=job_id)
 
 
 @frappe.whitelist()
