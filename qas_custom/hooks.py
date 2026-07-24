@@ -192,6 +192,9 @@ scheduler_events = {
 		"0 * * * *": [
 			"qas_custom.tasks.teacher_schedule_reminders.send_teacher_next_day_schedule_reminders",
 		],
+		"0 9 * * *": [
+			"qas_custom.tasks.invoice_overdue_reminders.send_overdue_invoice_reminders",
+		],
 	},
 	"hourly": [
 		"qas_custom.tasks.adhoc_booking_tasks.lock_due_adhoc_bookings",
