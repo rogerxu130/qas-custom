@@ -130,22 +130,67 @@ def send_overdue_invoice_reminder_job(invoice, sequence, event_key, notification
 
 
 def next_reminder_sequence(invoice, attempts, today):
+	eligibility = overdue_reminder_eligibility(invoice, attempts, today)
+	return eligibility.get("sequence") if eligibility.get("eligible") else None
+
+
+def overdue_reminder_eligibility(invoice, attempts=None, today=None):
 	today = _brisbane_date(today)
 	due_date = getdate(invoice.get("due_date")) if invoice.get("due_date") else None
-	if not due_date or due_date >= today:
-		return None
+	if cint(invoice.get("docstatus")) != 1:
+		return _ineligible("not_submitted", _("Invoice is not submitted."))
+	if cint(invoice.get("is_return")):
+		return _ineligible("return_invoice", _("Return invoices do not receive overdue reminders."))
+	if not due_date:
+		return _ineligible("missing_due_date", _("Invoice does not have a due date."))
+	if due_date >= today:
+		return _ineligible("not_overdue", _("Invoice is not overdue."))
+	if flt(invoice.get("outstanding_amount")) <= 0.005:
+		return _ineligible("no_outstanding", _("Invoice no longer has an outstanding balance."))
 
-	attempts = sorted((_attempt_datetime(row) for row in attempts), reverse=True)
-	attempts = [value for value in attempts if value]
-	if len(attempts) >= MAX_REMINDER_ATTEMPTS:
-		return None
-	if not attempts:
-		return 1
+	attempt_dates = sorted(
+		(value for value in (_attempt_datetime(row) for row in (attempts or [])) if value),
+		reverse=True,
+	)
+	attempt_count = len(attempt_dates)
+	if attempt_count >= MAX_REMINDER_ATTEMPTS:
+		return _ineligible(
+			"maximum_attempts",
+			_("The maximum of {0} overdue reminders has been reached.").format(MAX_REMINDER_ATTEMPTS),
+			attempt_count=attempt_count,
+			last_reminder_at=attempt_dates[0] if attempt_dates else None,
+		)
+	if not attempt_dates:
+		return {
+			"eligible": True,
+			"reason_code": None,
+			"reason": None,
+			"attempt_count": 0,
+			"sequence": 1,
+			"last_reminder_at": None,
+			"days_until_eligible": 0,
+		}
 
-	last_attempt_date = _system_datetime_to_brisbane(attempts[0]).date()
-	if date_diff(today, last_attempt_date) < REMINDER_INTERVAL_DAYS:
-		return None
-	return len(attempts) + 1
+	last_reminder_at = attempt_dates[0]
+	last_attempt_date = _system_datetime_to_brisbane(last_reminder_at).date()
+	days_since_last_attempt = date_diff(today, last_attempt_date)
+	if days_since_last_attempt < REMINDER_INTERVAL_DAYS:
+		return _ineligible(
+			"recently_reminded",
+			_("This invoice was reminded within the last {0} days.").format(REMINDER_INTERVAL_DAYS),
+			attempt_count=attempt_count,
+			last_reminder_at=last_reminder_at,
+			days_until_eligible=REMINDER_INTERVAL_DAYS - days_since_last_attempt,
+		)
+	return {
+		"eligible": True,
+		"reason_code": None,
+		"reason": None,
+		"attempt_count": attempt_count,
+		"sequence": attempt_count + 1,
+		"last_reminder_at": last_reminder_at,
+		"days_until_eligible": 0,
+	}
 
 
 def overdue_reminder_event_key(invoice, due_date, sequence):
@@ -263,6 +308,34 @@ def overdue_invoice_reminders_enabled():
 	return True if value is None else cint(value) != 0
 
 
+def queue_overdue_invoice_reminder(invoice, today=None):
+	today = _brisbane_date(today)
+	doc = frappe.get_doc("Sales Invoice", invoice)
+	history = _get_reminder_history([doc.name]).get(doc.name, [])
+	eligibility = overdue_reminder_eligibility(doc, history, today)
+	if not eligibility.get("eligible"):
+		return {
+			"queued": False,
+			"skipped": True,
+			"invoice": doc.name,
+			**eligibility,
+		}
+	recipient = _invoice_recipient(doc)
+	if not recipient.get("email"):
+		return {
+			"queued": False,
+			"skipped": True,
+			"invoice": doc.name,
+			**_ineligible(
+				"missing_recipient",
+				_("No parent email found."),
+				attempt_count=eligibility.get("attempt_count"),
+				last_reminder_at=eligibility.get("last_reminder_at"),
+			),
+		}
+	return _queue_overdue_invoice_reminder(doc.name, eligibility.get("sequence"), today)
+
+
 def _queue_overdue_invoice_reminder(invoice, sequence, today):
 	doc = frappe.get_doc("Sales Invoice", invoice)
 	reason = _invoice_ineligible_reason(doc, today)
@@ -311,12 +384,14 @@ def _get_overdue_invoice_candidates(today):
 		"due_date": ["<", today],
 		"outstanding_amount": [">", 0.005],
 	}
+	fields = ["name", "due_date", "outstanding_amount", "docstatus"]
 	if frappe.db.has_column("Sales Invoice", "is_return"):
 		filters["is_return"] = 0
+		fields.append("is_return")
 	return frappe.get_all(
 		"Sales Invoice",
 		filters=filters,
-		fields=["name", "due_date", "outstanding_amount"],
+		fields=fields,
 		order_by="due_date asc, name asc",
 		limit_page_length=SCHEDULER_BATCH_SIZE,
 	)
@@ -470,3 +545,22 @@ def _invoice_from_fallback_event_key(event_key):
 		return None
 	parts = text[len(EVENT_PREFIX) :].rsplit(":", 2)
 	return parts[0] if len(parts) == 3 else None
+
+
+def _ineligible(
+	reason_code,
+	reason,
+	*,
+	attempt_count=0,
+	last_reminder_at=None,
+	days_until_eligible=None,
+):
+	return {
+		"eligible": False,
+		"reason_code": reason_code,
+		"reason": reason,
+		"attempt_count": cint(attempt_count),
+		"sequence": None,
+		"last_reminder_at": last_reminder_at,
+		"days_until_eligible": days_until_eligible,
+	}
