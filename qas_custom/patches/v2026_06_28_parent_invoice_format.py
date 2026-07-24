@@ -243,9 +243,7 @@ def _parent_invoice_print_html():
 		<thead>
 			<tr>
 				<th style="width:20%;">Student</th>
-				<th>Course</th>
-				<th class="right" style="width:13%;">Sessions</th>
-				<th class="right" style="width:16%;">Unit price</th>
+				<th>Description</th>
 				<th class="right" style="width:16%;">Amount</th>
 			</tr>
 		</thead>
@@ -254,10 +252,17 @@ def _parent_invoice_print_html():
 			<tr>
 				<td><strong>{{ item.student_display_name or item.student or "Student" }}</strong></td>
 				<td>{{ item.description }}</td>
-				<td class="right">{{ item.session_count or item.qty }}</td>
-				<td class="right">AUD ${{ "%.2f"|format(item.rate) }}</td>
 				<td class="right"><strong>AUD ${{ "%.2f"|format(item.amount) }}</strong></td>
 			</tr>
+			{% endfor %}
+			{% for adjustment in doc.taxes %}
+			{% if adjustment.qas_is_invoice_adjustment %}
+			<tr>
+				<td></td>
+				<td>{{ adjustment.description or "Adjustment" }}</td>
+				<td class="right"><strong>AUD ${{ "%.2f"|format(adjustment.tax_amount) }}</strong></td>
+			</tr>
+			{% endif %}
 			{% endfor %}
 		</tbody>
 	</table>

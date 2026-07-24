@@ -114,6 +114,7 @@ ACTIVE_TIMESLOT_STATUSES = ["Active"]
 COURSE_LABEL_FIELDS = ["name", "course_name", "course_name_zh"]
 DEFAULT_COURSE_INVOICE_ITEM = "Tuition Fee"
 MANUAL_INVOICE_ITEM = "Other"
+INVOICE_ADJUSTMENT_FIELD = "qas_is_invoice_adjustment"
 BULK_INVOICE_SUBMIT_JOB_TTL_SECONDS = 86400
 NON_ATTENDING_ATTENDANCE_STATUSES = {"Cancelled", "Leave"}
 TRIAL_CONFIRMATION_STATUSES = {"Pending", "Text Message Sent", "Customer Confirmed"}
@@ -1388,45 +1389,80 @@ def update_school_admin_draft_invoice_data(invoice=None, payload=None):
 	if not invoice:
 		frappe.throw(_("Invoice is required."))
 	payload = _get_payload(payload)
-	doc = frappe.get_doc("Sales Invoice", invoice)
-	if cint(doc.docstatus) != 0:
-		frappe.throw(_("Only draft invoices can be edited."))
-	is_manual_invoice = cint(doc.get("qas_is_manual_invoice")) or (doc.get("source_type") or "").strip().lower() == "manual"
-
-	for fieldname in ["customer", "due_date", "remarks"]:
-		if fieldname in payload:
-			doc.set(fieldname, payload.get(fieldname))
-	for fieldname in [
-		"parent",
-		"student",
-		"primary_student",
-		"enrollment",
-		"course",
-		"term",
-		"qas_invoice_type",
-		"source_doctype",
-		"source_document",
-		"billing_note",
-		"source_inquiry",
-		"source_type",
-	]:
-		if fieldname in payload:
-			_set_if_field(doc, fieldname, payload.get(fieldname))
-	if "apply_store_credit_on_submit" in payload and is_manual_invoice:
-		_set_if_field(
-			doc,
-			"qas_apply_store_credit_on_submit",
-			cint(payload.get("apply_store_credit_on_submit")),
+	savepoint = "school_admin_update_draft_invoice"
+	frappe.db.savepoint(savepoint)
+	try:
+		frappe.db.sql(
+			"select name from `tabSales Invoice` where name = %s for update",
+			(invoice,),
 		)
-	_apply_invoice_payment_payload(doc, payload)
-	apply_invoice_payment_snapshot(doc)
-	if "items" in payload:
-		_apply_invoice_items(doc, payload.get("items") or [])
-	_sync_invoice_student_summary(doc)
-	_run_school_admin_invoice_mutation(lambda: doc.save(ignore_permissions=True))
-	_add_comment("Sales Invoice", doc.name, "Draft invoice updated by School Admin.")
-	frappe.db.commit()
-	return _build_invoice_payload(doc)
+		doc = frappe.get_doc("Sales Invoice", invoice)
+		if cint(doc.docstatus) != 0:
+			frappe.throw(_("Only draft invoices can be edited."))
+		previous_total = get_invoice_total_amount(doc)
+		fallback_accounts = _invoice_item_financial_values(doc, "income_account")
+		fallback_cost_centers = _invoice_item_financial_values(doc, "cost_center")
+		is_manual_invoice = cint(doc.get("qas_is_manual_invoice")) or (doc.get("source_type") or "").strip().lower() == "manual"
+
+		for fieldname in ["customer", "due_date", "remarks"]:
+			if fieldname in payload:
+				doc.set(fieldname, payload.get(fieldname))
+		for fieldname in [
+			"parent",
+			"student",
+			"primary_student",
+			"enrollment",
+			"course",
+			"term",
+			"qas_invoice_type",
+			"source_doctype",
+			"source_document",
+			"billing_note",
+			"source_inquiry",
+			"source_type",
+		]:
+			if fieldname in payload:
+				_set_if_field(doc, fieldname, payload.get(fieldname))
+		if "apply_store_credit_on_submit" in payload and is_manual_invoice:
+			_set_if_field(
+				doc,
+				"qas_apply_store_credit_on_submit",
+				cint(payload.get("apply_store_credit_on_submit")),
+			)
+		_apply_invoice_payment_payload(doc, payload)
+		apply_invoice_payment_snapshot(doc)
+		if "items" in payload:
+			_apply_invoice_items(doc, payload.get("items") or [])
+		if "adjustments" in payload:
+			_apply_invoice_adjustments(
+				doc,
+				payload.get("adjustments") or [],
+				fallback_accounts=fallback_accounts,
+				fallback_cost_centers=fallback_cost_centers,
+			)
+		_sync_invoice_student_summary(doc)
+		doc.calculate_taxes_and_totals()
+		if flt(doc.get("grand_total")) < 0:
+			frappe.throw(_("Invoice total cannot be negative."))
+		_run_school_admin_invoice_mutation(lambda: doc.save(ignore_permissions=True))
+		new_total = get_invoice_total_amount(doc)
+		_add_comment(
+			"Sales Invoice",
+			doc.name,
+			_(
+				"Draft invoice updated by School Admin: total {0} → {1}; {2} item(s); {3} adjustment(s)."
+			).format(
+				flt(previous_total),
+				flt(new_total),
+				len(doc.get("items") or []),
+				len(_invoice_adjustment_rows(doc)),
+			),
+		)
+		frappe.db.commit()
+		return _build_invoice_payload(doc)
+	except Exception:
+		frappe.db.rollback(save_point=savepoint)
+		raise
 
 
 def delete_school_admin_draft_invoice_data(invoice=None):
@@ -5629,6 +5665,8 @@ def _build_invoice_payload(doc):
 	payload["docstatus"] = cint(doc.docstatus)
 	payload["status_label"] = _invoice_status_label(doc)
 	payload["items"] = [_child_payload(row) for row in doc.get("items", [])]
+	payload["adjustments"] = [_invoice_adjustment_payload(row) for row in _invoice_adjustment_rows(doc)]
+	payload.update(_invoice_edit_totals(doc))
 	payload["comments"] = _get_comments("Sales Invoice", doc.name)
 	payload.update(_invoice_credit_payload(doc))
 	payload["notifications"] = get_invoice_notification_summary(doc.name)
@@ -5683,15 +5721,28 @@ def _apply_invoice_items(invoice, items):
 			frappe.throw(_("Invoice item code is required."))
 		if item_code == MANUAL_INVOICE_ITEM:
 			item_code = _ensure_school_admin_invoice_item(MANUAL_INVOICE_ITEM)
+		description = (row.get("description") or "").strip()
+		if not description:
+			frappe.throw(_("Invoice item description is required."))
+		qty = flt(row.get("qty"))
+		rate = flt(row.get("rate"))
+		if qty <= 0:
+			frappe.throw(_("Invoice item unit must be greater than zero."))
+		if rate < 0:
+			frappe.throw(_("Invoice item unit price cannot be negative. Use an Adjustment for deductions."))
+		item_values = {
+			"item_code": item_code,
+			"item_name": row.get("item_name") or item_code,
+			"description": description,
+			"qty": qty,
+			"rate": rate,
+		}
+		for fieldname in ("income_account", "cost_center", "warehouse", "uom", "conversion_factor"):
+			if row.get(fieldname) not in (None, ""):
+				item_values[fieldname] = row.get(fieldname)
 		item = invoice.append(
 			"items",
-			{
-				"item_code": item_code,
-				"item_name": row.get("item_name") or item_code,
-				"description": row.get("description") or row.get("item_name") or item_code,
-				"qty": flt(row.get("qty") or 1),
-				"rate": flt(row.get("rate") or 0),
-			},
+			item_values,
 		)
 		student = row.get("student")
 		_set_if_field(item, "qas_line_type", row.get("qas_line_type") or row.get("line_type") or "Other")
@@ -5703,6 +5754,114 @@ def _apply_invoice_items(invoice, items):
 		_set_if_field(item, "term", row.get("term"))
 		_set_if_field(item, "course_session", row.get("course_session"))
 		_set_if_field(item, "session_count", row.get("session_count"))
+
+
+def _apply_invoice_adjustments(invoice, adjustments, *, fallback_accounts=None, fallback_cost_centers=None):
+	existing_rows = _invoice_adjustment_rows(invoice)
+	for row in existing_rows:
+		invoice.remove(row)
+	if not adjustments:
+		return
+	if not _has_field("Sales Taxes and Charges", INVOICE_ADJUSTMENT_FIELD):
+		frappe.throw(_("Invoice adjustments are not available until the latest site migration has completed."))
+
+	account_head = _resolve_invoice_adjustment_account(
+		invoice,
+		existing_rows=existing_rows,
+		fallback_accounts=fallback_accounts,
+	)
+	cost_center = _resolve_invoice_adjustment_cost_center(
+		invoice,
+		existing_rows=existing_rows,
+		fallback_cost_centers=fallback_cost_centers,
+	)
+
+	for row in adjustments:
+		description = (row.get("description") or "").strip()
+		amount = flt(row.get("amount"))
+		if not description:
+			frappe.throw(_("Adjustment description is required."))
+		if not amount:
+			frappe.throw(_("Adjustment amount cannot be zero."))
+		values = {
+			"charge_type": "Actual",
+			"account_head": account_head,
+			"description": description,
+			"tax_amount": amount,
+			"included_in_print_rate": 0,
+		}
+		if cost_center:
+			values["cost_center"] = cost_center
+		adjustment = invoice.append("taxes", values)
+		_set_if_field(adjustment, INVOICE_ADJUSTMENT_FIELD, 1)
+
+
+def _invoice_adjustment_rows(invoice):
+	return [
+		row
+		for row in (invoice.get("taxes") or [])
+		if cint(row.get(INVOICE_ADJUSTMENT_FIELD) or 0)
+	]
+
+
+def _invoice_adjustment_payload(row):
+	return {
+		"name": row.get("name"),
+		"description": row.get("description") or "Adjustment",
+		"amount": flt(row.get("tax_amount")),
+	}
+
+
+def _invoice_edit_totals(invoice):
+	item_subtotal = sum(flt(row.get("amount")) for row in (invoice.get("items") or []))
+	adjustment_total = sum(flt(row.get("tax_amount")) for row in _invoice_adjustment_rows(invoice))
+	total_taxes = flt(invoice.get("total_taxes_and_charges"))
+	return {
+		"item_subtotal": item_subtotal,
+		"adjustment_total": adjustment_total,
+		"other_charge_total": total_taxes - adjustment_total,
+	}
+
+
+def _invoice_item_financial_values(invoice, fieldname):
+	return {
+		str(row.get(fieldname)).strip()
+		for row in (invoice.get("items") or [])
+		if row.get(fieldname)
+	}
+
+
+def _resolve_invoice_adjustment_account(invoice, *, existing_rows=None, fallback_accounts=None):
+	existing_accounts = {
+		str(row.get("account_head")).strip()
+		for row in (existing_rows or [])
+		if row.get("account_head")
+	}
+	if len(existing_accounts) == 1:
+		return next(iter(existing_accounts))
+
+	item_accounts = _invoice_item_financial_values(invoice, "income_account")
+	item_accounts.update(fallback_accounts or set())
+	if len(item_accounts) == 1:
+		return next(iter(item_accounts))
+	if len(item_accounts) > 1:
+		frappe.throw(_("Invoice items use multiple income accounts. Choose one account before adding an Adjustment."))
+
+	default_account = frappe.db.get_value("Company", invoice.get("company"), "default_income_account")
+	if default_account:
+		return default_account
+	frappe.throw(_("Could not resolve an income account for the Adjustment."))
+
+
+def _resolve_invoice_adjustment_cost_center(invoice, *, existing_rows=None, fallback_cost_centers=None):
+	for row in existing_rows or []:
+		if row.get("cost_center"):
+			return row.get("cost_center")
+	item_cost_centers = _invoice_item_financial_values(invoice, "cost_center")
+	item_cost_centers.update(fallback_cost_centers or set())
+	if len(item_cost_centers) == 1:
+		return next(iter(item_cost_centers))
+	return frappe.db.get_value("Company", invoice.get("company"), "cost_center")
 
 
 def _sync_invoice_student_summary(invoice):
