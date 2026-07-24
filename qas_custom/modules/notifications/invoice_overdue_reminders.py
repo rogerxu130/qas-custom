@@ -16,7 +16,6 @@ from qas_custom.modules.notifications.commands import (
 	_invoice_email_portal_action,
 	_invoice_outstanding_amount,
 	_invoice_pdf_attachment,
-	_invoice_portal_links_enabled,
 	_invoice_recipient,
 	_mark_notification_failed,
 	_mark_notification_queued,
@@ -217,7 +216,7 @@ def overdue_reminder_email_message(invoice_doc, *, days_overdue, outstanding_amo
 		invoice_doc,
 		payable_amount=outstanding_amount,
 		invoice_link=parent_portal_invoice_link(invoice_doc.name),
-		include_portal_link=_invoice_portal_links_enabled(),
+		include_portal_link=True,
 	)
 	settings = get_invoice_settings()
 	context.update(

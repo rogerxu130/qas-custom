@@ -67,6 +67,7 @@ from qas_custom.modules.makeup.pricing import (
 	preview_makeup_target_pricing,
 )
 from qas_custom.modules.notifications.commands import enqueue_session_staff_notification
+from qas_custom.modules.notifications.makeup_parent_notifications import queue_makeup_booking_confirmation
 from qas_custom.modules.notifications import (
 	enqueue_parent_invoice_cancellation_notification,
 	enqueue_parent_invoice_paid_receipt,
@@ -3889,6 +3890,7 @@ def redeem_school_admin_voucher_data(parent=None, voucher_id=None, session_id=No
                 student=student,
                 allow_ordinary_cross_course=True,
                 notify_staff=False,
+                notify_parent=False,
             )
             invoice = _ensure_makeup_price_difference_invoice(
                 parent_doc=parent_doc,
@@ -3908,6 +3910,12 @@ def redeem_school_admin_voucher_data(parent=None, voucher_id=None, session_id=No
                 source_document=voucher.name,
             )
             _audit_school_admin_redeem_result(result, reason)
+            if result.get("booking_created"):
+                result["parent_notification"] = queue_makeup_booking_confirmation(
+                    voucher.name,
+                    session_id,
+                    student,
+                )
             frappe.db.commit()
             return result
         except Exception:

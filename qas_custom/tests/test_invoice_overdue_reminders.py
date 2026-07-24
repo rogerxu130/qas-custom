@@ -200,7 +200,6 @@ class TestOverdueReminderContent(TestCase):
 	@patch("qas_custom.modules.notifications.invoice_overdue_reminders._invoice_email_portal_action", return_value="<a>View invoice</a>")
 	@patch("qas_custom.modules.notifications.invoice_overdue_reminders._invoice_email_bank_details", return_value="<div>Bank details</div>")
 	@patch("qas_custom.modules.notifications.invoice_overdue_reminders._invoice_email_greeting", return_value="Hi Parent,")
-	@patch("qas_custom.modules.notifications.invoice_overdue_reminders._invoice_portal_links_enabled", return_value=True)
 	@patch(
 		"qas_custom.modules.notifications.invoice_overdue_reminders.parent_portal_invoice_link",
 		return_value="https://portal.example.com/invoices",
@@ -212,7 +211,6 @@ class TestOverdueReminderContent(TestCase):
 		mock_context,
 		mock_settings,
 		_mock_link,
-		_mock_links,
 		_mock_greeting,
 		_mock_bank,
 		_mock_portal,
@@ -237,6 +235,7 @@ class TestOverdueReminderContent(TestCase):
 		self.assertIn("Bank details", message)
 		self.assertIn("View invoice", message)
 		self.assertIn("already paid", message)
+		self.assertTrue(mock_context.call_args.kwargs["include_portal_link"])
 		self.assertEqual(overdue_reminder_subject(invoice()), "Payment reminder: Invoice ACC-SINV-2026-00001 is overdue")
 
 

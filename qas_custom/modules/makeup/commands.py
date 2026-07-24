@@ -8,6 +8,10 @@ from frappe.utils import add_days, cint, get_time, getdate, now_datetime, today
 from qas_custom.modules.course_schedule.queries import get_teacher_name_map, get_weekly_timeslot_map
 from qas_custom.modules.attendance.commands import update_attendance_status
 from qas_custom.modules.notifications.commands import enqueue_session_staff_notification
+from qas_custom.modules.notifications.makeup_parent_notifications import (
+	queue_makeup_booking_confirmation,
+	queue_makeup_voucher_issued_email,
+)
 from qas_custom.services.class_attendance import ATTENDANCE_DOCTYPE, DEFAULT_ATTENDANCE_STATUS, create_attendance_entry
 from qas_custom.services.display_labels import get_makeup_voucher_label, sync_makeup_voucher_label
 
@@ -171,6 +175,7 @@ def redeem_parent_voucher_core(
 	*,
 	allow_ordinary_cross_course: bool = False,
 	notify_staff: bool = True,
+	notify_parent: bool = True,
 ):
 	if not session_id:
 		frappe.throw("Please select a makeup session.")
@@ -198,6 +203,13 @@ def redeem_parent_voucher_core(
 			"attendance_entry": attendance_entry,
 			"session": _build_redeem_session_payload(session_id),
 			"notification": notification,
+			"parent_notification": {
+				"queued": False,
+				"skipped": True,
+				"duplicate": True,
+				"reason": "The makeup booking already exists.",
+			},
+			"booking_created": False,
 		}
 
 	_validate_voucher_available_for_redeem(voucher)
@@ -229,12 +241,23 @@ def redeem_parent_voucher_core(
 		student=selected_student,
 		voucher=voucher.name,
 	)
+	parent_notification = (
+		queue_makeup_booking_confirmation(voucher.name, session_id, selected_student)
+		if notify_parent
+		else {
+			"queued": False,
+			"skipped": True,
+			"reason": "deferred_until_makeup_transaction_completes",
+		}
+	)
 
 	return {
 		"voucher": _build_makeup_voucher_payload(voucher),
 		"attendance_entry": attendance_entry,
 		"session": _build_redeem_session_payload(session_id),
 		"notification": notification,
+		"parent_notification": parent_notification,
+		"booking_created": True,
 	}
 
 
@@ -836,6 +859,7 @@ def _ensure_leave_makeup_voucher(doc):
 		voucher.expiry_date = add_days(today(), DEFAULT_VOUCHER_EXPIRY_DAYS)
 	voucher.insert(ignore_permissions=True)
 	sync_makeup_voucher_label(voucher.name)
+	queue_makeup_voucher_issued_email(voucher.name)
 	return frappe.get_doc("Makeup Voucher", voucher.name)
 
 

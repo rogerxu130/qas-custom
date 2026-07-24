@@ -21,6 +21,7 @@ class TestParentInvoiceCancellationNotification(TestCase):
 			"school_name": "Queensland Art School",
 			"recipient_name": "Taylor",
 			"total": 450,
+			"invoice_link": "https://portal.example.com/invoices?invoice=SINV-0001",
 			"items": [
 				{
 					"student": "Alex Student",
@@ -41,7 +42,10 @@ class TestParentInvoiceCancellationNotification(TestCase):
 		self.assertIn("Term 3 Creative Art", message)
 		self.assertIn("Family withdrew", message)
 		self.assertIn("cancelled copy of the invoice is attached", message)
+		self.assertIn("View Invoice in Parent Portal", message)
+		self.assertIn("https://portal.example.com/invoices?invoice=SINV-0001", message)
 		self.assertNotIn("arrange payment", message.lower())
+		self.assertTrue(mock_context.call_args.kwargs["include_portal_link"])
 
 	@patch("qas_custom.modules.notifications.commands._school_identity_pdf_html", return_value="")
 	def test_cancelled_pdf_html_excludes_payable_invoice_fields(self, _mock_identity):

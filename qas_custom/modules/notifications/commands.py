@@ -1665,7 +1665,7 @@ def _invoice_email_message(invoice_doc, event, store_credit_applied, payable_amo
 		store_credit_applied=store_credit_applied,
 		payable_amount=payable_amount,
 		payment_link=payment_link,
-		include_portal_link=_invoice_portal_links_enabled(),
+		include_portal_link=True,
 	)
 	greeting = _invoice_email_greeting(context)
 	intro = (
@@ -1756,7 +1756,7 @@ def _invoice_email_message(invoice_doc, event, store_credit_applied, payable_amo
 
 
 def _invoice_cancellation_email_message(invoice_doc, reason=None):
-	context = build_parent_invoice_context(invoice_doc, include_portal_link=False)
+	context = build_parent_invoice_context(invoice_doc, include_portal_link=True)
 	rows = "\n".join(_invoice_email_item_row(item) for item in _invoice_parent_lines(context))
 	if not rows:
 		rows = """<tr><td colspan="3" style="padding:12px;color:#64748b;">No invoice line details are available.</td></tr>"""
@@ -1799,6 +1799,7 @@ def _invoice_cancellation_email_message(invoice_doc, reason=None):
 
 						{reason_html}
 						<p style="margin:0 0 18px;font-size:15px;line-height:1.5;color:#334155;">A cancelled copy of the invoice is attached for your records.</p>
+						{portal_action}
 						<p style="margin:0;font-size:15px;line-height:1.5;color:#475569;">If you have any questions, please contact {school_name}.</p>
 					</div>
 				</div>
@@ -1812,6 +1813,7 @@ def _invoice_cancellation_email_message(invoice_doc, reason=None):
 		total=flt(context.get("total")),
 		rows=rows,
 		reason_html=reason_html,
+		portal_action=_invoice_email_portal_action(context),
 	)
 
 
@@ -1820,7 +1822,7 @@ def _invoice_email_portal_action(context):
 	if not invoice_link:
 		return ""
 	return '''<p style="margin:0 0 22px;">
-		<a href="{0}" style="display:inline-block;background:#e85f47;color:#ffffff;text-decoration:none;border-radius:10px;padding:12px 18px;font-weight:700;">View invoice</a>
+		<a href="{0}" style="display:inline-block;background:#e85f47;color:#ffffff;text-decoration:none;border-radius:10px;padding:12px 18px;font-weight:700;">View Invoice in Parent Portal</a>
 	</p>'''.format(escape_html(invoice_link))
 
 
@@ -1965,7 +1967,7 @@ def _receipt_email_message(invoice_doc, amounts, payment_context):
 		store_credit_applied=amounts["store_credit_applied"],
 		payable_amount=0,
 		payment_link=parent_portal_invoice_link(invoice_doc.name),
-		include_portal_link=_invoice_portal_links_enabled(),
+		include_portal_link=True,
 	)
 	greeting = _invoice_email_greeting(context)
 	rows = "\n".join(_invoice_email_item_row(item) for item in _invoice_parent_lines(context))
@@ -2006,6 +2008,7 @@ def _receipt_email_message(invoice_doc, amounts, payment_context):
 							<tbody>{rows}</tbody>
 						</table>
 
+						{portal_action}
 						<p style="margin:0;font-size:13px;line-height:1.5;color:#64748b;">Receipt reference: {receipt_reference}</p>
 					</div>
 				</div>
@@ -2023,6 +2026,7 @@ def _receipt_email_message(invoice_doc, amounts, payment_context):
 		cash=flt(payment_context.get("payment_amount")),
 		remaining=flt(payment_context.get("remaining_amount")),
 		rows=rows,
+		portal_action=_invoice_email_portal_action(context),
 		receipt_reference=escape_html(payment_context.get("receipt_reference") or context["invoice"]),
 	)
 
