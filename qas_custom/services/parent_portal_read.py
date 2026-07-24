@@ -6,7 +6,11 @@ import frappe
 from frappe.utils import getdate, get_time, now_datetime, today
 
 from qas_custom.modules.billing.invoice_settings import get_invoice_payment_context
-from qas_custom.modules.billing.presentation import build_parent_invoice_item
+from qas_custom.modules.billing.presentation import (
+    build_parent_invoice_adjustment,
+    build_parent_invoice_item,
+    is_parent_invoice_adjustment,
+)
 from qas_custom.modules.billing.store_credit import (
     get_invoice_payable_amount,
     get_invoice_store_credit_applied,
@@ -320,6 +324,11 @@ def get_parent_invoices_data():
         store_credit_applied = float(get_invoice_store_credit_applied(doc.name) or 0)
         payable_amount = float(get_invoice_payable_amount(doc) or 0)
         payment_status = "Paid" if payable_amount <= 0 else (doc.status or "Unpaid")
+        adjustments = [
+            build_parent_invoice_adjustment(row)
+            for row in doc.get("taxes", [])
+            if is_parent_invoice_adjustment(row)
+        ]
         payload.append(
             {
                 "invoice_id": doc.name,
@@ -336,6 +345,7 @@ def get_parent_invoices_data():
                 "status": doc.status,
                 **get_invoice_payment_context(doc),
                 "items": [build_parent_invoice_item(item) for item in doc.items],
+                "adjustments": adjustments,
             }
         )
 

@@ -101,9 +101,22 @@ class TestSchoolAdminMakeupCancellation(TestCase):
 
 	@patch("qas_custom.services.school_admin._require_school_admin")
 	@patch("qas_custom.services.school_admin._get_school_admin_voucher_family_context")
+	@patch("qas_custom.services.school_admin._build_redeem_session_payload", return_value={"course": "Anime"})
+	@patch("qas_custom.services.school_admin.get_makeup_difference_invoice", return_value=None)
 	@patch("qas_custom.services.school_admin.cancel_makeup_booking_core", side_effect=RuntimeError("save failed"))
-	def test_service_rolls_back_when_core_fails(self, _mock_core, mock_context, _mock_require):
-		mock_context.return_value = (FakeDoc(name="PAR-001"), [], FakeDoc(name="MV-001"))
+	def test_service_rolls_back_when_core_fails(
+		self,
+		_mock_core,
+		_mock_invoice,
+		_mock_session,
+		mock_context,
+		_mock_require,
+	):
+		mock_context.return_value = (
+			FakeDoc(name="PAR-001"),
+			[],
+			FakeDoc(name="MV-001", used_on_session="CS-001", student="STU-001"),
+		)
 		fake_db = SimpleNamespace(commit=Mock(), rollback=Mock())
 		with patch("qas_custom.services.school_admin.frappe.db", fake_db):
 			with self.assertRaisesRegex(RuntimeError, "save failed"):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 import hashlib
 import json
@@ -51,11 +52,22 @@ from qas_custom.modules.billing.commands import (
 )
 from qas_custom.modules.billing.presentation import build_course_invoice_description, invoice_item_schedule
 from qas_custom.modules.makeup.commands import (
+    _build_makeup_voucher_payload,
+    _build_redeem_session_payload,
     cancel_makeup_booking_core,
     get_parent_redeemable_sessions_core,
     redeem_parent_voucher_core,
     submit_parent_leave_request_core,
 )
+from qas_custom.modules.makeup.pricing import (
+	MAKEUP_PRICE_DIFFERENCE_SOURCE_TYPE,
+	classify_difference_invoice,
+	get_makeup_difference_invoice,
+	get_makeup_target_pricing,
+	preview_makeup_target_pricing,
+)
+from qas_custom.modules.notifications.commands import enqueue_session_staff_notification
+from qas_custom.modules.notifications.makeup_parent_notifications import queue_makeup_booking_confirmation
 from qas_custom.modules.notifications import (
 	enqueue_parent_invoice_cancellation_notification,
 	enqueue_parent_invoice_paid_receipt,
@@ -103,6 +115,7 @@ ACTIVE_TIMESLOT_STATUSES = ["Active"]
 COURSE_LABEL_FIELDS = ["name", "course_name", "course_name_zh"]
 DEFAULT_COURSE_INVOICE_ITEM = "Tuition Fee"
 MANUAL_INVOICE_ITEM = "Other"
+INVOICE_ADJUSTMENT_FIELD = "qas_is_invoice_adjustment"
 BULK_INVOICE_SUBMIT_JOB_TTL_SECONDS = 86400
 NON_ATTENDING_ATTENDANCE_STATUSES = {"Cancelled", "Leave"}
 TRIAL_CONFIRMATION_STATUSES = {"Pending", "Text Message Sent", "Customer Confirmed"}
@@ -669,7 +682,9 @@ def get_school_admin_courses_data(query=None, status=None, limit=120):
 		limit=_limit(limit, default=120, max_value=500),
 	)
 	items = [_normalize_row_payload("Course", row) for row in rows]
+	accepted_map = _get_course_makeup_acceptance_map([item.get("name") for item in items])
 	for item in items:
+		item["accepted_makeup_courses"] = accepted_map.get(item.get("name"), [])
 		_attach_course_label(item, item.get("name"), item)
 	return {"items": items}
 
@@ -716,6 +731,7 @@ def create_school_admin_course_data(payload=None):
 	payload = _get_payload(payload)
 	doc = frappe.new_doc("Course")
 	_apply_master_payload(doc, payload, COURSE_EDIT_FIELDS)
+	_apply_course_makeup_acceptance(doc, payload)
 	if not doc.get("course_name") and payload.get("name"):
 		_set_if_field(doc, "course_name", payload.get("name"))
 	if _has_field("Course", "status") and not doc.get("status"):
@@ -736,6 +752,7 @@ def update_school_admin_course_data(course=None, payload=None):
 	doc = frappe.get_doc("Course", course)
 	payload = _get_payload(payload)
 	_apply_master_payload(doc, payload, COURSE_EDIT_FIELDS)
+	_apply_course_makeup_acceptance(doc, payload)
 	_apply_course_pricing_defaults(doc)
 	_apply_course_invoice_item_default(doc)
 	_validate_required(doc, ["course_name"])
@@ -747,6 +764,8 @@ def update_school_admin_course_data(course=None, payload=None):
 
 def _apply_course_pricing_defaults(doc):
 	if not _has_field("Course", "term_session_fee"):
+		return
+	if cint(doc.get("is_makeup_course")):
 		return
 	full_term_fee_value = doc.get("full_term_fee")
 	total_sessions_value = doc.get("total_session_per_term")
@@ -762,8 +781,49 @@ def _apply_course_pricing_defaults(doc):
 def _apply_course_invoice_item_default(doc):
 	if not _has_field("Course", "invoice_item"):
 		return
+	if cint(doc.get("is_makeup_course")) and not doc.get("invoice_item"):
+		return
 	item_code = str(doc.get("invoice_item") or DEFAULT_COURSE_INVOICE_ITEM).strip()
 	_set_if_field(doc, "invoice_item", _ensure_school_admin_invoice_item(item_code))
+
+
+def _apply_course_makeup_acceptance(doc, payload):
+	if "accepted_makeup_courses" not in payload or not _has_field("Course", "accepted_makeup_course"):
+		return
+	accepted = []
+	seen = set()
+	for value in payload.get("accepted_makeup_courses") or []:
+		course = value.get("course") if isinstance(value, dict) else value
+		course = str(course or "").strip()
+		if not course or course in seen:
+			continue
+		if not frappe.db.exists("Course", course):
+			frappe.throw(_("Accepted makeup course does not exist: {0}").format(course))
+		seen.add(course)
+		accepted.append({"course": course})
+	doc.set("accepted_makeup_course", accepted)
+
+
+def _get_course_makeup_acceptance_map(courses):
+	courses = sorted({course for course in courses if course})
+	if not courses:
+		return {}
+	rows = frappe.get_all(
+		"Course Accepted Makeup Course",
+		filters={
+			"parent": ["in", courses],
+			"parenttype": "Course",
+			"parentfield": "accepted_makeup_course",
+		},
+		fields=["parent", "course", "idx"],
+		order_by="parent asc, idx asc",
+		limit_page_length=0,
+	)
+	accepted = defaultdict(list)
+	for row in rows:
+		if row.get("parent") and row.get("course"):
+			accepted[row.get("parent")].append(row.get("course"))
+	return dict(accepted)
 
 
 def _ensure_school_admin_invoice_item(item_code):
@@ -1310,7 +1370,7 @@ def _create_school_admin_manual_invoice_doc(payload):
 	_set_if_field(invoice, "source_document", payload.get("source_document"))
 	_set_if_field(invoice, "billing_note", payload.get("billing_note"))
 	_set_if_field(invoice, "source_type", payload.get("source_type") or "Manual")
-	_set_if_field(invoice, "qas_is_manual_invoice", 1)
+	_set_if_field(invoice, "qas_is_manual_invoice", cint(payload.get("qas_is_manual_invoice", 1)))
 	_set_if_field(
 		invoice,
 		"qas_apply_store_credit_on_submit",
@@ -1330,45 +1390,80 @@ def update_school_admin_draft_invoice_data(invoice=None, payload=None):
 	if not invoice:
 		frappe.throw(_("Invoice is required."))
 	payload = _get_payload(payload)
-	doc = frappe.get_doc("Sales Invoice", invoice)
-	if cint(doc.docstatus) != 0:
-		frappe.throw(_("Only draft invoices can be edited."))
-	is_manual_invoice = cint(doc.get("qas_is_manual_invoice")) or (doc.get("source_type") or "").strip().lower() == "manual"
-
-	for fieldname in ["customer", "due_date", "remarks"]:
-		if fieldname in payload:
-			doc.set(fieldname, payload.get(fieldname))
-	for fieldname in [
-		"parent",
-		"student",
-		"primary_student",
-		"enrollment",
-		"course",
-		"term",
-		"qas_invoice_type",
-		"source_doctype",
-		"source_document",
-		"billing_note",
-		"source_inquiry",
-		"source_type",
-	]:
-		if fieldname in payload:
-			_set_if_field(doc, fieldname, payload.get(fieldname))
-	if "apply_store_credit_on_submit" in payload and is_manual_invoice:
-		_set_if_field(
-			doc,
-			"qas_apply_store_credit_on_submit",
-			cint(payload.get("apply_store_credit_on_submit")),
+	savepoint = "school_admin_update_draft_invoice"
+	frappe.db.savepoint(savepoint)
+	try:
+		frappe.db.sql(
+			"select name from `tabSales Invoice` where name = %s for update",
+			(invoice,),
 		)
-	_apply_invoice_payment_payload(doc, payload)
-	apply_invoice_payment_snapshot(doc)
-	if "items" in payload:
-		_apply_invoice_items(doc, payload.get("items") or [])
-	_sync_invoice_student_summary(doc)
-	_run_school_admin_invoice_mutation(lambda: doc.save(ignore_permissions=True))
-	_add_comment("Sales Invoice", doc.name, "Draft invoice updated by School Admin.")
-	frappe.db.commit()
-	return _build_invoice_payload(doc)
+		doc = frappe.get_doc("Sales Invoice", invoice)
+		if cint(doc.docstatus) != 0:
+			frappe.throw(_("Only draft invoices can be edited."))
+		previous_total = get_invoice_total_amount(doc)
+		fallback_accounts = _invoice_item_financial_values(doc, "income_account")
+		fallback_cost_centers = _invoice_item_financial_values(doc, "cost_center")
+		is_manual_invoice = cint(doc.get("qas_is_manual_invoice")) or (doc.get("source_type") or "").strip().lower() == "manual"
+
+		for fieldname in ["customer", "due_date", "remarks"]:
+			if fieldname in payload:
+				doc.set(fieldname, payload.get(fieldname))
+		for fieldname in [
+			"parent",
+			"student",
+			"primary_student",
+			"enrollment",
+			"course",
+			"term",
+			"qas_invoice_type",
+			"source_doctype",
+			"source_document",
+			"billing_note",
+			"source_inquiry",
+			"source_type",
+		]:
+			if fieldname in payload:
+				_set_if_field(doc, fieldname, payload.get(fieldname))
+		if "apply_store_credit_on_submit" in payload and is_manual_invoice:
+			_set_if_field(
+				doc,
+				"qas_apply_store_credit_on_submit",
+				cint(payload.get("apply_store_credit_on_submit")),
+			)
+		_apply_invoice_payment_payload(doc, payload)
+		apply_invoice_payment_snapshot(doc)
+		if "items" in payload:
+			_apply_invoice_items(doc, payload.get("items") or [])
+		if "adjustments" in payload:
+			_apply_invoice_adjustments(
+				doc,
+				payload.get("adjustments") or [],
+				fallback_accounts=fallback_accounts,
+				fallback_cost_centers=fallback_cost_centers,
+			)
+		_sync_invoice_student_summary(doc)
+		doc.calculate_taxes_and_totals()
+		if flt(doc.get("grand_total")) < 0:
+			frappe.throw(_("Invoice total cannot be negative."))
+		_run_school_admin_invoice_mutation(lambda: doc.save(ignore_permissions=True))
+		new_total = get_invoice_total_amount(doc)
+		_add_comment(
+			"Sales Invoice",
+			doc.name,
+			_(
+				"Draft invoice updated by School Admin: total {0} → {1}; {2} item(s); {3} adjustment(s)."
+			).format(
+				flt(previous_total),
+				flt(new_total),
+				len(doc.get("items") or []),
+				len(_invoice_adjustment_rows(doc)),
+			),
+		)
+		frappe.db.commit()
+		return _build_invoice_payload(doc)
+	except Exception:
+		frappe.db.rollback(save_point=savepoint)
+		raise
 
 
 def delete_school_admin_draft_invoice_data(invoice=None):
@@ -3695,7 +3790,11 @@ def get_school_admin_vouchers_data(student=None, status=None, limit=120):
 		filters["status"] = status
 	fields = _safe_fields(
 		"Makeup Voucher",
-		["name", "student", "course", "original_session", "leave_request", "status", "issue_date", "expiry_date", "used_on_session", "used_date", "used_by_student", "voucher_label"],
+		[
+			"name", "student", "course", "original_session", "leave_request", "status",
+			"issue_date", "expiry_date", "used_on_session", "used_date", "used_by_student",
+			"voucher_label", "price_difference_invoice",
+		],
 	)
 	rows = frappe.get_all(
 		"Makeup Voucher",
@@ -3704,7 +3803,9 @@ def get_school_admin_vouchers_data(student=None, status=None, limit=120):
 		order_by="modified desc",
 		limit=_limit(limit, default=120, max_value=300),
 	)
-	return {"items": [_normalize_row_payload("Makeup Voucher", row) for row in rows]}
+	items = [_normalize_row_payload("Makeup Voucher", row) for row in rows]
+	_attach_makeup_difference_invoice_summaries(items)
+	return {"items": items}
 
 
 
@@ -3748,43 +3849,270 @@ def get_school_admin_redeemable_sessions_data(parent=None, voucher_id=None, stud
     parent_doc, students, voucher = _get_school_admin_voucher_family_context(parent=parent, voucher_id=voucher_id)
     if student:
         _assert_student_in_family(student, students)
-    return get_parent_redeemable_sessions_core(
+    result = get_parent_redeemable_sessions_core(
         parent=parent_doc,
         students=students,
         voucher_id=voucher.name,
         student=student,
+        allow_ordinary_cross_course=True,
     )
+    for session in result.get("available_sessions") or []:
+        try:
+            session["pricing"] = {
+                **preview_makeup_target_pricing(voucher.get("course"), session.get("course")),
+                "booking_allowed": True,
+            }
+        except ValueError as exc:
+            session["pricing"] = {
+                "booking_allowed": False,
+                "pricing_error": str(exc),
+            }
+    return result
 
 
 def redeem_school_admin_voucher_data(parent=None, voucher_id=None, session_id=None, student=None, reason=None):
     _require_school_admin()
+    if not session_id:
+        frappe.throw(_("Course session is required."))
     reason = _school_admin_required_reason(reason)
-    parent_doc, students, voucher = _get_school_admin_voucher_family_context(parent=parent, voucher_id=voucher_id)
-    _assert_student_in_family(student, students)
-    result = redeem_parent_voucher_core(
-        parent=parent_doc,
-        students=students,
-        voucher_id=voucher.name,
-        session_id=session_id,
-        student=student,
-    )
-    _audit_school_admin_redeem_result(result, reason)
-    frappe.db.commit()
-    return result
+    with _school_admin_makeup_lock(voucher_id):
+        parent_doc, students, voucher = _get_school_admin_voucher_family_context(parent=parent, voucher_id=voucher_id)
+        _assert_student_in_family(student, students)
+        session = _build_redeem_session_payload(session_id)
+        pricing = get_makeup_target_pricing(voucher.get("course"), session.get("course"))
+        savepoint = _school_admin_makeup_savepoint("redeem", voucher.name)
+        try:
+            result = redeem_parent_voucher_core(
+                parent=parent_doc,
+                students=students,
+                voucher_id=voucher.name,
+                session_id=session_id,
+                student=student,
+                allow_ordinary_cross_course=True,
+                notify_staff=False,
+                notify_parent=False,
+            )
+            invoice = _ensure_makeup_price_difference_invoice(
+                parent_doc=parent_doc,
+                voucher=frappe.get_doc("Makeup Voucher", voucher.name),
+                student=student,
+                session=result.get("session") or session,
+                pricing=pricing,
+                reason=reason,
+            )
+            result["pricing"] = pricing
+            result["price_difference_invoice"] = _makeup_invoice_summary(invoice)
+            result["notification"] = enqueue_session_staff_notification(
+                "makeup_booked",
+                course_session=session_id,
+                student=student,
+                source_doctype="Makeup Voucher",
+                source_document=voucher.name,
+            )
+            _audit_school_admin_redeem_result(result, reason)
+            if result.get("booking_created"):
+                result["parent_notification"] = queue_makeup_booking_confirmation(
+                    voucher.name,
+                    session_id,
+                    student,
+                )
+            frappe.db.commit()
+            return result
+        except Exception:
+            _rollback_school_admin_makeup_savepoint(savepoint)
+            raise
 
 
 def cancel_school_admin_makeup_booking_data(parent=None, voucher_id=None, reason=None, confirm_cancel=0):
     _require_school_admin()
-    _parent_doc, _students, voucher = _get_school_admin_voucher_family_context(parent=parent, voucher_id=voucher_id)
     reason = str(reason or "").strip()
-    try:
-        result = cancel_makeup_booking_core(voucher, confirm_cancel=confirm_cancel)
-        _audit_school_admin_makeup_cancellation_result(result, reason)
-        frappe.db.commit()
-        return result
-    except Exception:
-        frappe.db.rollback()
-        raise
+    with _school_admin_makeup_lock(voucher_id):
+        _parent_doc, _students, voucher = _get_school_admin_voucher_family_context(parent=parent, voucher_id=voucher_id)
+        difference_invoice = get_makeup_difference_invoice(voucher)
+        settlement = classify_difference_invoice(difference_invoice)
+        _validate_makeup_cancellation_settlement(settlement, difference_invoice)
+        original_session = voucher.get("used_on_session")
+        used_student = voucher.get("used_by_student") or voucher.get("student")
+        if not original_session:
+            frappe.throw(_("This used makeup voucher is missing its booked session."))
+        if not used_student:
+            frappe.throw(_("This used makeup voucher is missing its booked student."))
+        target_course = (_build_redeem_session_payload(original_session) or {}).get("course")
+        savepoint = _school_admin_makeup_savepoint("cancel", voucher.name)
+        try:
+            if settlement.get("action") == "delete_draft":
+                _delete_makeup_difference_draft(difference_invoice)
+            result = cancel_makeup_booking_core(voucher, confirm_cancel=confirm_cancel)
+            refreshed_voucher = frappe.get_doc("Makeup Voucher", voucher.name)
+            if settlement.get("upgrade_voucher_course") and target_course:
+                target = frappe.db.get_value("Course", target_course, ["name", "is_makeup_course"], as_dict=True)
+                if target and not cint(target.get("is_makeup_course")):
+                    refreshed_voucher.course = target_course
+                    result["voucher_course_upgraded"] = True
+            if frappe.db.has_column("Makeup Voucher", "price_difference_invoice"):
+                refreshed_voucher.price_difference_invoice = None
+            refreshed_voucher.flags.skip_makeup_attendance_sync = True
+            refreshed_voucher.save(ignore_permissions=True)
+            result["voucher"] = _build_school_admin_makeup_voucher_payload(refreshed_voucher)
+            result["price_difference_invoice"] = _makeup_invoice_summary(difference_invoice)
+            result["price_difference_settlement"] = settlement
+            result["notification"] = enqueue_session_staff_notification(
+                "makeup_cancelled",
+                course_session=original_session,
+                student=used_student,
+                source_doctype="Makeup Voucher",
+                source_document=voucher.name,
+            )
+            _audit_school_admin_makeup_cancellation_result(result, reason)
+            frappe.db.commit()
+            return result
+        except Exception:
+            _rollback_school_admin_makeup_savepoint(savepoint)
+            raise
+
+
+@contextmanager
+def _school_admin_makeup_lock(voucher_id):
+    cache = getattr(frappe, "cache", None)
+    if not cache or not hasattr(cache, "lock"):
+        yield
+        return
+    lock_name = "qas-school-admin-makeup:{0}".format(voucher_id or "missing")
+    with cache.lock(lock_name, timeout=60, blocking_timeout=10):
+        yield
+
+
+def _school_admin_makeup_savepoint(action, voucher_id):
+    savepoint = "school_admin_makeup_{0}_{1}".format(
+        action,
+        re.sub(r"[^a-zA-Z0-9_]", "_", str(voucher_id or "voucher")),
+    )
+    if hasattr(frappe.db, "savepoint"):
+        frappe.db.savepoint(savepoint)
+        return savepoint
+    return None
+
+
+def _rollback_school_admin_makeup_savepoint(savepoint):
+    if savepoint:
+        try:
+            frappe.db.rollback(save_point=savepoint)
+            return
+        except TypeError:
+            pass
+    frappe.db.rollback()
+
+
+def _ensure_makeup_price_difference_invoice(*, parent_doc, voucher, student, session, pricing, reason):
+    if not pricing.get("requires_difference_invoice"):
+        return None
+
+    existing = get_makeup_difference_invoice(voucher)
+    if existing:
+        settlement = classify_difference_invoice(existing)
+        if settlement.get("action") != "release_cancelled":
+            return frappe.get_doc("Sales Invoice", existing.get("name"))
+        if frappe.db.has_column("Makeup Voucher", "price_difference_invoice"):
+            voucher.price_difference_invoice = None
+
+    source_course = pricing.get("source_course")
+    target_course = pricing.get("target_course")
+    session_id = session.get("session_id")
+    student_name = get_student_parent_name(student) or student
+    description = _(
+        "{0} - Makeup price difference: {1} to {2}; session {3}."
+    ).format(
+        student_name,
+        source_course,
+        target_course,
+        get_course_session_snapshot_label(session_id) or session_id,
+    )
+    invoice = _create_school_admin_manual_invoice_doc(
+        {
+            "customer": get_invoice_customer(parent_doc.name),
+            "parent": parent_doc.name,
+            "student": student,
+            "course": target_course,
+            "qas_invoice_type": "Course",
+            "source_doctype": "Makeup Voucher",
+            "source_document": voucher.name,
+            "source_type": MAKEUP_PRICE_DIFFERENCE_SOURCE_TYPE,
+            "qas_is_manual_invoice": 0,
+            "apply_store_credit_on_submit": 1,
+            "billing_note": _("Draft makeup price-difference invoice. No parent email has been sent."),
+            "remarks": _("School Admin makeup booking reason: {0}").format(reason),
+            "items": [
+                {
+                    "item_code": get_invoice_item(target_course),
+                    "item_name": _("Makeup price difference"),
+                    "description": description,
+                    "qty": 1,
+                    "rate": pricing.get("price_difference"),
+                    "qas_line_type": "Course Fee",
+                    "student": student,
+                    "course": target_course,
+                    "course_session": get_course_session_snapshot_label(session_id) or session_id,
+                    "session_count": 1,
+                }
+            ],
+        }
+    )
+    if frappe.db.has_column("Makeup Voucher", "price_difference_invoice"):
+        voucher.price_difference_invoice = invoice.name
+        voucher.flags.skip_makeup_attendance_sync = True
+        voucher.save(ignore_permissions=True)
+    _add_comment(
+        "Sales Invoice",
+        invoice.name,
+        _("Draft created automatically for Makeup Voucher {0}. No parent email was sent.").format(voucher.name),
+    )
+    return invoice
+
+
+def _validate_makeup_cancellation_settlement(settlement, invoice):
+    action = settlement.get("action")
+    invoice_name = (invoice or {}).get("name") if hasattr(invoice, "get") else None
+    if action == "block_unpaid":
+        frappe.throw(
+            _(
+                "Cancel submitted unpaid difference Invoice {0} manually, then retry the makeup cancellation."
+            ).format(invoice_name)
+        )
+    if action == "block_partial":
+        frappe.throw(
+            _(
+                "Difference Invoice {0} is partially paid. Complete a manual finance review before cancelling this makeup."
+            ).format(invoice_name)
+        )
+
+
+def _delete_makeup_difference_draft(invoice):
+    if not invoice or cint(invoice.get("docstatus")) != 0:
+        return
+    invoice_name = invoice.get("name")
+    _run_school_admin_invoice_mutation(
+        lambda: frappe.delete_doc("Sales Invoice", invoice_name, ignore_permissions=True)
+    )
+
+
+def _makeup_invoice_summary(invoice):
+    if not invoice:
+        return None
+    return {
+        fieldname: invoice.get(fieldname)
+        for fieldname in [
+            "name",
+            "docstatus",
+            "status",
+            "grand_total",
+            "paid_amount",
+            "outstanding_amount",
+        ]
+    }
+
+
+def _build_school_admin_makeup_voucher_payload(voucher):
+    return _build_makeup_voucher_payload(voucher)
 
 
 def _get_school_admin_family_context(parent=None, student=None):
@@ -3988,7 +4316,11 @@ def _get_family_voucher_rows(students=None, status=None, limit=80):
         filters["status"] = status
     fields = _safe_fields(
         "Makeup Voucher",
-        ["name", "student", "course", "original_session", "leave_request", "status", "issue_date", "expiry_date", "used_on_session", "used_date", "used_by_student", "voucher_label"],
+        [
+            "name", "student", "course", "original_session", "leave_request", "status",
+            "issue_date", "expiry_date", "used_on_session", "used_date", "used_by_student",
+            "voucher_label", "price_difference_invoice",
+        ],
     )
     rows = frappe.get_all(
         "Makeup Voucher",
@@ -3998,6 +4330,7 @@ def _get_family_voucher_rows(students=None, status=None, limit=80):
         limit=_limit(limit, default=80, max_value=300),
     )
     items = [_normalize_row_payload("Makeup Voucher", row) for row in rows]
+    _attach_makeup_difference_invoice_summaries(items)
     attendance_map = _get_family_makeup_attendance_map(items)
     session_map = _get_school_admin_session_summary_map(
         [item.get("original_session") for item in items if item.get("original_session")]
@@ -4017,10 +4350,32 @@ def _get_family_voucher_rows(students=None, status=None, limit=80):
         item["used_session_date"] = used_session.get("session_date")
         item["used_day_of_week"] = used_session.get("day_of_week")
         item["used_start_time"] = used_session.get("start_time")
+        item["used_course"] = used_session.get("course")
         attendance = attendance_map.get(item.get("name")) or {}
         item["makeup_attendance_entry"] = attendance.get("name")
         item["makeup_attendance_status"] = attendance.get("status")
     return items
+
+
+def _attach_makeup_difference_invoice_summaries(vouchers):
+    invoice_names = sorted({
+        row.get("price_difference_invoice")
+        for row in vouchers
+        if row.get("price_difference_invoice")
+    })
+    if not invoice_names:
+        return vouchers
+    rows = frappe.get_all(
+        "Sales Invoice",
+        filters={"name": ["in", invoice_names]},
+        fields=["name", "docstatus", "status", "grand_total", "paid_amount", "outstanding_amount"],
+        limit_page_length=0,
+    )
+    invoice_map = {row.get("name"): row for row in rows}
+    for voucher in vouchers:
+        invoice = invoice_map.get(voucher.get("price_difference_invoice"))
+        voucher["price_difference_invoice_summary"] = _makeup_invoice_summary(invoice)
+    return vouchers
 
 
 def _get_family_makeup_attendance_map(vouchers):
@@ -4430,6 +4785,7 @@ def _get_course_payload(course):
 	if not rows:
 		return {"doctype": "Course", "name": course}
 	payload = _normalize_row_payload("Course", rows[0])
+	payload["accepted_makeup_courses"] = _get_course_makeup_acceptance_map([course]).get(course, [])
 	_attach_course_label(payload, payload.get("name"), payload)
 	return payload
 
@@ -5317,6 +5673,8 @@ def _build_invoice_payload(doc):
 	payload["docstatus"] = cint(doc.docstatus)
 	payload["status_label"] = _invoice_status_label(doc)
 	payload["items"] = [_child_payload(row) for row in doc.get("items", [])]
+	payload["adjustments"] = [_invoice_adjustment_payload(row) for row in _invoice_adjustment_rows(doc)]
+	payload.update(_invoice_edit_totals(doc))
 	payload["comments"] = _get_comments("Sales Invoice", doc.name)
 	payload.update(_invoice_credit_payload(doc))
 	payload["notifications"] = get_invoice_notification_summary(doc.name)
@@ -5371,15 +5729,28 @@ def _apply_invoice_items(invoice, items):
 			frappe.throw(_("Invoice item code is required."))
 		if item_code == MANUAL_INVOICE_ITEM:
 			item_code = _ensure_school_admin_invoice_item(MANUAL_INVOICE_ITEM)
+		description = (row.get("description") or "").strip()
+		if not description:
+			frappe.throw(_("Invoice item description is required."))
+		qty = flt(row.get("qty"))
+		rate = flt(row.get("rate"))
+		if qty <= 0:
+			frappe.throw(_("Invoice item unit must be greater than zero."))
+		if rate < 0:
+			frappe.throw(_("Invoice item unit price cannot be negative. Use an Adjustment for deductions."))
+		item_values = {
+			"item_code": item_code,
+			"item_name": row.get("item_name") or item_code,
+			"description": description,
+			"qty": qty,
+			"rate": rate,
+		}
+		for fieldname in ("income_account", "cost_center", "warehouse", "uom", "conversion_factor"):
+			if row.get(fieldname) not in (None, ""):
+				item_values[fieldname] = row.get(fieldname)
 		item = invoice.append(
 			"items",
-			{
-				"item_code": item_code,
-				"item_name": row.get("item_name") or item_code,
-				"description": row.get("description") or row.get("item_name") or item_code,
-				"qty": flt(row.get("qty") or 1),
-				"rate": flt(row.get("rate") or 0),
-			},
+			item_values,
 		)
 		student = row.get("student")
 		_set_if_field(item, "qas_line_type", row.get("qas_line_type") or row.get("line_type") or "Other")
@@ -5391,6 +5762,114 @@ def _apply_invoice_items(invoice, items):
 		_set_if_field(item, "term", row.get("term"))
 		_set_if_field(item, "course_session", row.get("course_session"))
 		_set_if_field(item, "session_count", row.get("session_count"))
+
+
+def _apply_invoice_adjustments(invoice, adjustments, *, fallback_accounts=None, fallback_cost_centers=None):
+	existing_rows = _invoice_adjustment_rows(invoice)
+	for row in existing_rows:
+		invoice.remove(row)
+	if not adjustments:
+		return
+	if not _has_field("Sales Taxes and Charges", INVOICE_ADJUSTMENT_FIELD):
+		frappe.throw(_("Invoice adjustments are not available until the latest site migration has completed."))
+
+	account_head = _resolve_invoice_adjustment_account(
+		invoice,
+		existing_rows=existing_rows,
+		fallback_accounts=fallback_accounts,
+	)
+	cost_center = _resolve_invoice_adjustment_cost_center(
+		invoice,
+		existing_rows=existing_rows,
+		fallback_cost_centers=fallback_cost_centers,
+	)
+
+	for row in adjustments:
+		description = (row.get("description") or "").strip()
+		amount = flt(row.get("amount"))
+		if not description:
+			frappe.throw(_("Adjustment description is required."))
+		if not amount:
+			frappe.throw(_("Adjustment amount cannot be zero."))
+		values = {
+			"charge_type": "Actual",
+			"account_head": account_head,
+			"description": description,
+			"tax_amount": amount,
+			"included_in_print_rate": 0,
+		}
+		if cost_center:
+			values["cost_center"] = cost_center
+		adjustment = invoice.append("taxes", values)
+		_set_if_field(adjustment, INVOICE_ADJUSTMENT_FIELD, 1)
+
+
+def _invoice_adjustment_rows(invoice):
+	return [
+		row
+		for row in (invoice.get("taxes") or [])
+		if cint(row.get(INVOICE_ADJUSTMENT_FIELD) or 0)
+	]
+
+
+def _invoice_adjustment_payload(row):
+	return {
+		"name": row.get("name"),
+		"description": row.get("description") or "Adjustment",
+		"amount": flt(row.get("tax_amount")),
+	}
+
+
+def _invoice_edit_totals(invoice):
+	item_subtotal = sum(flt(row.get("amount")) for row in (invoice.get("items") or []))
+	adjustment_total = sum(flt(row.get("tax_amount")) for row in _invoice_adjustment_rows(invoice))
+	total_taxes = flt(invoice.get("total_taxes_and_charges"))
+	return {
+		"item_subtotal": item_subtotal,
+		"adjustment_total": adjustment_total,
+		"other_charge_total": total_taxes - adjustment_total,
+	}
+
+
+def _invoice_item_financial_values(invoice, fieldname):
+	return {
+		str(row.get(fieldname)).strip()
+		for row in (invoice.get("items") or [])
+		if row.get(fieldname)
+	}
+
+
+def _resolve_invoice_adjustment_account(invoice, *, existing_rows=None, fallback_accounts=None):
+	existing_accounts = {
+		str(row.get("account_head")).strip()
+		for row in (existing_rows or [])
+		if row.get("account_head")
+	}
+	if len(existing_accounts) == 1:
+		return next(iter(existing_accounts))
+
+	item_accounts = _invoice_item_financial_values(invoice, "income_account")
+	item_accounts.update(fallback_accounts or set())
+	if len(item_accounts) == 1:
+		return next(iter(item_accounts))
+	if len(item_accounts) > 1:
+		frappe.throw(_("Invoice items use multiple income accounts. Choose one account before adding an Adjustment."))
+
+	default_account = frappe.db.get_value("Company", invoice.get("company"), "default_income_account")
+	if default_account:
+		return default_account
+	frappe.throw(_("Could not resolve an income account for the Adjustment."))
+
+
+def _resolve_invoice_adjustment_cost_center(invoice, *, existing_rows=None, fallback_cost_centers=None):
+	for row in existing_rows or []:
+		if row.get("cost_center"):
+			return row.get("cost_center")
+	item_cost_centers = _invoice_item_financial_values(invoice, "cost_center")
+	item_cost_centers.update(fallback_cost_centers or set())
+	if len(item_cost_centers) == 1:
+		return next(iter(item_cost_centers))
+	return frappe.db.get_value("Company", invoice.get("company"), "cost_center")
 
 
 def _sync_invoice_student_summary(invoice):

@@ -54,6 +54,12 @@ def build_parent_invoice_context(
 	portal_link = (invoice_link or payment_link or parent_portal_invoice_link(invoice_doc.name)) if include_portal_link else ""
 	payment_context = get_invoice_payment_context(invoice_doc)
 	settings = get_invoice_settings()
+	items = [build_parent_invoice_item(row) for row in invoice_doc.get("items", [])]
+	adjustments = [
+		build_parent_invoice_adjustment(row)
+		for row in invoice_doc.get("taxes", [])
+		if is_parent_invoice_adjustment(row)
+	]
 	return {
 		"invoice": invoice_doc.name,
 		"school_name": settings.get("school_name") or "Queensland Art School",
@@ -70,7 +76,9 @@ def build_parent_invoice_context(
 		"invoice_link": portal_link,
 		"payment_link": portal_link,
 		**payment_context,
-		"items": [build_parent_invoice_item(row) for row in invoice_doc.get("items", [])],
+		"items": items,
+		"adjustments": adjustments,
+		"lines": [*items, *adjustments],
 	}
 
 
@@ -133,6 +141,22 @@ def build_parent_invoice_item(row):
 		"rate": rate,
 		"amount": amount,
 		"description": description,
+	}
+
+
+def is_parent_invoice_adjustment(row) -> bool:
+	if not hasattr(row, "get"):
+		return False
+	return bool(flt(row.get("qas_is_invoice_adjustment") or 0))
+
+
+def build_parent_invoice_adjustment(row):
+	amount = flt(row.get("tax_amount") or 0)
+	return {
+		"student": "",
+		"description": row.get("description") or "Adjustment",
+		"amount": amount,
+		"qas_line_type": "Adjustment",
 	}
 
 

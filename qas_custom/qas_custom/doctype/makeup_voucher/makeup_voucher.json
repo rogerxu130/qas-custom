@@ -61,6 +61,13 @@
    "fieldname": "used_date",
    "fieldtype": "Date",
    "label": "Used Date"
+  },
+  {
+   "fieldname": "price_difference_invoice",
+   "fieldtype": "Link",
+   "label": "Price Difference Invoice",
+   "options": "Sales Invoice",
+   "read_only": 1
   }
  ],
  "grid_page_length": 50,
