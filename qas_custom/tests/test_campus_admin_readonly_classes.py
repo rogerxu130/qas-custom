@@ -5,6 +5,7 @@ from unittest.mock import Mock, call, patch
 import frappe
 
 from qas_custom.services.campus_admin import (
+	_enrich_trial_payment_status,
 	_get_campus_admin_course_session_access,
 	get_campus_admin_course_session_data,
 	get_campus_admin_course_sessions_data,
@@ -14,6 +15,78 @@ from qas_custom.services.campus_admin import (
 
 
 class TestCampusAdminReadonlyClasses(TestCase):
+	@patch("qas_custom.services.campus_admin.frappe.get_all")
+	def test_trial_payment_status_uses_only_the_linked_active_trial_invoice(self, get_all):
+		attendance = [
+			{"name": "ATT-MISSING-LINK", "source_doctype": "Inquiry", "source_document": ""},
+			{"name": "ATT-NONE", "source_doctype": "Inquiry", "source_document": "INQ-NONE"},
+			{"name": "ATT-DRAFT", "source_doctype": "Inquiry", "source_document": "INQ-DRAFT"},
+			{"name": "ATT-CANCELLED", "source_doctype": "Inquiry", "source_document": "INQ-CANCELLED"},
+			{"name": "ATT-DELETED", "source_doctype": "Inquiry", "source_document": "INQ-DELETED"},
+			{"name": "ATT-DUE", "source_doctype": "Inquiry", "source_document": "INQ-DUE"},
+			{"name": "ATT-PAID", "source_doctype": "Inquiry", "source_document": "INQ-PAID"},
+			{"name": "ATT-FALLBACK", "source_doctype": "Inquiry", "source_document": "INQ-FALLBACK"},
+			{"name": "ATT-FULL-TERM", "source_doctype": "Enrollment", "source_document": "ENR-1"},
+		]
+
+		def get_all_rows(doctype, **kwargs):
+			fields = kwargs.get("fields") or []
+			if doctype == "Inquiry":
+				return [
+					{"name": "INQ-NONE", "trial_invoice": ""},
+					{"name": "INQ-DRAFT", "trial_invoice": "INV-DRAFT"},
+					{"name": "INQ-CANCELLED", "trial_invoice": "INV-CANCELLED"},
+					{"name": "INQ-DELETED", "trial_invoice": "INV-DELETED"},
+					{"name": "INQ-DUE", "trial_invoice": "INV-DUE"},
+					{"name": "INQ-PAID", "trial_invoice": "INV-PAID"},
+					{"name": "INQ-FALLBACK", "trial_invoice": ""},
+				]
+			if doctype == "Sales Invoice" and "source_document" in fields:
+				return [
+					{
+						"name": "INV-FALLBACK",
+						"source_document": "INQ-FALLBACK",
+						"creation": "2026-07-01 09:00:00",
+					}
+				]
+			if doctype == "Sales Invoice":
+				return [
+					{"name": "INV-DRAFT", "docstatus": 0, "status": "Draft", "outstanding_amount": 68},
+					{"name": "INV-CANCELLED", "docstatus": 2, "status": "Cancelled", "outstanding_amount": 68},
+					{"name": "INV-DUE", "docstatus": 1, "status": "Unpaid", "outstanding_amount": 68},
+					{"name": "INV-PAID", "docstatus": 1, "status": "Paid", "outstanding_amount": 0},
+					{"name": "INV-FALLBACK", "docstatus": 1, "status": "Paid", "outstanding_amount": 0},
+					{"name": "UNRELATED-FAMILY-INVOICE", "docstatus": 1, "status": "Unpaid", "outstanding_amount": 500},
+				]
+			return []
+
+		get_all.side_effect = get_all_rows
+
+		result = _enrich_trial_payment_status(attendance, ["Campus A"])
+		by_name = {row["name"]: row for row in result}
+
+		for name in ("ATT-MISSING-LINK", "ATT-NONE", "ATT-DRAFT", "ATT-CANCELLED", "ATT-DELETED"):
+			self.assertEqual(by_name[name]["trial_payment_status"], "needs_front_desk")
+			self.assertFalse(by_name[name]["trial_invoice_active"])
+			self.assertEqual(by_name[name]["trial_invoice_outstanding_amount"], 0)
+
+		self.assertEqual(by_name["ATT-DUE"]["trial_payment_status"], "outstanding")
+		self.assertTrue(by_name["ATT-DUE"]["trial_invoice_active"])
+		self.assertEqual(by_name["ATT-DUE"]["trial_invoice_outstanding_amount"], 68)
+		self.assertEqual(by_name["ATT-PAID"]["trial_payment_status"], "paid")
+		self.assertEqual(by_name["ATT-FALLBACK"]["trial_invoice"], "INV-FALLBACK")
+		self.assertEqual(by_name["ATT-FALLBACK"]["trial_payment_status"], "paid")
+		self.assertNotIn("trial_payment_status", by_name["ATT-FULL-TERM"])
+
+		inquiry_call = next(call_args for call_args in get_all.call_args_list if call_args.args[0] == "Inquiry")
+		self.assertEqual(inquiry_call.kwargs["filters"]["campus"], ["in", ["Campus A"]])
+		invoice_detail_call = next(
+			call_args
+			for call_args in get_all.call_args_list
+			if call_args.args[0] == "Sales Invoice" and "docstatus" in (call_args.kwargs.get("fields") or [])
+		)
+		self.assertNotIn("UNRELATED-FAMILY-INVOICE", invoice_detail_call.kwargs["filters"]["name"][1])
+
 	@patch("qas_custom.services.campus_admin._get_course_session_rows")
 	@patch("qas_custom.services.campus_admin._require_campus_admin_profile")
 	@patch("qas_custom.services.campus_admin._attach_campus_admin_teacher_labels")
@@ -59,6 +132,7 @@ class TestCampusAdminReadonlyClasses(TestCase):
 		with self.assertRaises(frappe.PermissionError):
 			_get_campus_admin_course_session_access("SESSION-1", ["Campus A"])
 
+	@patch("qas_custom.services.campus_admin._enrich_trial_payment_status")
 	@patch("qas_custom.services.campus_admin._count_leave_attendance_rows", return_value=1)
 	@patch("qas_custom.services.campus_admin._roster_course_session_attendance_rows")
 	@patch("qas_custom.services.campus_admin._visible_course_session_attendance_rows")
@@ -81,6 +155,7 @@ class TestCampusAdminReadonlyClasses(TestCase):
 		visible_rows,
 		roster_rows,
 		_count_leave,
+		enrich_trial_payment,
 	):
 		require_profile.return_value = {"campuses": ["Campus A"]}
 		session = SimpleNamespace(name="SESSION-1")
@@ -104,6 +179,7 @@ class TestCampusAdminReadonlyClasses(TestCase):
 		self.assertEqual(payload["leave_count"], 1)
 		self.assertEqual(payload["attendance"], attendance)
 		self.assertEqual(payload["class_content"], get_content.return_value)
+		enrich_trial_payment.assert_called_once_with(attendance, ["Campus A"])
 		get_content.assert_called_once_with(
 			"SESSION-1",
 			photo_method="qas_custom.api.campus_admin.campus_admin_get_course_session_photo",

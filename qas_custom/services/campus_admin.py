@@ -3,7 +3,7 @@ from __future__ import annotations
 import frappe
 from frappe import _
 
-from frappe.utils import add_days, cint, getdate, now_datetime, today
+from frappe.utils import add_days, cint, flt, getdate, now_datetime, today
 
 from qas_custom.services.billing_enrollment import (
 	convert_inquiry_to_full_term_core,
@@ -491,6 +491,7 @@ def get_campus_admin_course_session_data(course_session=None):
 		course_session,
 		term=(payload.get("weekly_timeslot_detail") or {}).get("term"),
 	)
+	_enrich_trial_payment_status(attendance_rows, profile["campuses"])
 	attending_rows = _visible_course_session_attendance_rows(attendance_rows)
 	payload["attendance"] = _roster_course_session_attendance_rows(attendance_rows)
 	payload["student_count"] = len(attending_rows)
@@ -506,6 +507,83 @@ def get_campus_admin_course_session_data(course_session=None):
 		video_method="qas_custom.api.campus_admin.campus_admin_get_course_session_video",
 	)
 	return payload
+
+
+def _enrich_trial_payment_status(attendance_rows, allowed_campuses=None):
+	trial_rows = [row for row in attendance_rows if row.get("source_doctype") == "Inquiry"]
+	if not trial_rows:
+		return attendance_rows
+
+	for row in trial_rows:
+		row["trial_invoice"] = ""
+		row["trial_invoice_active"] = False
+		row["trial_invoice_outstanding_amount"] = 0
+		row["trial_payment_status"] = "needs_front_desk"
+
+	inquiry_names = sorted({row.get("source_document") for row in trial_rows if row.get("source_document")})
+	if not inquiry_names:
+		return attendance_rows
+
+	inquiry_filters = {"name": ["in", inquiry_names]}
+	if allowed_campuses:
+		inquiry_filters["campus"] = ["in", list(allowed_campuses)]
+	inquiry_rows = frappe.get_all(
+		"Inquiry",
+		filters=inquiry_filters,
+		fields=["name", "trial_invoice"],
+		limit_page_length=0,
+	)
+	invoice_by_inquiry = {
+		row.get("name"): row.get("trial_invoice")
+		for row in inquiry_rows
+		if row.get("name")
+	}
+
+	missing_direct_links = sorted(
+		inquiry
+		for inquiry in inquiry_names
+		if not invoice_by_inquiry.get(inquiry)
+	)
+	if missing_direct_links:
+		fallback_rows = frappe.get_all(
+			"Sales Invoice",
+			filters={
+				"source_doctype": "Inquiry",
+				"source_document": ["in", missing_direct_links],
+			},
+			fields=["name", "source_document", "creation"],
+			order_by="creation asc",
+			limit_page_length=0,
+		)
+		for row in fallback_rows:
+			inquiry = row.get("source_document")
+			if inquiry and row.get("name") and not invoice_by_inquiry.get(inquiry):
+				invoice_by_inquiry[inquiry] = row.get("name")
+
+	invoice_names = sorted({invoice for invoice in invoice_by_inquiry.values() if invoice})
+	invoice_map = {}
+	if invoice_names:
+		invoice_rows = frappe.get_all(
+			"Sales Invoice",
+			filters={"name": ["in", invoice_names]},
+			fields=["name", "docstatus", "status", "outstanding_amount"],
+			limit_page_length=0,
+		)
+		invoice_map = {row.get("name"): row for row in invoice_rows if row.get("name")}
+
+	for row in trial_rows:
+		invoice_name = invoice_by_inquiry.get(row.get("source_document"))
+		invoice = invoice_map.get(invoice_name)
+		row["trial_invoice"] = invoice_name or ""
+		if not invoice or cint(invoice.get("docstatus")) != 1 or str(invoice.get("status") or "").lower() == "cancelled":
+			continue
+
+		outstanding_amount = max(flt(invoice.get("outstanding_amount") or 0), 0)
+		row["trial_invoice_active"] = True
+		row["trial_invoice_outstanding_amount"] = outstanding_amount
+		row["trial_payment_status"] = "outstanding" if outstanding_amount > 0.005 else "paid"
+
+	return attendance_rows
 
 
 def get_campus_admin_session_photo_content_data(course_session=None, photo_post=None, photo_idx=None):
