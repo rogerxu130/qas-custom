@@ -138,7 +138,14 @@ def cancel_parent_leave_request_core(parent, students: list[dict], voucher_id: s
 	}
 
 
-def get_parent_redeemable_sessions_core(parent, students: list[dict], voucher_id: str | None, student: str | None = None):
+def get_parent_redeemable_sessions_core(
+	parent,
+	students: list[dict],
+	voucher_id: str | None,
+	student: str | None = None,
+	*,
+	allow_ordinary_cross_course: bool = False,
+):
 	voucher = _get_parent_makeup_voucher(voucher_id, parent.name)
 	_validate_voucher_available_for_redeem(voucher)
 	selected_student = _get_redeem_student(student, voucher, students)
@@ -147,7 +154,11 @@ def get_parent_redeemable_sessions_core(parent, students: list[dict], voucher_id
 		"voucher": _build_makeup_voucher_payload(voucher),
 		"students": [_build_redeem_student_payload(row) for row in students],
 		"selected_student": selected_student,
-		"available_sessions": _get_redeemable_makeup_sessions(voucher, selected_student),
+		"available_sessions": _get_redeemable_makeup_sessions(
+			voucher,
+			selected_student,
+			allow_ordinary_cross_course=allow_ordinary_cross_course,
+		),
 	}
 
 
@@ -157,6 +168,9 @@ def redeem_parent_voucher_core(
 	voucher_id: str | None,
 	session_id: str | None,
 	student: str | None = None,
+	*,
+	allow_ordinary_cross_course: bool = False,
+	notify_staff: bool = True,
 ):
 	if not session_id:
 		frappe.throw("Please select a makeup session.")
@@ -172,12 +186,12 @@ def redeem_parent_voucher_core(
 			session_id=session_id,
 			student=used_student,
 		)
-		notification = enqueue_session_staff_notification(
-			"makeup_booked",
+		notification = _queue_makeup_notification(
+			event="makeup_booked",
+			notify_staff=notify_staff,
 			course_session=session_id,
 			student=used_student,
-			source_doctype="Makeup Voucher",
-			source_document=voucher.name,
+			voucher=voucher.name,
 		)
 		return {
 			"voucher": _build_makeup_voucher_payload(voucher),
@@ -187,7 +201,12 @@ def redeem_parent_voucher_core(
 		}
 
 	_validate_voucher_available_for_redeem(voucher)
-	_validate_session_can_redeem_voucher(voucher, session_id, selected_student)
+	_validate_session_can_redeem_voucher(
+		voucher,
+		session_id,
+		selected_student,
+		allow_ordinary_cross_course=allow_ordinary_cross_course,
+	)
 
 	attendance_entry = redeem_voucher_attendance_entry(
 		voucher=voucher,
@@ -203,12 +222,12 @@ def redeem_parent_voucher_core(
 		voucher.voucher_label = get_makeup_voucher_label({**voucher.as_dict(), "voucher_label": None})
 	voucher.flags.skip_makeup_attendance_sync = True
 	voucher.save(ignore_permissions=True)
-	notification = enqueue_session_staff_notification(
-		"makeup_booked",
+	notification = _queue_makeup_notification(
+		event="makeup_booked",
+		notify_staff=notify_staff,
 		course_session=session_id,
 		student=selected_student,
-		source_doctype="Makeup Voucher",
-		source_document=voucher.name,
+		voucher=voucher.name,
 	)
 
 	return {
@@ -388,7 +407,12 @@ def _validate_voucher_available_for_cancel(voucher):
 		frappe.throw("This leave can no longer be cancelled because the class has already started.")
 
 
-def _get_redeemable_makeup_sessions(voucher, student: str | None = None):
+def _get_redeemable_makeup_sessions(
+	voucher,
+	student: str | None = None,
+	*,
+	allow_ordinary_cross_course: bool = False,
+):
 	redeem_student = student or voucher.student
 	session_rows = frappe.get_all(
 		"Course Sessions",
@@ -414,7 +438,11 @@ def _get_redeemable_makeup_sessions(voucher, student: str | None = None):
 		if session.get("status") == "Cancelled":
 			continue
 		timeslot = timeslot_map.get(session.get("weekly_timeslot"))
-		if not timeslot or not _course_accepts_makeup_voucher(timeslot.get("course"), voucher.get("course")):
+		if not timeslot or not _course_accepts_makeup_voucher(
+			timeslot.get("course"),
+			voucher.get("course"),
+			allow_ordinary_cross_course=allow_ordinary_cross_course,
+		):
 			continue
 		if not _student_session_can_redeem_voucher(redeem_student, session["name"]):
 			continue
@@ -436,9 +464,20 @@ def _get_redeemable_makeup_sessions(voucher, student: str | None = None):
 	return sessions
 
 
-def _validate_session_can_redeem_voucher(voucher, session_id: str, student: str):
+def _validate_session_can_redeem_voucher(
+	voucher,
+	session_id: str,
+	student: str,
+	*,
+	allow_ordinary_cross_course: bool = False,
+):
 	available_session_ids = {
-		row["session_id"] for row in _get_redeemable_makeup_sessions(voucher, student)
+		row["session_id"]
+		for row in _get_redeemable_makeup_sessions(
+			voucher,
+			student,
+			allow_ordinary_cross_course=allow_ordinary_cross_course,
+		)
 	}
 	if session_id not in available_session_ids:
 		frappe.throw("This class session is not available for this makeup voucher.")
@@ -546,7 +585,12 @@ def _get_attendance_entry_used_by_voucher(voucher, session_id: str, student: str
 	return voucher_rows[0] if voucher_rows else None
 
 
-def _course_accepts_makeup_voucher(target_course: str | None, voucher_course: str | None):
+def _course_accepts_makeup_voucher(
+	target_course: str | None,
+	voucher_course: str | None,
+	*,
+	allow_ordinary_cross_course: bool = False,
+):
 	if not target_course:
 		return False
 	if target_course == voucher_course:
@@ -558,14 +602,14 @@ def _course_accepts_makeup_voucher(target_course: str | None, voucher_course: st
 		return False
 
 	if not course_doc.get("is_makeup_course"):
-		return False
+		return allow_ordinary_cross_course
 
 	accepted_courses = [
 		row.get("course")
 		for row in course_doc.get("accepted_makeup_course") or []
 		if row.get("course")
 	]
-	return not accepted_courses or voucher_course in accepted_courses
+	return voucher_course in accepted_courses
 
 
 def _build_makeup_voucher_payload(voucher):
@@ -583,7 +627,20 @@ def _build_makeup_voucher_payload(voucher):
 		"used_on_session": voucher.get("used_on_session"),
 		"used_date": voucher.get("used_date"),
 		"leave_request": voucher.get("leave_request"),
+		"price_difference_invoice": voucher.get("price_difference_invoice"),
 	}
+
+
+def _queue_makeup_notification(*, event: str, notify_staff: bool, course_session: str, student: str, voucher: str):
+	if not notify_staff:
+		return {"skipped": True, "reason": "deferred_until_makeup_transaction_completes"}
+	return enqueue_session_staff_notification(
+		event,
+		course_session=course_session,
+		student=student,
+		source_doctype="Makeup Voucher",
+		source_document=voucher,
+	)
 
 
 def _build_redeem_student_payload(student):

@@ -205,6 +205,7 @@ class TestSessionStaffNotifications(TestCase):
 	def test_event_keys_are_stable_short_and_specific_to_the_source_event(self):
 		leave_key = _session_staff_notification_event_key("leave_requested", "CS-001", "STU-001", "LR-001")
 		makeup_key = _session_staff_notification_event_key("makeup_booked", "CS-001", "STU-001", "MV-001")
+		makeup_cancel_key = _session_staff_notification_event_key("makeup_cancelled", "CS-001", "STU-001", "MV-001")
 		trial_key = _session_staff_notification_event_key("trial_added", "CS-001", "STU-001", "INQ-001")
 		cancel_key = _session_staff_notification_event_key("trial_cancelled", "CS-001", "STU-001", "INQ-001")
 		reschedule_key = _session_staff_notification_event_key(
@@ -224,8 +225,12 @@ class TestSessionStaffNotifications(TestCase):
 		self.assertTrue(trial_key.startswith("session_staff:trial:"))
 		self.assertTrue(cancel_key.startswith("session_staff:trial-cancel:"))
 		self.assertTrue(reschedule_key.startswith("session_staff:trial-reschedule:"))
-		self.assertEqual(len({leave_key, makeup_key, trial_key, cancel_key, reschedule_key}), 5)
-		self.assertLessEqual(max(len(leave_key), len(makeup_key), len(trial_key), len(cancel_key), len(reschedule_key)), 140)
+		self.assertTrue(makeup_cancel_key.startswith("session_staff:makeup-cancel:"))
+		self.assertEqual(len({leave_key, makeup_key, makeup_cancel_key, trial_key, cancel_key, reschedule_key}), 6)
+		self.assertLessEqual(
+			max(len(leave_key), len(makeup_key), len(makeup_cancel_key), len(trial_key), len(cancel_key), len(reschedule_key)),
+			140,
+		)
 
 		long_makeup_key = _session_staff_notification_event_key(
 			"makeup_booked",
@@ -234,6 +239,27 @@ class TestSessionStaffNotifications(TestCase):
 			"MV-Anime Art - Intermediate-Isabella 1-2018-05-31-2026-07-14-0074",
 		)
 		self.assertLessEqual(len(long_makeup_key), 140)
+
+	def test_makeup_cancelled_notification_remains_current_after_voucher_is_restored(self):
+		from qas_custom.modules.notifications.commands import _session_staff_notification_is_current
+
+		fake_frappe = SimpleNamespace(
+			db=SimpleNamespace(get_value=lambda *args, **kwargs: {
+				"status": "Valid",
+				"used_on_session": None,
+				"student": "STU-001",
+				"used_by_student": None,
+			})
+		)
+		with patch("qas_custom.modules.notifications.commands.frappe", fake_frappe):
+			self.assertTrue(
+				_session_staff_notification_is_current(
+					"makeup_cancelled",
+					"CS-001",
+					"STU-001",
+					"MV-001",
+				)
+			)
 
 	@patch("qas_custom.modules.notifications.commands._", side_effect=lambda value: value)
 	def test_trial_email_includes_session_details_and_escapes_student_name(self, _mock_translate):
@@ -258,6 +284,25 @@ class TestSessionStaffNotifications(TestCase):
 		self.assertIn("Room 1", message)
 		self.assertIn("Tuesday 14 July 2026", message)
 		self.assertIn("16:00 - 17:30", message)
+
+	@patch("qas_custom.modules.notifications.commands._", side_effect=lambda value: value)
+	def test_makeup_cancel_email_explains_the_student_was_removed(self, _mock_translate):
+		message = _session_staff_notification_email_message(
+			{
+				"event": "makeup_cancelled",
+				"school_name": "Queensland Art School",
+				"student_name": "Ava",
+				"course": "Designer Art",
+				"campus": "Indooroopilly",
+				"classroom": "Room 1",
+				"day_of_week": "Tuesday",
+				"date_display": "14 July 2026",
+				"start_time": "16:00",
+				"end_time": "17:30",
+			}
+		)
+
+		self.assertIn("makeup booking has been cancelled", message)
 
 	@patch("qas_custom.modules.notifications.commands._", side_effect=lambda value: value)
 	def test_trial_reschedule_email_includes_original_and_new_sessions(self, _mock_translate):

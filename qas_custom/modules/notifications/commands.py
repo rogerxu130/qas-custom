@@ -19,6 +19,7 @@ SESSION_STAFF_NOTIFICATION_EVENT_PREFIX = "session_staff:"
 SESSION_STAFF_NOTIFICATION_EVENTS = {
 	"leave_requested",
 	"makeup_booked",
+	"makeup_cancelled",
 	"trial_added",
 	"trial_cancelled",
 	"trial_rescheduled",
@@ -903,6 +904,7 @@ def _session_staff_notification_event_key(
 	event_labels = {
 		"leave_requested": "leave",
 		"makeup_booked": "makeup",
+		"makeup_cancelled": "makeup-cancel",
 		"trial_added": "trial",
 		"trial_cancelled": "trial-cancel",
 		"trial_rescheduled": "trial-reschedule",
@@ -941,6 +943,18 @@ def _session_staff_notification_is_current(
 			and row.get("used_on_session") == course_session
 			and (row.get("used_by_student") or row.get("student")) == student
 		)
+	if event == "makeup_cancelled":
+		row = frappe.db.get_value(
+			"Makeup Voucher",
+			source_document,
+			["status", "used_on_session", "student", "used_by_student"],
+			as_dict=True,
+		)
+		return bool(
+			row
+			and row.get("status") == "Valid"
+			and not row.get("used_on_session")
+		)
 	if event in TRIAL_NOTIFICATION_EVENTS:
 		row = _get_trial_notification_inquiry(source_document)
 		if event == "trial_cancelled":
@@ -971,6 +985,7 @@ def _session_staff_notification_subject(context):
 	prefixes = {
 		"leave_requested": "Leave request",
 		"makeup_booked": "Makeup class booked",
+		"makeup_cancelled": "Makeup class cancelled",
 		"trial_added": "Trial student added",
 		"trial_cancelled": "Trial student cancelled",
 		"trial_rescheduled": "Trial student rescheduled",
@@ -985,6 +1000,7 @@ def _session_staff_notification_email_message(context):
 	intro = {
 		"leave_requested": "A parent has requested leave for this student.",
 		"makeup_booked": "This student has been booked into your session as a makeup class.",
+		"makeup_cancelled": "This student's makeup booking has been cancelled.",
 		"trial_added": "This session now has a trial student.",
 		"trial_cancelled": "This trial student will no longer attend the session.",
 		"trial_rescheduled": "This trial student has been moved to a different session.",

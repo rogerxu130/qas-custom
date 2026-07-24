@@ -86,25 +86,25 @@
    "fieldname": "full_term_fee",
    "fieldtype": "Currency",
    "label": "Full Term Fee",
-   "reqd": 1
+   "mandatory_depends_on": "eval:!doc.is_makeup_course"
   },
   {
    "fieldname": "pay_as_you_go_fee",
    "fieldtype": "Currency",
    "label": "Pay as you go Fee",
-   "reqd": 1
+   "mandatory_depends_on": "eval:!doc.is_makeup_course"
   },
   {
    "fieldname": "total_session_per_term",
    "fieldtype": "Int",
    "label": "Total session per term",
-   "reqd": 1
+   "mandatory_depends_on": "eval:!doc.is_makeup_course"
   },
   {
    "fieldname": "term_session_fee",
    "fieldtype": "Currency",
    "label": "Term Session Fee",
-   "reqd": 1
+   "mandatory_depends_on": "eval:!doc.is_makeup_course"
   },
   {
    "fieldname": "makeup_section",

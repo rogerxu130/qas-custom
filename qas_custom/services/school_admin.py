@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 import hashlib
 import json
@@ -51,11 +52,21 @@ from qas_custom.modules.billing.commands import (
 )
 from qas_custom.modules.billing.presentation import build_course_invoice_description, invoice_item_schedule
 from qas_custom.modules.makeup.commands import (
+    _build_makeup_voucher_payload,
+    _build_redeem_session_payload,
     cancel_makeup_booking_core,
     get_parent_redeemable_sessions_core,
     redeem_parent_voucher_core,
     submit_parent_leave_request_core,
 )
+from qas_custom.modules.makeup.pricing import (
+	MAKEUP_PRICE_DIFFERENCE_SOURCE_TYPE,
+	classify_difference_invoice,
+	get_makeup_difference_invoice,
+	get_makeup_target_pricing,
+	preview_makeup_target_pricing,
+)
+from qas_custom.modules.notifications.commands import enqueue_session_staff_notification
 from qas_custom.modules.notifications import (
 	enqueue_parent_invoice_cancellation_notification,
 	enqueue_parent_invoice_paid_receipt,
@@ -669,7 +680,9 @@ def get_school_admin_courses_data(query=None, status=None, limit=120):
 		limit=_limit(limit, default=120, max_value=500),
 	)
 	items = [_normalize_row_payload("Course", row) for row in rows]
+	accepted_map = _get_course_makeup_acceptance_map([item.get("name") for item in items])
 	for item in items:
+		item["accepted_makeup_courses"] = accepted_map.get(item.get("name"), [])
 		_attach_course_label(item, item.get("name"), item)
 	return {"items": items}
 
@@ -716,6 +729,7 @@ def create_school_admin_course_data(payload=None):
 	payload = _get_payload(payload)
 	doc = frappe.new_doc("Course")
 	_apply_master_payload(doc, payload, COURSE_EDIT_FIELDS)
+	_apply_course_makeup_acceptance(doc, payload)
 	if not doc.get("course_name") and payload.get("name"):
 		_set_if_field(doc, "course_name", payload.get("name"))
 	if _has_field("Course", "status") and not doc.get("status"):
@@ -736,6 +750,7 @@ def update_school_admin_course_data(course=None, payload=None):
 	doc = frappe.get_doc("Course", course)
 	payload = _get_payload(payload)
 	_apply_master_payload(doc, payload, COURSE_EDIT_FIELDS)
+	_apply_course_makeup_acceptance(doc, payload)
 	_apply_course_pricing_defaults(doc)
 	_apply_course_invoice_item_default(doc)
 	_validate_required(doc, ["course_name"])
@@ -747,6 +762,8 @@ def update_school_admin_course_data(course=None, payload=None):
 
 def _apply_course_pricing_defaults(doc):
 	if not _has_field("Course", "term_session_fee"):
+		return
+	if cint(doc.get("is_makeup_course")):
 		return
 	full_term_fee_value = doc.get("full_term_fee")
 	total_sessions_value = doc.get("total_session_per_term")
@@ -762,8 +779,49 @@ def _apply_course_pricing_defaults(doc):
 def _apply_course_invoice_item_default(doc):
 	if not _has_field("Course", "invoice_item"):
 		return
+	if cint(doc.get("is_makeup_course")) and not doc.get("invoice_item"):
+		return
 	item_code = str(doc.get("invoice_item") or DEFAULT_COURSE_INVOICE_ITEM).strip()
 	_set_if_field(doc, "invoice_item", _ensure_school_admin_invoice_item(item_code))
+
+
+def _apply_course_makeup_acceptance(doc, payload):
+	if "accepted_makeup_courses" not in payload or not _has_field("Course", "accepted_makeup_course"):
+		return
+	accepted = []
+	seen = set()
+	for value in payload.get("accepted_makeup_courses") or []:
+		course = value.get("course") if isinstance(value, dict) else value
+		course = str(course or "").strip()
+		if not course or course in seen:
+			continue
+		if not frappe.db.exists("Course", course):
+			frappe.throw(_("Accepted makeup course does not exist: {0}").format(course))
+		seen.add(course)
+		accepted.append({"course": course})
+	doc.set("accepted_makeup_course", accepted)
+
+
+def _get_course_makeup_acceptance_map(courses):
+	courses = sorted({course for course in courses if course})
+	if not courses:
+		return {}
+	rows = frappe.get_all(
+		"Course Accepted Makeup Course",
+		filters={
+			"parent": ["in", courses],
+			"parenttype": "Course",
+			"parentfield": "accepted_makeup_course",
+		},
+		fields=["parent", "course", "idx"],
+		order_by="parent asc, idx asc",
+		limit_page_length=0,
+	)
+	accepted = defaultdict(list)
+	for row in rows:
+		if row.get("parent") and row.get("course"):
+			accepted[row.get("parent")].append(row.get("course"))
+	return dict(accepted)
 
 
 def _ensure_school_admin_invoice_item(item_code):
@@ -1310,7 +1368,7 @@ def _create_school_admin_manual_invoice_doc(payload):
 	_set_if_field(invoice, "source_document", payload.get("source_document"))
 	_set_if_field(invoice, "billing_note", payload.get("billing_note"))
 	_set_if_field(invoice, "source_type", payload.get("source_type") or "Manual")
-	_set_if_field(invoice, "qas_is_manual_invoice", 1)
+	_set_if_field(invoice, "qas_is_manual_invoice", cint(payload.get("qas_is_manual_invoice", 1)))
 	_set_if_field(
 		invoice,
 		"qas_apply_store_credit_on_submit",
@@ -3695,7 +3753,11 @@ def get_school_admin_vouchers_data(student=None, status=None, limit=120):
 		filters["status"] = status
 	fields = _safe_fields(
 		"Makeup Voucher",
-		["name", "student", "course", "original_session", "leave_request", "status", "issue_date", "expiry_date", "used_on_session", "used_date", "used_by_student", "voucher_label"],
+		[
+			"name", "student", "course", "original_session", "leave_request", "status",
+			"issue_date", "expiry_date", "used_on_session", "used_date", "used_by_student",
+			"voucher_label", "price_difference_invoice",
+		],
 	)
 	rows = frappe.get_all(
 		"Makeup Voucher",
@@ -3704,7 +3766,9 @@ def get_school_admin_vouchers_data(student=None, status=None, limit=120):
 		order_by="modified desc",
 		limit=_limit(limit, default=120, max_value=300),
 	)
-	return {"items": [_normalize_row_payload("Makeup Voucher", row) for row in rows]}
+	items = [_normalize_row_payload("Makeup Voucher", row) for row in rows]
+	_attach_makeup_difference_invoice_summaries(items)
+	return {"items": items}
 
 
 
@@ -3748,43 +3812,263 @@ def get_school_admin_redeemable_sessions_data(parent=None, voucher_id=None, stud
     parent_doc, students, voucher = _get_school_admin_voucher_family_context(parent=parent, voucher_id=voucher_id)
     if student:
         _assert_student_in_family(student, students)
-    return get_parent_redeemable_sessions_core(
+    result = get_parent_redeemable_sessions_core(
         parent=parent_doc,
         students=students,
         voucher_id=voucher.name,
         student=student,
+        allow_ordinary_cross_course=True,
     )
+    for session in result.get("available_sessions") or []:
+        try:
+            session["pricing"] = {
+                **preview_makeup_target_pricing(voucher.get("course"), session.get("course")),
+                "booking_allowed": True,
+            }
+        except ValueError as exc:
+            session["pricing"] = {
+                "booking_allowed": False,
+                "pricing_error": str(exc),
+            }
+    return result
 
 
 def redeem_school_admin_voucher_data(parent=None, voucher_id=None, session_id=None, student=None, reason=None):
     _require_school_admin()
+    if not session_id:
+        frappe.throw(_("Course session is required."))
     reason = _school_admin_required_reason(reason)
-    parent_doc, students, voucher = _get_school_admin_voucher_family_context(parent=parent, voucher_id=voucher_id)
-    _assert_student_in_family(student, students)
-    result = redeem_parent_voucher_core(
-        parent=parent_doc,
-        students=students,
-        voucher_id=voucher.name,
-        session_id=session_id,
-        student=student,
-    )
-    _audit_school_admin_redeem_result(result, reason)
-    frappe.db.commit()
-    return result
+    with _school_admin_makeup_lock(voucher_id):
+        parent_doc, students, voucher = _get_school_admin_voucher_family_context(parent=parent, voucher_id=voucher_id)
+        _assert_student_in_family(student, students)
+        session = _build_redeem_session_payload(session_id)
+        pricing = get_makeup_target_pricing(voucher.get("course"), session.get("course"))
+        savepoint = _school_admin_makeup_savepoint("redeem", voucher.name)
+        try:
+            result = redeem_parent_voucher_core(
+                parent=parent_doc,
+                students=students,
+                voucher_id=voucher.name,
+                session_id=session_id,
+                student=student,
+                allow_ordinary_cross_course=True,
+                notify_staff=False,
+            )
+            invoice = _ensure_makeup_price_difference_invoice(
+                parent_doc=parent_doc,
+                voucher=frappe.get_doc("Makeup Voucher", voucher.name),
+                student=student,
+                session=result.get("session") or session,
+                pricing=pricing,
+                reason=reason,
+            )
+            result["pricing"] = pricing
+            result["price_difference_invoice"] = _makeup_invoice_summary(invoice)
+            result["notification"] = enqueue_session_staff_notification(
+                "makeup_booked",
+                course_session=session_id,
+                student=student,
+                source_doctype="Makeup Voucher",
+                source_document=voucher.name,
+            )
+            _audit_school_admin_redeem_result(result, reason)
+            frappe.db.commit()
+            return result
+        except Exception:
+            _rollback_school_admin_makeup_savepoint(savepoint)
+            raise
 
 
 def cancel_school_admin_makeup_booking_data(parent=None, voucher_id=None, reason=None, confirm_cancel=0):
     _require_school_admin()
-    _parent_doc, _students, voucher = _get_school_admin_voucher_family_context(parent=parent, voucher_id=voucher_id)
     reason = str(reason or "").strip()
-    try:
-        result = cancel_makeup_booking_core(voucher, confirm_cancel=confirm_cancel)
-        _audit_school_admin_makeup_cancellation_result(result, reason)
-        frappe.db.commit()
-        return result
-    except Exception:
-        frappe.db.rollback()
-        raise
+    with _school_admin_makeup_lock(voucher_id):
+        _parent_doc, _students, voucher = _get_school_admin_voucher_family_context(parent=parent, voucher_id=voucher_id)
+        difference_invoice = get_makeup_difference_invoice(voucher)
+        settlement = classify_difference_invoice(difference_invoice)
+        _validate_makeup_cancellation_settlement(settlement, difference_invoice)
+        original_session = voucher.get("used_on_session")
+        used_student = voucher.get("used_by_student") or voucher.get("student")
+        if not original_session:
+            frappe.throw(_("This used makeup voucher is missing its booked session."))
+        if not used_student:
+            frappe.throw(_("This used makeup voucher is missing its booked student."))
+        target_course = (_build_redeem_session_payload(original_session) or {}).get("course")
+        savepoint = _school_admin_makeup_savepoint("cancel", voucher.name)
+        try:
+            if settlement.get("action") == "delete_draft":
+                _delete_makeup_difference_draft(difference_invoice)
+            result = cancel_makeup_booking_core(voucher, confirm_cancel=confirm_cancel)
+            refreshed_voucher = frappe.get_doc("Makeup Voucher", voucher.name)
+            if settlement.get("upgrade_voucher_course") and target_course:
+                target = frappe.db.get_value("Course", target_course, ["name", "is_makeup_course"], as_dict=True)
+                if target and not cint(target.get("is_makeup_course")):
+                    refreshed_voucher.course = target_course
+                    result["voucher_course_upgraded"] = True
+            if frappe.db.has_column("Makeup Voucher", "price_difference_invoice"):
+                refreshed_voucher.price_difference_invoice = None
+            refreshed_voucher.flags.skip_makeup_attendance_sync = True
+            refreshed_voucher.save(ignore_permissions=True)
+            result["voucher"] = _build_school_admin_makeup_voucher_payload(refreshed_voucher)
+            result["price_difference_invoice"] = _makeup_invoice_summary(difference_invoice)
+            result["price_difference_settlement"] = settlement
+            result["notification"] = enqueue_session_staff_notification(
+                "makeup_cancelled",
+                course_session=original_session,
+                student=used_student,
+                source_doctype="Makeup Voucher",
+                source_document=voucher.name,
+            )
+            _audit_school_admin_makeup_cancellation_result(result, reason)
+            frappe.db.commit()
+            return result
+        except Exception:
+            _rollback_school_admin_makeup_savepoint(savepoint)
+            raise
+
+
+@contextmanager
+def _school_admin_makeup_lock(voucher_id):
+    cache = getattr(frappe, "cache", None)
+    if not cache or not hasattr(cache, "lock"):
+        yield
+        return
+    lock_name = "qas-school-admin-makeup:{0}".format(voucher_id or "missing")
+    with cache.lock(lock_name, timeout=60, blocking_timeout=10):
+        yield
+
+
+def _school_admin_makeup_savepoint(action, voucher_id):
+    savepoint = "school_admin_makeup_{0}_{1}".format(
+        action,
+        re.sub(r"[^a-zA-Z0-9_]", "_", str(voucher_id or "voucher")),
+    )
+    if hasattr(frappe.db, "savepoint"):
+        frappe.db.savepoint(savepoint)
+        return savepoint
+    return None
+
+
+def _rollback_school_admin_makeup_savepoint(savepoint):
+    if savepoint:
+        try:
+            frappe.db.rollback(save_point=savepoint)
+            return
+        except TypeError:
+            pass
+    frappe.db.rollback()
+
+
+def _ensure_makeup_price_difference_invoice(*, parent_doc, voucher, student, session, pricing, reason):
+    if not pricing.get("requires_difference_invoice"):
+        return None
+
+    existing = get_makeup_difference_invoice(voucher)
+    if existing:
+        settlement = classify_difference_invoice(existing)
+        if settlement.get("action") != "release_cancelled":
+            return frappe.get_doc("Sales Invoice", existing.get("name"))
+        if frappe.db.has_column("Makeup Voucher", "price_difference_invoice"):
+            voucher.price_difference_invoice = None
+
+    source_course = pricing.get("source_course")
+    target_course = pricing.get("target_course")
+    session_id = session.get("session_id")
+    student_name = get_student_parent_name(student) or student
+    description = _(
+        "{0} - Makeup price difference: {1} to {2}; session {3}."
+    ).format(
+        student_name,
+        source_course,
+        target_course,
+        get_course_session_snapshot_label(session_id) or session_id,
+    )
+    invoice = _create_school_admin_manual_invoice_doc(
+        {
+            "customer": get_invoice_customer(parent_doc.name),
+            "parent": parent_doc.name,
+            "student": student,
+            "course": target_course,
+            "qas_invoice_type": "Course",
+            "source_doctype": "Makeup Voucher",
+            "source_document": voucher.name,
+            "source_type": MAKEUP_PRICE_DIFFERENCE_SOURCE_TYPE,
+            "qas_is_manual_invoice": 0,
+            "apply_store_credit_on_submit": 1,
+            "billing_note": _("Draft makeup price-difference invoice. No parent email has been sent."),
+            "remarks": _("School Admin makeup booking reason: {0}").format(reason),
+            "items": [
+                {
+                    "item_code": get_invoice_item(target_course),
+                    "item_name": _("Makeup price difference"),
+                    "description": description,
+                    "qty": 1,
+                    "rate": pricing.get("price_difference"),
+                    "qas_line_type": "Course Fee",
+                    "student": student,
+                    "course": target_course,
+                    "course_session": get_course_session_snapshot_label(session_id) or session_id,
+                    "session_count": 1,
+                }
+            ],
+        }
+    )
+    if frappe.db.has_column("Makeup Voucher", "price_difference_invoice"):
+        voucher.price_difference_invoice = invoice.name
+        voucher.flags.skip_makeup_attendance_sync = True
+        voucher.save(ignore_permissions=True)
+    _add_comment(
+        "Sales Invoice",
+        invoice.name,
+        _("Draft created automatically for Makeup Voucher {0}. No parent email was sent.").format(voucher.name),
+    )
+    return invoice
+
+
+def _validate_makeup_cancellation_settlement(settlement, invoice):
+    action = settlement.get("action")
+    invoice_name = (invoice or {}).get("name") if hasattr(invoice, "get") else None
+    if action == "block_unpaid":
+        frappe.throw(
+            _(
+                "Cancel submitted unpaid difference Invoice {0} manually, then retry the makeup cancellation."
+            ).format(invoice_name)
+        )
+    if action == "block_partial":
+        frappe.throw(
+            _(
+                "Difference Invoice {0} is partially paid. Complete a manual finance review before cancelling this makeup."
+            ).format(invoice_name)
+        )
+
+
+def _delete_makeup_difference_draft(invoice):
+    if not invoice or cint(invoice.get("docstatus")) != 0:
+        return
+    invoice_name = invoice.get("name")
+    _run_school_admin_invoice_mutation(
+        lambda: frappe.delete_doc("Sales Invoice", invoice_name, ignore_permissions=True)
+    )
+
+
+def _makeup_invoice_summary(invoice):
+    if not invoice:
+        return None
+    return {
+        fieldname: invoice.get(fieldname)
+        for fieldname in [
+            "name",
+            "docstatus",
+            "status",
+            "grand_total",
+            "paid_amount",
+            "outstanding_amount",
+        ]
+    }
+
+
+def _build_school_admin_makeup_voucher_payload(voucher):
+    return _build_makeup_voucher_payload(voucher)
 
 
 def _get_school_admin_family_context(parent=None, student=None):
@@ -3988,7 +4272,11 @@ def _get_family_voucher_rows(students=None, status=None, limit=80):
         filters["status"] = status
     fields = _safe_fields(
         "Makeup Voucher",
-        ["name", "student", "course", "original_session", "leave_request", "status", "issue_date", "expiry_date", "used_on_session", "used_date", "used_by_student", "voucher_label"],
+        [
+            "name", "student", "course", "original_session", "leave_request", "status",
+            "issue_date", "expiry_date", "used_on_session", "used_date", "used_by_student",
+            "voucher_label", "price_difference_invoice",
+        ],
     )
     rows = frappe.get_all(
         "Makeup Voucher",
@@ -3998,6 +4286,7 @@ def _get_family_voucher_rows(students=None, status=None, limit=80):
         limit=_limit(limit, default=80, max_value=300),
     )
     items = [_normalize_row_payload("Makeup Voucher", row) for row in rows]
+    _attach_makeup_difference_invoice_summaries(items)
     attendance_map = _get_family_makeup_attendance_map(items)
     session_map = _get_school_admin_session_summary_map(
         [item.get("original_session") for item in items if item.get("original_session")]
@@ -4017,10 +4306,32 @@ def _get_family_voucher_rows(students=None, status=None, limit=80):
         item["used_session_date"] = used_session.get("session_date")
         item["used_day_of_week"] = used_session.get("day_of_week")
         item["used_start_time"] = used_session.get("start_time")
+        item["used_course"] = used_session.get("course")
         attendance = attendance_map.get(item.get("name")) or {}
         item["makeup_attendance_entry"] = attendance.get("name")
         item["makeup_attendance_status"] = attendance.get("status")
     return items
+
+
+def _attach_makeup_difference_invoice_summaries(vouchers):
+    invoice_names = sorted({
+        row.get("price_difference_invoice")
+        for row in vouchers
+        if row.get("price_difference_invoice")
+    })
+    if not invoice_names:
+        return vouchers
+    rows = frappe.get_all(
+        "Sales Invoice",
+        filters={"name": ["in", invoice_names]},
+        fields=["name", "docstatus", "status", "grand_total", "paid_amount", "outstanding_amount"],
+        limit_page_length=0,
+    )
+    invoice_map = {row.get("name"): row for row in rows}
+    for voucher in vouchers:
+        invoice = invoice_map.get(voucher.get("price_difference_invoice"))
+        voucher["price_difference_invoice_summary"] = _makeup_invoice_summary(invoice)
+    return vouchers
 
 
 def _get_family_makeup_attendance_map(vouchers):
@@ -4430,6 +4741,7 @@ def _get_course_payload(course):
 	if not rows:
 		return {"doctype": "Course", "name": course}
 	payload = _normalize_row_payload("Course", rows[0])
+	payload["accepted_makeup_courses"] = _get_course_makeup_acceptance_map([course]).get(course, [])
 	_attach_course_label(payload, payload.get("name"), payload)
 	return payload
 
