@@ -41,6 +41,7 @@ from qas_custom.services.support_view import get_support_view_campus_admin_profi
 
 POST_VISIT_INQUIRY_STATUSES = ("Completed", "Follow-up", "No-show", "Converted", "Inactive")
 CAMPUS_ADMIN_INQUIRY_RESULT_LIMIT = 200
+CAMPUS_ADMIN_CURRENT_TERM_ENROLLMENT_RESULT_LIMIT = 50
 CAMPUS_ADMIN_INQUIRY_SEARCH_FIELDS = (
 	"name",
 	"submitted_student_name",
@@ -72,6 +73,95 @@ def get_campus_admin_csrf_token_data():
 def get_campus_admin_teacher_directory_data(query=None, limit=300):
 	_require_campus_admin_profile()
 	return get_active_teacher_directory_data(query=query, limit=limit)
+
+
+def get_campus_admin_current_term_enrollments_data(query=None, limit=50):
+	profile = _require_campus_admin_profile()
+	term_result = _get_campus_admin_current_active_term()
+	if term_result["state"] != "ready":
+		return {
+			"items": [],
+			"term": None,
+			"searched": False,
+			**term_result,
+		}
+
+	term = term_result["term"]
+	query = str(query or "").strip()
+	if not query:
+		return {
+			"items": [],
+			"term": term,
+			"searched": False,
+			"state": "ready",
+		}
+
+	page_limit = min(max(cint(limit or CAMPUS_ADMIN_CURRENT_TERM_ENROLLMENT_RESULT_LIMIT), 1), CAMPUS_ADMIN_CURRENT_TERM_ENROLLMENT_RESULT_LIMIT)
+	student_rows = _get_campus_admin_enrollment_search_students(query)
+	if not student_rows:
+		return {
+			"items": [],
+			"term": term,
+			"searched": True,
+			"state": "ready",
+		}
+
+	timeslot_rows = frappe.get_all(
+		"Weekly Timeslot",
+		filters={"term": term, "campus": ["in", profile["campuses"]]},
+		fields=["name", "course", "campus", "day_of_week", "start_time", "end_time"],
+		limit_page_length=0,
+	)
+	if not timeslot_rows:
+		return {
+			"items": [],
+			"term": term,
+			"searched": True,
+			"state": "ready",
+		}
+
+	timeslot_map = {row.get("name"): row for row in timeslot_rows if row.get("name")}
+	enrollments = frappe.get_all(
+		"Enrollment",
+		filters={
+			"term": term,
+			"student": ["in", [row["name"] for row in student_rows]],
+			"weekly_timeslot": ["in", list(timeslot_map)],
+		},
+		fields=["name", "student", "term", "course", "weekly_timeslot", "enrollment_type", "status"],
+		limit_page_length=page_limit * 4,
+	)
+	student_map = {row["name"]: row for row in student_rows}
+	items = []
+	for enrollment in enrollments:
+		timeslot = timeslot_map.get(enrollment.get("weekly_timeslot"))
+		student = student_map.get(enrollment.get("student"))
+		if not timeslot or not student:
+			continue
+		items.append(
+			{
+				"id": enrollment.get("name"),
+				"name": enrollment.get("name"),
+				"student": enrollment.get("student"),
+				"student_name": student.get("student_name") or student.get("name"),
+				"term": term,
+				"course": enrollment.get("course") or timeslot.get("course"),
+				"campus": timeslot.get("campus"),
+				"day_of_week": timeslot.get("day_of_week"),
+				"start_time": timeslot.get("start_time"),
+				"end_time": timeslot.get("end_time"),
+				"enrollment_type": enrollment.get("enrollment_type"),
+				"status": enrollment.get("status"),
+			}
+		)
+
+	items.sort(key=_campus_admin_current_term_enrollment_sort_key)
+	return {
+		"items": items[:page_limit],
+		"term": term,
+		"searched": True,
+		"state": "ready",
+	}
 
 
 def get_campus_admin_dashboard_data(from_date=None, to_date=None):
@@ -890,6 +980,62 @@ def link_campus_admin_inquiry_enrollment_data(inquiry=None, enrollment=None):
 		enrollment,
 		actor=frappe.session.user,
 		operator_label=_("Campus Admin"),
+	)
+
+
+def _get_campus_admin_current_active_term():
+	rows = frappe.get_all(
+		"Term",
+		filters={"status": "Active"},
+		fields=["name"],
+		order_by="start_date desc, name desc",
+		limit_page_length=2,
+	)
+	if not rows:
+		return {
+			"state": "no_active_term",
+			"message": _("No active term is configured."),
+		}
+	if len(rows) > 1:
+		return {
+			"state": "multiple_active_terms",
+			"message": _("Multiple active terms are configured. Ask School Admin to keep only one active term."),
+		}
+	return {"state": "ready", "term": rows[0].get("name")}
+
+
+def _get_campus_admin_enrollment_search_students(query):
+	pattern = f"%{query}%"
+	rows = frappe.get_all(
+		"Student",
+		or_filters=[
+			["Student", "name", "like", pattern],
+			["Student", "student_name", "like", pattern],
+		],
+		fields=["name", "student_name"],
+		limit_page_length=200,
+	)
+	items = [dict(row) for row in rows if row.get("name")]
+	query_key = query.casefold()
+
+	def rank(row):
+		name = str(row.get("student_name") or "").casefold()
+		identifier = str(row.get("name") or "").casefold()
+		if name == query_key or identifier == query_key:
+			return 0
+		if name.startswith(query_key) or identifier.startswith(query_key):
+			return 1
+		return 2
+
+	return sorted(items, key=lambda row: (rank(row), str(row.get("student_name") or row.get("name")).casefold(), row["name"]))
+
+
+def _campus_admin_current_term_enrollment_sort_key(item):
+	return (
+		str(item.get("student_name") or item.get("student") or "").casefold(),
+		str(item.get("day_of_week") or ""),
+		str(item.get("start_time") or ""),
+		str(item.get("name") or ""),
 	)
 
 

@@ -18,6 +18,7 @@ from qas_custom.services.campus_admin import (
 	get_campus_admin_contacts_data,
 	get_campus_admin_course_session_data,
 	get_campus_admin_course_sessions_data,
+	get_campus_admin_current_term_enrollments_data,
 	get_campus_admin_linkable_enrollments_data,
 	get_campus_admin_session_photo_content_data,
 	get_campus_admin_session_video_content_data,
@@ -134,6 +135,11 @@ def campus_admin_get_contacts(from_date=None, to_date=None, campus=None, course_
 		course_session=course_session,
 		query=query,
 	)
+
+
+@frappe.whitelist()
+def campus_admin_get_current_term_enrollments(query=None, limit=50):
+	return get_campus_admin_current_term_enrollments_data(query=query, limit=limit)
 
 
 @frappe.whitelist()
