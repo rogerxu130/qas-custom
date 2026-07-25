@@ -945,8 +945,13 @@ def school_admin_submit_leave_request(parent=None, student=None, course_session=
 
 
 @frappe.whitelist()
-def school_admin_get_redeemable_sessions(parent=None, voucher_id=None, student=None):
-    return get_school_admin_redeemable_sessions_data(parent=parent, voucher_id=voucher_id, student=student)
+def school_admin_get_redeemable_sessions(parent=None, voucher_id=None, student=None, course=None):
+    return get_school_admin_redeemable_sessions_data(
+        parent=parent,
+        voucher_id=voucher_id,
+        student=student,
+        course=course,
+    )
 
 
 @frappe.whitelist()

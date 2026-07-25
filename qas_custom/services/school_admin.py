@@ -3844,7 +3844,7 @@ def submit_school_admin_leave_request_data(parent=None, student=None, course_ses
     return result
 
 
-def get_school_admin_redeemable_sessions_data(parent=None, voucher_id=None, student=None):
+def get_school_admin_redeemable_sessions_data(parent=None, voucher_id=None, student=None, course=None):
     _require_school_admin()
     parent_doc, students, voucher = _get_school_admin_voucher_family_context(parent=parent, voucher_id=voucher_id)
     if student:
@@ -3856,7 +3856,8 @@ def get_school_admin_redeemable_sessions_data(parent=None, voucher_id=None, stud
         student=student,
         allow_ordinary_cross_course=True,
     )
-    for session in result.get("available_sessions") or []:
+    available_sessions = result.get("available_sessions") or []
+    for session in available_sessions:
         try:
             session["pricing"] = {
                 **preview_makeup_target_pricing(voucher.get("course"), session.get("course")),
@@ -3867,7 +3868,51 @@ def get_school_admin_redeemable_sessions_data(parent=None, voucher_id=None, stud
                 "booking_allowed": False,
                 "pricing_error": str(exc),
             }
+    voucher_course = str(voucher.get("course") or "").strip()
+    selected_course = str(course or voucher_course).strip()
+    eligible_courses = _school_admin_makeup_course_options(available_sessions, voucher_course)
+    eligible_course_names = {item.get("course") for item in eligible_courses}
+    if selected_course not in eligible_course_names:
+        frappe.throw(_("The selected course is no longer available for this Makeup Voucher and student."))
+    result["voucher_course"] = voucher_course
+    result["selected_course"] = selected_course
+    result["eligible_courses"] = eligible_courses
+    result["available_sessions"] = [
+        session for session in available_sessions if session.get("course") == selected_course
+    ]
     return result
+
+
+def _school_admin_makeup_course_options(available_sessions, voucher_course):
+    session_counts = {}
+    for session in available_sessions or []:
+        course = str(session.get("course") or "").strip()
+        if not course:
+            continue
+        session_counts[course] = session_counts.get(course, 0) + 1
+
+    course_names = set(session_counts)
+    if voucher_course:
+        course_names.add(voucher_course)
+    label_map = _course_label_map(course_names)
+
+    def build_option(course):
+        row = {"course": course}
+        _attach_course_label(row, course, label_map.get(course))
+        row["label"] = row.get("course_label") or course
+        row["is_original"] = course == voucher_course
+        row["session_count"] = session_counts.get(course, 0)
+        return row
+
+    original = [build_option(voucher_course)] if voucher_course else []
+    other_courses = sorted(
+        (course for course in course_names if course != voucher_course),
+        key=lambda course: (
+            str((label_map.get(course) or {}).get("course_name") or course).casefold(),
+            course,
+        ),
+    )
+    return original + [build_option(course) for course in other_courses]
 
 
 def redeem_school_admin_voucher_data(parent=None, voucher_id=None, session_id=None, student=None, reason=None):
