@@ -18,7 +18,7 @@ from qas_custom.modules.enrollment.commands import (
 	link_invoice_to_enrollment,
 )
 from qas_custom.modules.inquiry.commands import get_inquiry_for_conversion, mark_converted
-from qas_custom.modules.inquiry.notes import add_conversion_note, add_system_note
+from qas_custom.modules.inquiry.notes import add_conversion_internal_note, add_conversion_note, add_system_note
 
 
 CONVERSION_INTERNAL_NOTE_MAX_LENGTH = 1000
@@ -114,6 +114,7 @@ def convert_inquiry_to_full_term_core(
 	link_invoice_to_enrollment(enrollment, invoice)
 	create_full_term_attendance_entries(remaining_sessions, inquiry_doc.student, enrollment.name)
 	inquiry_doc = mark_converted(inquiry_doc, enrollment, invoice)
+	add_conversion_internal_note(inquiry_doc, invoice, internal_note, actor=actor)
 	add_conversion_note(
 		inquiry_doc=inquiry_doc,
 		enrollment=enrollment,

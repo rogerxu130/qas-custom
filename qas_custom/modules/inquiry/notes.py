@@ -27,6 +27,19 @@ def add_conversion_note(inquiry_doc, enrollment, invoice, session, timeslot, rem
 	note_doc.insert()
 
 
+def add_conversion_internal_note(inquiry_doc, invoice, internal_note, actor=None):
+	note_text = str(internal_note or "").strip()
+	if not note_text:
+		return
+	add_system_note(
+		inquiry_doc=inquiry_doc,
+		note=_("Campus Admin conversion note: {0}").format(note_text),
+		source_doctype="Sales Invoice",
+		source_document=invoice.name,
+		actor=actor,
+	)
+
+
 def add_attendance_sync_note(inquiry_doc, attendance_entry, status, target_status, previous_status=None, comment=None, actor=None):
 	add_system_note(
 		inquiry_doc=inquiry_doc,

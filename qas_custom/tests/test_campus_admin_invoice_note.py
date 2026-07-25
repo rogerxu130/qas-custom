@@ -11,10 +11,37 @@ from qas_custom.modules.workflows.trial_conversion import (
 	convert_inquiry_to_full_term_core,
 	normalize_conversion_internal_note,
 )
+from qas_custom.modules.inquiry.notes import add_conversion_internal_note
 from qas_custom.services.campus_admin import convert_campus_admin_inquiry_data
 
 
 class TestCampusAdminInvoiceNote(TestCase):
+	@patch("qas_custom.modules.inquiry.notes.add_system_note")
+	def test_adds_non_empty_conversion_note_to_inquiry_timeline(self, add_system_note):
+		inquiry = SimpleNamespace(name="INQ-001")
+		invoice = SimpleNamespace(name="ACC-SINV-001")
+
+		add_conversion_internal_note(
+			inquiry,
+			invoice,
+			"Promised 10% discount",
+			actor="campus@example.com",
+		)
+
+		add_system_note.assert_called_once_with(
+			inquiry_doc=inquiry,
+			note="Campus Admin conversion note: Promised 10% discount",
+			source_doctype="Sales Invoice",
+			source_document="ACC-SINV-001",
+			actor="campus@example.com",
+		)
+
+	@patch("qas_custom.modules.inquiry.notes.add_system_note")
+	def test_does_not_add_empty_conversion_note_to_inquiry_timeline(self, add_system_note):
+		add_conversion_internal_note(SimpleNamespace(name="INQ-001"), SimpleNamespace(name="ACC-SINV-001"), "   ")
+
+		add_system_note.assert_not_called()
+
 	def test_normalizes_optional_note(self):
 		self.assertEqual(normalize_conversion_internal_note(None), "")
 		self.assertEqual(normalize_conversion_internal_note("   "), "")
