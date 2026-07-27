@@ -240,14 +240,25 @@ class TestSchoolAdminReportingBuild(TestCase):
 
 
 class TestSchoolAdminReportingActions(TestCase):
-	@patch("qas_custom.services.school_admin_reporting.frappe.get_roles", return_value=["Campus Admin"])
-	def test_non_school_admin_is_denied(self, _mock_roles):
-		with self.assertRaises(frappe.PermissionError):
-			_require_school_admin()
+	def test_non_school_admin_is_denied(self):
+		fake_frappe = SimpleNamespace(
+			session=SimpleNamespace(user="campus@example.com"),
+			get_roles=Mock(return_value=["Campus Admin"]),
+			PermissionError=frappe.PermissionError,
+			throw=Mock(side_effect=frappe.PermissionError),
+		)
+		with patch("qas_custom.services.school_admin_reporting.frappe", fake_frappe):
+			with self.assertRaises(frappe.PermissionError):
+				_require_school_admin()
 
-	@patch("qas_custom.services.school_admin_reporting.frappe.get_roles", return_value=["School Admin"])
-	def test_school_admin_is_allowed(self, _mock_roles):
-		_require_school_admin()
+	def test_school_admin_is_allowed(self):
+		fake_frappe = SimpleNamespace(
+			session=SimpleNamespace(user="school@example.com"),
+			get_roles=Mock(return_value=["School Admin"]),
+			throw=Mock(),
+		)
+		with patch("qas_custom.services.school_admin_reporting.frappe", fake_frappe):
+			_require_school_admin()
 
 	@patch("qas_custom.services.school_admin_reporting._require_school_admin")
 	@patch("qas_custom.services.school_admin_reporting._validate_reporting_term")
@@ -332,27 +343,27 @@ class TestSchoolAdminVoucherReport(TestCase):
 	@patch("qas_custom.services.school_admin_reporting._latest_completed_snapshot")
 	@patch("qas_custom.services.school_admin_reporting._validate_reporting_term")
 	@patch("qas_custom.services.school_admin_reporting._require_school_admin")
-	@patch("qas_custom.services.school_admin_reporting.frappe.get_all")
-	@patch("qas_custom.services.school_admin_reporting.frappe.db.count", return_value=1)
 	def test_family_row_filters_are_applied_to_latest_snapshot(
 		self,
-		_mock_count,
-		mock_get_all,
 		_mock_require,
 		_mock_validate,
 		mock_latest,
 		_mock_options,
 	):
 		mock_latest.return_value = frappe._dict(name="QARS-1", term="Term 3 2026", status="Completed")
-		mock_get_all.return_value = []
-		result = get_school_admin_reporting_rows_data(
-			term="Term 3 2026",
-			report_type=FAMILY_REPORT_TYPE,
-			attendance="Absent",
-			invoice="Outstanding",
-			query="pat",
+		fake_frappe = SimpleNamespace(
+			db=SimpleNamespace(count=Mock(return_value=1)),
+			get_all=Mock(return_value=[]),
 		)
-		filters = mock_get_all.call_args.kwargs["filters"]
+		with patch("qas_custom.services.school_admin_reporting.frappe", fake_frappe):
+			result = get_school_admin_reporting_rows_data(
+				term="Term 3 2026",
+				report_type=FAMILY_REPORT_TYPE,
+				attendance="Absent",
+				invoice="Outstanding",
+				query="pat",
+			)
+		filters = fake_frappe.get_all.call_args.kwargs["filters"]
 		self.assertEqual(filters["snapshot"], "QARS-1")
 		self.assertEqual(filters["attendance_classification"], "Absent")
 		self.assertEqual(filters["invoice_classification"], "Outstanding")
@@ -363,24 +374,25 @@ class TestSchoolAdminVoucherReport(TestCase):
 	@patch("qas_custom.services.school_admin_reporting._latest_completed_snapshot")
 	@patch("qas_custom.services.school_admin_reporting._validate_reporting_term")
 	@patch("qas_custom.services.school_admin_reporting._require_school_admin")
-	@patch("qas_custom.services.school_admin_reporting.frappe.get_all", return_value=[])
-	@patch("qas_custom.services.school_admin_reporting.frappe.db.count", return_value=0)
 	def test_unmarked_filters_are_applied(
 		self,
-		_mock_count,
-		mock_get_all,
 		_mock_require,
 		_mock_validate,
 		mock_latest,
 		_mock_options,
 	):
 		mock_latest.return_value = frappe._dict(name="QARS-1", term="Term 3 2026", status="Completed")
-		get_school_admin_reporting_rows_data(
-			term="Term 3 2026",
-			report_type=UNMARKED_REPORT_TYPE,
-			campus="Indooroopilly",
-			teacher="TEA-1",
+		fake_frappe = SimpleNamespace(
+			db=SimpleNamespace(count=Mock(return_value=0)),
+			get_all=Mock(return_value=[]),
 		)
-		filters = mock_get_all.call_args.kwargs["filters"]
+		with patch("qas_custom.services.school_admin_reporting.frappe", fake_frappe):
+			get_school_admin_reporting_rows_data(
+				term="Term 3 2026",
+				report_type=UNMARKED_REPORT_TYPE,
+				campus="Indooroopilly",
+				teacher="TEA-1",
+			)
+		filters = fake_frappe.get_all.call_args.kwargs["filters"]
 		self.assertEqual(filters["campus"], "Indooroopilly")
 		self.assertEqual(filters["teacher"], "TEA-1")

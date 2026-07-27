@@ -231,18 +231,21 @@ def makeup_parent_email_subject(context):
 
 
 def makeup_voucher_issued_email_message(context):
+	manual_voucher = context.get("is_manual_voucher")
 	return _makeup_parent_email_card(
 		context,
 		heading=_("Your Makeup Voucher Is Ready"),
-		intro=_(
-			"A makeup voucher has been created successfully. You can view and use it in the Parent Portal."
+		intro=(
+			_("A makeup voucher has been issued by Queensland Art School. You can view and use it in the Parent Portal.")
+			if manual_voucher
+			else _("A makeup voucher has been created successfully. You can view and use it in the Parent Portal.")
 		),
 		rows=[
 			(_("Student"), context.get("student_name")),
-			(_("Original course"), context.get("course")),
-			(_("Original class date"), context.get("date_display")),
-			(_("Original class time"), _time_range(context)),
-			(_("Campus"), context.get("campus")),
+			(_("Applicable course") if manual_voucher else _("Original course"), context.get("course")),
+			(None if manual_voucher else _("Original class date"), context.get("date_display")),
+			(None if manual_voucher else _("Original class time"), _time_range(context)),
+			(None if manual_voucher else _("Campus"), context.get("campus")),
 			(_("Voucher"), context.get("voucher_label")),
 			(_("Valid until"), context.get("expiry_date_display")),
 		],
@@ -325,6 +328,7 @@ def _build_makeup_parent_context(
 	student: str | None = None,
 ):
 	voucher_doc = frappe.get_doc("Makeup Voucher", voucher)
+	is_manual_voucher = not voucher_doc.get("original_session") and not voucher_doc.get("leave_request")
 	original_student = voucher_doc.get("student")
 	selected_student = (
 		student
@@ -350,6 +354,7 @@ def _build_makeup_parent_context(
 	)
 	return {
 		"event_kind": event_kind,
+		"is_manual_voucher": is_manual_voucher,
 		"voucher": voucher_doc.name,
 		"voucher_label": get_makeup_voucher_label(voucher_doc),
 		"recipient": recipient,
