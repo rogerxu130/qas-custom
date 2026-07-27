@@ -1131,6 +1131,7 @@ def get_school_admin_inquiries_data(
 	)
 	items = [_build_inquiry_list_item(row) for row in rows]
 	_attach_inquiry_teacher_labels(items)
+	_attach_trial_payment_status(items)
 	return {
 		"items": items,
 		"total": total,
@@ -1144,7 +1145,9 @@ def get_school_admin_inquiry_data(inquiry=None):
 	_require_school_admin()
 	if not inquiry:
 		frappe.throw(_("Inquiry is required."))
-	return build_inquiry_detail(inquiry)
+	detail = build_inquiry_detail(inquiry)
+	_attach_trial_payment_status([detail.get("inquiry") or {}])
+	return detail
 
 
 def create_school_admin_trial_inquiry_data(payload=None):
@@ -5618,6 +5621,72 @@ def _build_inquiry_list_item(row):
 	payload = build_inquiry_summary(row)
 	payload["latest_note"] = _get_latest_inquiry_note(row.name)
 	return payload
+
+
+def _attach_trial_payment_status(items):
+	"""Add the mobile Trial payment badge without using unrelated family invoices."""
+	trial_items = [item for item in items if item.get("inquiry_type") == "Trial Lesson"]
+	if not trial_items:
+		return items
+
+	for item in trial_items:
+		item["trial_payment_status"] = "needs_front_desk"
+
+	inquiry_ids = sorted(
+		{
+			item.get("id") or item.get("inquiry_id") or item.get("name")
+			for item in trial_items
+			if item.get("id") or item.get("inquiry_id") or item.get("name")
+		}
+	)
+	if not inquiry_ids:
+		return items
+
+	invoice_by_inquiry = {
+		(item.get("id") or item.get("inquiry_id") or item.get("name")): item.get("trial_invoice")
+		for item in trial_items
+		if item.get("trial_invoice")
+	}
+	missing_invoice_links = sorted(inquiry for inquiry in inquiry_ids if not invoice_by_inquiry.get(inquiry))
+	if missing_invoice_links:
+		fallback_rows = frappe.get_all(
+			"Sales Invoice",
+			filters={
+				"source_doctype": "Inquiry",
+				"source_document": ["in", missing_invoice_links],
+			},
+			fields=["name", "source_document", "creation"],
+			order_by="creation asc",
+			limit_page_length=0,
+		)
+		for row in fallback_rows:
+			inquiry = row.get("source_document")
+			if inquiry and row.get("name") and not invoice_by_inquiry.get(inquiry):
+				invoice_by_inquiry[inquiry] = row.get("name")
+
+	invoice_names = sorted({invoice for invoice in invoice_by_inquiry.values() if invoice})
+	if not invoice_names:
+		return items
+
+	invoice_rows = frappe.get_all(
+		"Sales Invoice",
+		filters={"name": ["in", invoice_names]},
+		fields=["name", "docstatus", "status", "outstanding_amount"],
+		limit_page_length=0,
+	)
+	invoice_map = {row.get("name"): row for row in invoice_rows if row.get("name")}
+	for item in trial_items:
+		inquiry = item.get("id") or item.get("inquiry_id") or item.get("name")
+		invoice_name = invoice_by_inquiry.get(inquiry)
+		invoice = invoice_map.get(invoice_name)
+		if invoice_name:
+			item["trial_invoice"] = invoice_name
+		if not invoice or cint(invoice.get("docstatus")) != 1 or str(invoice.get("status") or "").lower() == "cancelled":
+			continue
+		if max(flt(invoice.get("outstanding_amount") or 0), 0) <= 0.005:
+			item["trial_payment_status"] = "paid"
+
+	return items
 
 
 def _attach_inquiry_teacher_labels(items):
