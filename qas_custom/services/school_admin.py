@@ -78,7 +78,12 @@ from qas_custom.modules.notifications import (
 	send_parent_invoice_notification,
 )
 from qas_custom.modules.notifications.guard import disable_sales_invoice_auto_notifications
-from qas_custom.services.class_attendance import ATTENDANCE_DOCTYPE, create_attendance_entry, get_attendance_entries
+from qas_custom.services.class_attendance import (
+	ATTENDANCE_DOCTYPE,
+	create_attendance_entry,
+	get_attendance_entries,
+	reactivate_cancelled_attendance_entry,
+)
 from qas_custom.services.display_labels import get_course_session_snapshot_label, get_makeup_voucher_label, get_student_display_code, get_student_display_name, get_student_parent_name
 from qas_custom.utils.environment import payment_block_reason, payment_mutations_enabled
 from qas_custom.services.inquiry import (
@@ -6402,8 +6407,58 @@ def _create_enrollment_attendance_entries(doc, start_date=None):
 		if start_session_date:
 			filters["session_date"] = [">=", getdate(start_session_date)]
 	rows = frappe.get_all("Course Sessions", filters=filters, fields=["name", "session_date"], order_by="session_date asc")
-	create_full_term_attendance_entries(rows, doc.student, doc.name)
+	_ensure_enrollment_attendance_entries(doc, rows)
 	return [row.name for row in rows]
+
+
+def _ensure_enrollment_attendance_entries(doc, sessions):
+	"""Prepare full-term attendance without leaving same-enrollment rows cancelled.
+
+	A cancelled entry remains part of the attendance audit trail. If the same
+	Enrollment is reactivated, restore only that exact source row rather than
+	deleting it or taking ownership of an entry from another source.
+	"""
+	result = {"created": 0, "reactivated": 0, "retained": 0, "total": 0}
+	for session in sessions or []:
+		session_name = session.get("name") if hasattr(session, "get") else session.name
+		if not session_name:
+			continue
+		existing = frappe.db.get_value(
+			ATTENDANCE_DOCTYPE,
+			{
+				"source_doctype": "Enrollment",
+				"source_document": doc.name,
+				"course_session": session_name,
+			},
+			["name", "status"],
+			as_dict=True,
+		)
+		if existing:
+			if existing.get("status") == "Cancelled":
+				reactivate_cancelled_attendance_entry(
+					existing.get("name"),
+					status="To be started",
+					comments=f"Added from Enrollment {doc.name}",
+					source_doctype="Enrollment",
+					source_document=doc.name,
+				)
+				result["reactivated"] += 1
+			else:
+				result["retained"] += 1
+			result["total"] += 1
+			continue
+		create_attendance_entry(
+			course_session=session_name,
+			student=doc.student,
+			enrollment_type="Full-Term",
+			source_doctype="Enrollment",
+			source_document=doc.name,
+			status="To be started",
+			comments=f"Added from Enrollment {doc.name}",
+		)
+		result["created"] += 1
+		result["total"] += 1
+	return result
 
 
 def _create_attendance_for_enrollment_names(enrollment_names, payload=None):

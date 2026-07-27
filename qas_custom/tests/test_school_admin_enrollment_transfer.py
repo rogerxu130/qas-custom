@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 from unittest import TestCase
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import frappe
 from frappe.utils import getdate
@@ -8,6 +8,7 @@ from frappe.utils import getdate
 from qas_custom.services.school_admin import (
 	_build_enrollment_transfer_preview,
 	_cancel_future_enrollment_attendance,
+	_ensure_enrollment_attendance_entries,
 	_ensure_transfer_destination_attendance,
 	transfer_school_admin_enrollment_data,
 )
@@ -143,3 +144,34 @@ class TestSchoolAdminEnrollmentTransfer(TestCase):
 		)
 		self.assertEqual(create_entry.call_count, 1)
 		self.assertEqual(create_entry.call_args.kwargs["course_session"], "CS-NEW-2")
+
+	@patch("qas_custom.services.school_admin.reactivate_cancelled_attendance_entry")
+	def test_create_attendance_reactivates_cancelled_row_for_same_enrollment(self, reactivate):
+		fake_frappe = SimpleNamespace(
+			db=SimpleNamespace(get_value=Mock(return_value={"name": "ATT-CANCELLED", "status": "Cancelled"}))
+		)
+
+		with patch("qas_custom.services.school_admin.frappe", fake_frappe):
+			result = _ensure_enrollment_attendance_entries(self._enrollment(), [{"name": "CS-001"}])
+
+		self.assertEqual(result, {"created": 0, "reactivated": 1, "retained": 0, "total": 1})
+		reactivate.assert_called_once_with(
+			"ATT-CANCELLED",
+			status="To be started",
+			comments="Added from Enrollment ENR-001",
+			source_doctype="Enrollment",
+			source_document="ENR-001",
+		)
+
+	@patch("qas_custom.services.school_admin.create_attendance_entry")
+	def test_create_attendance_retains_existing_non_cancelled_row(self, create_entry):
+		fake_frappe = SimpleNamespace(
+			db=SimpleNamespace(get_value=Mock(return_value={"name": "ATT-PRESENT", "status": "Present"}))
+		)
+
+		with patch("qas_custom.services.school_admin.frappe", fake_frappe):
+			result = _ensure_enrollment_attendance_entries(self._enrollment(), [{"name": "CS-001"}])
+
+		self.assertEqual(result, {"created": 0, "reactivated": 0, "retained": 1, "total": 1})
+		create_entry.assert_not_called()
+		self.assertEqual(fake_frappe.db.get_value.call_args.args[1]["source_document"], "ENR-001")
