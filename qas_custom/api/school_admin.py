@@ -15,6 +15,7 @@ from qas_custom.services.announcements import (
 )
 from qas_custom.services.support_view import create_support_view_token, get_support_view_targets
 from qas_custom.services.school_admin_reporting import (
+	get_school_admin_voucher_report_data,
 	get_school_admin_reporting_family_detail_data,
 	get_school_admin_reporting_rows_data,
 	get_school_admin_reporting_snapshot_data,
@@ -369,6 +370,16 @@ def school_admin_get_reporting_rows(
 @frappe.whitelist()
 def school_admin_get_reporting_family_detail(row=None):
 	return get_school_admin_reporting_family_detail_data(row=row)
+
+
+@frappe.whitelist()
+def school_admin_get_voucher_report(status=None, query=None, page=1, page_length=50):
+	return get_school_admin_voucher_report_data(
+		status=status,
+		query=query,
+		page=page,
+		page_length=page_length,
+	)
 
 
 @frappe.whitelist()

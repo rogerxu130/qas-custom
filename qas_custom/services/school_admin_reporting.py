@@ -6,7 +6,7 @@ import json
 
 import frappe
 from frappe import _
-from frappe.utils import cint, flt, getdate, now_datetime
+from frappe.utils import cint, flt, getdate, now_datetime, today
 
 from qas_custom.modules.billing.store_credit import get_invoice_payable_amount
 from qas_custom.services.display_labels import get_student_display_name
@@ -212,6 +212,90 @@ def get_school_admin_reporting_family_detail_data(row=None):
 		"parent": values.parent_record,
 		"students": _decode_json(values.student_details_json, []),
 		"invoices": _decode_json(values.invoice_names_json, []),
+	}
+
+
+def get_school_admin_voucher_report_data(status=None, query=None, page=1, page_length=50):
+	"""Return the live, voucher-level School Admin report.
+
+	Voucher expiry is calculated at read time because legacy vouchers are not
+	automatically rewritten from Valid to Expired when a calendar day passes.
+	"""
+	_require_school_admin()
+	if not _doctype_available("Makeup Voucher"):
+		frappe.throw(_("Makeup Voucher data is not installed yet. Please run the site migration."))
+
+	status = str(status or "Usable").strip()
+	allowed_statuses = {"Usable", "Used", "Expired", "Cancelled", "All"}
+	if status not in allowed_statuses:
+		frappe.throw(_("A valid Voucher status filter is required."))
+	page = max(1, cint(page) or 1)
+	page_length = _page_length(page_length)
+	query = str(query or "").strip().lower()
+
+	fields = _safe_fields(
+		"Makeup Voucher",
+		[
+			"name", "student", "course", "original_session", "status", "issue_date",
+			"expiry_date", "used_on_session", "used_date", "used_by_student", "redeemed_student",
+		],
+	)
+	vouchers = [dict(row) for row in frappe.get_all("Makeup Voucher", fields=fields, limit_page_length=0)]
+	student_ids = sorted({row.get("student") for row in vouchers if row.get("student")})
+	students = _student_map(student_ids)
+	parent_field = _student_parent_field()
+	parent_ids = sorted({(students.get(student) or {}).get(parent_field) for student in student_ids if (students.get(student) or {}).get(parent_field)})
+	parents = _parent_map(parent_ids)
+	sessions = _voucher_session_map(vouchers)
+
+	items = []
+	for voucher in vouchers:
+		student = voucher.get("student")
+		student_detail = students.get(student) or {}
+		parent = student_detail.get(parent_field) if parent_field else None
+		parent_detail = parents.get(parent) or {}
+		effective_status = _voucher_effective_status(voucher)
+		if status != "All" and effective_status != status:
+			continue
+		search_text = _search_text(
+			voucher.get("name"), parent_detail.get("parent_name"), parent_detail.get("email"),
+			parent_detail.get("phone"), student, _student_label(student_detail, student),
+			voucher.get("course"), _voucher_session_label(sessions.get(voucher.get("original_session"))),
+		)
+		if query and query not in search_text:
+			continue
+		items.append(
+			{
+				"name": voucher.get("name"),
+				"status": effective_status,
+				"stored_status": voucher.get("status") or "",
+				"student": student,
+				"student_name": _student_label(student_detail, student),
+				"parent_record": parent or "",
+				"parent_name": parent_detail.get("parent_name") or "-",
+				"parent_email": parent_detail.get("email") or "",
+				"parent_phone": parent_detail.get("phone") or "",
+				"course": voucher.get("course") or "",
+				"original_session": voucher.get("original_session") or "",
+				"original_session_label": _voucher_session_label(sessions.get(voucher.get("original_session"))),
+				"issue_date": voucher.get("issue_date"),
+				"expiry_date": voucher.get("expiry_date"),
+				"used_on_session": voucher.get("used_on_session") or "",
+				"used_on_session_label": _voucher_session_label(sessions.get(voucher.get("used_on_session"))),
+				"used_date": voucher.get("used_date"),
+			}
+		)
+
+	items.sort(key=_voucher_report_sort_key)
+	total = len(items)
+	start = (page - 1) * page_length
+	return {
+		"items": items[start:start + page_length],
+		"total": total,
+		"page": page,
+		"page_length": page_length,
+		"has_more": start + page_length < total,
+		"options": ["Usable", "Used", "Expired", "Cancelled", "All"],
 	}
 
 
@@ -433,6 +517,59 @@ def _session_context(attendance):
 			)
 		}
 	return sessions, timeslots
+
+
+def _voucher_session_map(vouchers):
+	session_ids = sorted(
+		{
+			session_id
+			for voucher in vouchers
+			for session_id in (voucher.get("original_session"), voucher.get("used_on_session"))
+			if session_id
+		}
+	)
+	if not session_ids:
+		return {}
+	session_fields = _safe_fields("Course Sessions", ["name", "weekly_timeslot", "session_date", "status"])
+	sessions = {
+		row.get("name"): dict(row)
+		for row in frappe.get_all("Course Sessions", filters={"name": ["in", session_ids]}, fields=session_fields, limit_page_length=0)
+	}
+	timeslot_ids = sorted({row.get("weekly_timeslot") for row in sessions.values() if row.get("weekly_timeslot")})
+	if not timeslot_ids:
+		return sessions
+	timeslot_fields = _safe_fields("Weekly Timeslot", ["name", "course", "campus", "start_time", "end_time"])
+	timeslots = {
+		row.get("name"): dict(row)
+		for row in frappe.get_all("Weekly Timeslot", filters={"name": ["in", timeslot_ids]}, fields=timeslot_fields, limit_page_length=0)
+	}
+	for session in sessions.values():
+		session["timeslot"] = timeslots.get(session.get("weekly_timeslot")) or {}
+	return sessions
+
+
+def _voucher_effective_status(voucher):
+	stored_status = voucher.get("status") or ""
+	if stored_status == "Valid" and voucher.get("expiry_date") and getdate(voucher.get("expiry_date")) < getdate(today()):
+		return "Expired"
+	if stored_status == "Valid":
+		return "Usable"
+	return stored_status or "Cancelled"
+
+
+def _voucher_session_label(session):
+	if not session:
+		return ""
+	timeslot = session.get("timeslot") or {}
+	parts = [session.get("session_date"), timeslot.get("start_time"), timeslot.get("course"), timeslot.get("campus")]
+	return " · ".join(str(value) for value in parts if value not in (None, "")) or session.get("name") or ""
+
+
+def _voucher_report_sort_key(row):
+	status_rank = {"Usable": 0, "Used": 1, "Expired": 2, "Cancelled": 3}.get(row.get("status"), 4)
+	expiry = str(row.get("expiry_date") or "9999-12-31")
+	issue = str(row.get("issue_date") or "")
+	return status_rank, expiry, issue, row.get("name") or ""
 
 
 def _term_invoice_map(term, parent_ids, parents):

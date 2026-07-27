@@ -16,6 +16,7 @@ from qas_custom.services.school_admin_reporting import (
 	_session_in_completed_range,
 	_session_in_unmarked_window,
 	_require_school_admin,
+	get_school_admin_voucher_report_data,
 	get_school_admin_reporting_rows_data,
 	start_school_admin_reporting_generation_data,
 )
@@ -257,6 +258,75 @@ class TestSchoolAdminReportingActions(TestCase):
 		result = start_school_admin_reporting_generation_data("Term 3 2026")
 		self.assertTrue(result["reused"])
 		self.assertEqual(result["snapshot"]["name"], "QARS-1")
+
+
+class TestSchoolAdminVoucherReport(TestCase):
+	@patch("qas_custom.services.school_admin_reporting._safe_fields", side_effect=lambda _doctype, fields: fields)
+	@patch("qas_custom.services.school_admin_reporting.today", return_value="2026-07-27")
+	@patch("qas_custom.services.school_admin_reporting._voucher_session_map", return_value={})
+	@patch("qas_custom.services.school_admin_reporting._parent_map")
+	@patch("qas_custom.services.school_admin_reporting._student_map")
+	@patch("qas_custom.services.school_admin_reporting._student_parent_field", return_value="guardian")
+	@patch("qas_custom.services.school_admin_reporting.frappe.get_all")
+	@patch("qas_custom.services.school_admin_reporting._doctype_available", return_value=True)
+	@patch("qas_custom.services.school_admin_reporting._require_school_admin")
+	def test_usable_excludes_a_valid_but_expired_voucher(
+		self,
+		_mock_require,
+		_mock_doctype,
+		mock_get_all,
+		_mock_parent_field,
+		mock_students,
+		mock_parents,
+		_mock_sessions,
+		_mock_today,
+		_mock_safe_fields,
+	):
+		mock_get_all.return_value = [
+			frappe._dict(name="MV-VALID", student="STU-1", course="Art", status="Valid", expiry_date="2026-07-28"),
+			frappe._dict(name="MV-OLD", student="STU-1", course="Art", status="Valid", expiry_date="2026-07-26"),
+		]
+		mock_students.return_value = {"STU-1": {"student_name": "Sam", "guardian": "PAR-1"}}
+		mock_parents.return_value = {"PAR-1": {"parent_name": "Pat", "email": "pat@example.com", "phone": "0400"}}
+
+		usable = get_school_admin_voucher_report_data(status="Usable")
+		expired = get_school_admin_voucher_report_data(status="Expired")
+
+		self.assertEqual([row["name"] for row in usable["items"]], ["MV-VALID"])
+		self.assertEqual([row["name"] for row in expired["items"]], ["MV-OLD"])
+		self.assertEqual(expired["items"][0]["status"], "Expired")
+
+	@patch("qas_custom.services.school_admin_reporting._safe_fields", side_effect=lambda _doctype, fields: fields)
+	@patch("qas_custom.services.school_admin_reporting._voucher_session_map", return_value={})
+	@patch("qas_custom.services.school_admin_reporting._parent_map")
+	@patch("qas_custom.services.school_admin_reporting._student_map")
+	@patch("qas_custom.services.school_admin_reporting._student_parent_field", return_value="guardian")
+	@patch("qas_custom.services.school_admin_reporting.frappe.get_all")
+	@patch("qas_custom.services.school_admin_reporting._doctype_available", return_value=True)
+	@patch("qas_custom.services.school_admin_reporting._require_school_admin")
+	def test_search_matches_parent_contact_and_paginates(
+		self,
+		_mock_require,
+		_mock_doctype,
+		mock_get_all,
+		_mock_parent_field,
+		mock_students,
+		mock_parents,
+		_mock_sessions,
+		_mock_safe_fields,
+	):
+		mock_get_all.return_value = [
+			frappe._dict(name="MV-001", student="STU-1", status="Used"),
+			frappe._dict(name="MV-002", student="STU-1", status="Cancelled"),
+		]
+		mock_students.return_value = {"STU-1": {"student_name": "Sam", "guardian": "PAR-1"}}
+		mock_parents.return_value = {"PAR-1": {"parent_name": "Pat", "email": "pat@example.com", "phone": "0400"}}
+
+		result = get_school_admin_voucher_report_data(status="All", query="pat@example", page=2, page_length=1)
+
+		self.assertEqual(result["total"], 2)
+		self.assertEqual(result["items"][0]["name"], "MV-002")
+		self.assertFalse(result["has_more"])
 
 	@patch("qas_custom.services.school_admin_reporting._report_filter_options", return_value={"campuses": [], "teachers": []})
 	@patch("qas_custom.services.school_admin_reporting._latest_completed_snapshot")
