@@ -52,6 +52,7 @@ from qas_custom.modules.billing.commands import (
 )
 from qas_custom.modules.billing.presentation import build_course_invoice_description, invoice_item_schedule
 from qas_custom.modules.makeup.commands import (
+    DEFAULT_VOUCHER_EXPIRY_DAYS,
     _build_makeup_voucher_payload,
     _build_redeem_session_payload,
     cancel_makeup_booking_core,
@@ -67,7 +68,10 @@ from qas_custom.modules.makeup.pricing import (
 	preview_makeup_target_pricing,
 )
 from qas_custom.modules.notifications.commands import enqueue_session_staff_notification
-from qas_custom.modules.notifications.makeup_parent_notifications import queue_makeup_booking_confirmation
+from qas_custom.modules.notifications.makeup_parent_notifications import (
+    queue_makeup_booking_confirmation,
+    queue_makeup_voucher_issued_email,
+)
 from qas_custom.modules.notifications import (
 	enqueue_parent_invoice_cancellation_notification,
 	enqueue_parent_invoice_paid_receipt,
@@ -79,7 +83,14 @@ from qas_custom.modules.notifications import (
 )
 from qas_custom.modules.notifications.guard import disable_sales_invoice_auto_notifications
 from qas_custom.services.class_attendance import ATTENDANCE_DOCTYPE, create_attendance_entry, get_attendance_entries
-from qas_custom.services.display_labels import get_course_session_snapshot_label, get_makeup_voucher_label, get_student_display_code, get_student_display_name, get_student_parent_name
+from qas_custom.services.display_labels import (
+	get_course_session_snapshot_label,
+	get_makeup_voucher_label,
+	get_student_display_code,
+	get_student_display_name,
+	get_student_parent_name,
+	sync_makeup_voucher_label,
+)
 from qas_custom.utils.environment import payment_block_reason, payment_mutations_enabled
 from qas_custom.services.inquiry import (
 	add_inquiry_note_core,
@@ -4016,6 +4027,98 @@ def cancel_school_admin_makeup_booking_data(parent=None, voucher_id=None, reason
             raise
 
 
+def issue_school_admin_manual_makeup_voucher_data(
+    parent=None,
+    student=None,
+    course=None,
+    expiry_date=None,
+    reason=None,
+    notify_parent=1,
+):
+    """Issue an audited, standalone makeup voucher for a family student."""
+    _require_school_admin()
+    parent_doc, students = _get_school_admin_family_context(parent=parent, student=student)
+    student = _assert_student_in_family(student, students)
+    course = _school_admin_require_active_course(course)
+    reason = _school_admin_required_reason(reason)
+    expiry_date = _school_admin_manual_voucher_expiry_date(expiry_date)
+
+    voucher = frappe.new_doc("Makeup Voucher")
+    voucher.student = student
+    voucher.course = course
+    voucher.status = "Valid"
+    voucher.issue_date = today()
+    voucher.expiry_date = expiry_date
+    voucher.flags.skip_makeup_attendance_sync = True
+    voucher.insert(ignore_permissions=True)
+    sync_makeup_voucher_label(voucher.name)
+    voucher = frappe.get_doc("Makeup Voucher", voucher.name)
+
+    _add_comment(
+        "Makeup Voucher",
+        voucher.name,
+        _("Manual voucher issued by School Admin {0}. Reason: {1}").format(
+            frappe.session.user,
+            reason,
+        ),
+    )
+    parent_notification = (
+        queue_makeup_voucher_issued_email(voucher.name)
+        if cint(notify_parent)
+        else {
+            "queued": False,
+            "skipped": True,
+            "reason": "Parent notification was not selected.",
+        }
+    )
+    frappe.db.commit()
+    return {
+        "voucher": _build_school_admin_makeup_voucher_payload(voucher),
+        "parent_notification": parent_notification,
+        "parent": parent_doc.name,
+    }
+
+
+def cancel_school_admin_unused_makeup_voucher_data(
+    parent=None,
+    voucher_id=None,
+    reason=None,
+    confirm_cancel=0,
+):
+    """Cancel an unused voucher without changing attendance, leave, or finance data."""
+    _require_school_admin()
+    reason = _school_admin_required_reason(reason)
+    if not cint(confirm_cancel):
+        frappe.throw(_("Please confirm cancellation of this voucher."))
+
+    with _school_admin_makeup_lock(voucher_id):
+        _parent_doc, _students, voucher = _get_school_admin_voucher_family_context(
+            parent=parent,
+            voucher_id=voucher_id,
+        )
+        if voucher.get("status") != "Valid":
+            frappe.throw(_("Only valid, unused makeup vouchers can be cancelled directly."))
+        if any(voucher.get(fieldname) for fieldname in ("used_on_session", "used_date", "used_by_student", "redeemed_student")):
+            frappe.throw(_("This makeup voucher has already been used. Cancel the makeup booking instead."))
+
+        voucher.status = "Cancelled"
+        voucher.flags.skip_makeup_attendance_sync = True
+        voucher.save(ignore_permissions=True)
+        _add_comment(
+            "Makeup Voucher",
+            voucher.name,
+            _("Voucher cancelled directly by School Admin {0}. Reason: {1}").format(
+                frappe.session.user,
+                reason,
+            ),
+        )
+        frappe.db.commit()
+        return {
+            "voucher": _build_school_admin_makeup_voucher_payload(voucher),
+            "cancelled": True,
+        }
+
+
 @contextmanager
 def _school_admin_makeup_lock(voucher_id):
     cache = getattr(frappe, "cache", None)
@@ -4157,7 +4260,9 @@ def _makeup_invoice_summary(invoice):
 
 
 def _build_school_admin_makeup_voucher_payload(voucher):
-    return _build_makeup_voucher_payload(voucher)
+    payload = _build_makeup_voucher_payload(voucher)
+    payload["is_manual_voucher"] = not voucher.get("original_session") and not voucher.get("leave_request")
+    return payload
 
 
 def _get_school_admin_family_context(parent=None, student=None):
@@ -4203,6 +4308,26 @@ def _school_admin_required_reason(reason):
     if not reason:
         frappe.throw(_("Reason is required."))
     return reason
+
+
+def _school_admin_require_active_course(course):
+    course = str(course or "").strip()
+    if not course:
+        frappe.throw(_("Applicable course is required."))
+    if not frappe.db.exists("Course", course):
+        frappe.throw(_("Applicable course was not found."))
+    if _has_field("Course", "status"):
+        status = frappe.db.get_value("Course", course, "status")
+        if status != "Active":
+            frappe.throw(_("Only active courses can be selected for a manual makeup voucher."))
+    return course
+
+
+def _school_admin_manual_voucher_expiry_date(expiry_date):
+    parsed = getdate(expiry_date) if expiry_date else getdate(add_days(today(), DEFAULT_VOUCHER_EXPIRY_DAYS))
+    if parsed < getdate(today()):
+        frappe.throw(_("Voucher expiry date must be today or later."))
+    return parsed
 
 
 def _get_school_admin_leave_sessions(student, course_session=None):
@@ -4383,6 +4508,7 @@ def _get_family_voucher_rows(students=None, status=None, limit=80):
     )
     for item in items:
         item["voucher_id"] = item.get("name")
+        item["is_manual_voucher"] = not item.get("original_session") and not item.get("leave_request")
         item["voucher_label"] = get_makeup_voucher_label(item)
         item["student_display"] = get_student_display_name(item.get("student")) or item.get("student")
         item["source_student_display"] = item["student_display"]

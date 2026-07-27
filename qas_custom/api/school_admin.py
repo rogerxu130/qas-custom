@@ -69,6 +69,7 @@ from qas_custom.services.school_admin import (
 	activate_school_admin_enrollment_data,
 	bulk_school_admin_invoice_action_data,
 	cancel_school_admin_makeup_booking_data,
+	cancel_school_admin_unused_makeup_voucher_data,
 	cancel_school_admin_invoice_data,
 	reopen_school_admin_unpaid_invoice_data,
 	convert_school_admin_inquiry_data,
@@ -116,6 +117,7 @@ from qas_custom.services.school_admin import (
 	get_school_admin_terms_data,
 	get_school_admin_teacher_directory_data,
 	get_school_admin_vouchers_data,
+	issue_school_admin_manual_makeup_voucher_data,
 	get_school_admin_weekly_timeslot_data,
 	get_school_admin_weekly_timeslots_data,
 	link_school_admin_inquiry_enrollment_data,
@@ -973,6 +975,35 @@ def school_admin_redeem_voucher(parent=None, voucher_id=None, session_id=None, s
 @frappe.whitelist()
 def school_admin_cancel_makeup_booking(parent=None, voucher_id=None, reason=None, confirm_cancel=0):
 	return cancel_school_admin_makeup_booking_data(
+		parent=parent,
+		voucher_id=voucher_id,
+		reason=reason,
+		confirm_cancel=confirm_cancel,
+	)
+
+
+@frappe.whitelist()
+def school_admin_issue_manual_makeup_voucher(
+	parent=None,
+	student=None,
+	course=None,
+	expiry_date=None,
+	reason=None,
+	notify_parent=1,
+):
+	return issue_school_admin_manual_makeup_voucher_data(
+		parent=parent,
+		student=student,
+		course=course,
+		expiry_date=expiry_date,
+		reason=reason,
+		notify_parent=notify_parent,
+	)
+
+
+@frappe.whitelist()
+def school_admin_cancel_unused_makeup_voucher(parent=None, voucher_id=None, reason=None, confirm_cancel=0):
+	return cancel_school_admin_unused_makeup_voucher_data(
 		parent=parent,
 		voucher_id=voucher_id,
 		reason=reason,

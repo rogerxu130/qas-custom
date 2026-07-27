@@ -86,6 +86,22 @@ class TestMakeupParentEmailContent(TestCase):
 		self.assertIn("View Makeup Voucher", html)
 		self.assertIn("https://portal.example.com/vouchers", html)
 
+	def test_manual_voucher_email_uses_applicable_course_without_original_session_details(self):
+		html = makeup_voucher_issued_email_message(
+			parent_context(
+				is_manual_voucher=True,
+				date_display="",
+				start_time="",
+				end_time="",
+				campus="",
+			)
+		)
+
+		self.assertIn("Applicable course", html)
+		self.assertIn("issued by Queensland Art School", html)
+		self.assertNotIn("Original class date", html)
+		self.assertNotIn("Original class time", html)
+
 	def test_booking_email_contains_class_details_and_schedule_button(self):
 		html = makeup_booking_email_message(
 			parent_context(
