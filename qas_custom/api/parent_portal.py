@@ -14,7 +14,10 @@ from qas_custom.services.parent_portal_read import (
 )
 from qas_custom.services.parent_portal_write import (
     cancel_parent_leave_data,
+    complete_parent_leave_and_keep_voucher_data,
+    complete_parent_leave_and_redeem_data,
     get_parent_csrf_token_data,
+    get_parent_leave_makeup_options_data,
     get_parent_redeemable_sessions_data,
     redeem_parent_voucher_data,
     submit_parent_leave_request_data,
@@ -127,6 +130,38 @@ def parent_portal_get_csrf_token():
 @frappe.whitelist()
 def parent_portal_leave_request(student=None, course_session=None):
     return submit_parent_leave_request_data(student=student, course_session=course_session)
+
+
+@frappe.whitelist()
+def parent_portal_get_leave_makeup_options(student=None, course_session=None, redeem_student=None):
+    return get_parent_leave_makeup_options_data(
+        student=student,
+        course_session=course_session,
+        redeem_student=redeem_student,
+    )
+
+
+@frappe.whitelist()
+def parent_portal_complete_leave_and_redeem(
+    student=None,
+    course_session=None,
+    session_id=None,
+    redeem_student=None,
+):
+    return complete_parent_leave_and_redeem_data(
+        student=student,
+        course_session=course_session,
+        session_id=session_id,
+        redeem_student=redeem_student,
+    )
+
+
+@frappe.whitelist()
+def parent_portal_complete_leave_and_keep_voucher(student=None, course_session=None):
+    return complete_parent_leave_and_keep_voucher_data(
+        student=student,
+        course_session=course_session,
+    )
 
 
 @frappe.whitelist()

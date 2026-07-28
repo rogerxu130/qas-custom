@@ -32,6 +32,7 @@ def submit_parent_leave_request_core(
 	allowed_attendance_statuses=None,
 	allow_started_session: bool = False,
 	notify_staff: bool = True,
+	notify_parent_voucher: bool = True,
 	attendance_entry: str | None = None,
 ):
 	if not student:
@@ -58,9 +59,17 @@ def submit_parent_leave_request_core(
 	leave_request.status = "Approved"
 	leave_request.flags.ignore_permissions = True
 	leave_request.flags.qas_leave_attendance_entry = attendance_row.name
+	# The Leave Request hook normally creates the voucher immediately. Parent
+	# completion flows need to decide whether the voucher email belongs to a
+	# retained voucher or an immediately-booked makeup, so process it explicitly.
+	leave_request.flags.qas_skip_makeup_processing = True
 	leave_request.insert()
 	leave_request.reload()
-	result = process_leave_request(leave_request, attendance_entry=attendance_row.name)
+	result = process_leave_request(
+		leave_request,
+		attendance_entry=attendance_row.name,
+		notify_parent_voucher=notify_parent_voucher,
+	)
 	voucher_id = result.get("makeup_voucher") or _get_voucher_for_leave_request(leave_request)
 	voucher_label = sync_makeup_voucher_label(voucher_id)
 	notification = _queue_leave_requested_notification(
@@ -74,18 +83,7 @@ def submit_parent_leave_request_core(
 		"leave_request": leave_request.name,
 		"makeup_voucher": voucher_id,
 		"makeup_voucher_label": voucher_label or voucher_id,
-		"session": {
-			"session_id": session_doc.name,
-			"student": selected_student,
-			"course": timeslot.course,
-			"session_date": session_doc.session_date,
-			"day_of_week": timeslot.day_of_week,
-			"start_time": timeslot.start_time,
-			"end_time": timeslot.end_time,
-			"campus": timeslot.campus,
-			"classroom": timeslot.classroom,
-			"attendance_status": "Leave",
-		},
+		"session": _build_leave_session_payload(session_doc, timeslot, selected_student, "Leave"),
 		"notification": notification,
 	}
 
@@ -103,11 +101,13 @@ def _queue_leave_requested_notification(*, notify_staff: bool, course_session: s
 
 
 def process_leave_request_after_insert(doc, method=None):
+	if getattr(doc, "flags", None) and doc.flags.get("qas_skip_makeup_processing"):
+		return {"skipped": True, "reason": "processed_by_parent_completion_flow"}
 	attendance_entry = doc.flags.get("qas_leave_attendance_entry") if getattr(doc, "flags", None) else None
 	return process_leave_request(doc, attendance_entry=attendance_entry)
 
 
-def process_leave_request(leave_request, attendance_entry=None):
+def process_leave_request(leave_request, attendance_entry=None, *, notify_parent_voucher: bool = True):
 	doc = frappe.get_doc("Leave Request", leave_request) if isinstance(leave_request, str) else leave_request
 	if not doc or doc.get("status") != "Approved":
 		return {"skipped": True, "reason": "Leave request is not approved."}
@@ -116,13 +116,181 @@ def process_leave_request(leave_request, attendance_entry=None):
 
 	_populate_leave_request_context(doc)
 	attendance_entry = _mark_leave_attendance(doc, attendance_entry=attendance_entry)
-	voucher = _ensure_leave_makeup_voucher(doc)
+	voucher = _ensure_leave_makeup_voucher(doc, notify_parent=notify_parent_voucher)
 	_set_leave_request_voucher(doc.name, voucher.name)
 	return {
 		"leave_request": doc.name,
 		"attendance_entry": attendance_entry,
 		"makeup_voucher": voucher.name,
 	}
+
+
+def get_parent_leave_makeup_options_core(
+	parent,
+	students: list[dict],
+	student: str,
+	course_session: str,
+	redeem_student: str | None = None,
+):
+	"""Preview parent-eligible makeup sessions without creating leave or voucher data."""
+	selected_student = _validate_student_for_parent(student, students)
+	session_doc, _attendance_row, timeslot = _get_leave_session(
+		student=selected_student,
+		course_session=course_session,
+	)
+	_validate_no_active_leave(student=selected_student, course_session=session_doc.name)
+
+	preview_voucher = frappe._dict({
+		"student": selected_student,
+		"course": timeslot.course,
+		"original_session": session_doc.name,
+	})
+	selected_redeem_student = _get_redeem_student(redeem_student, preview_voucher, students)
+	return {
+		"source_session": _build_leave_session_payload(
+			session_doc,
+			timeslot,
+			selected_student,
+			"To be started",
+		),
+		"students": [_build_redeem_student_payload(row) for row in students],
+		"selected_redeem_student": selected_redeem_student,
+		"available_sessions": _get_redeemable_makeup_sessions(
+			preview_voucher,
+			selected_redeem_student,
+			excluded_session_ids={session_doc.name},
+		),
+	}
+
+
+def complete_parent_leave_and_redeem_core(
+	parent,
+	students: list[dict],
+	student: str,
+	course_session: str,
+	session_id: str,
+	redeem_student: str | None = None,
+):
+	"""Create leave and immediately consume its voucher in one request."""
+	if not session_id:
+		frappe.throw("Please select a makeup session.")
+	if session_id == course_session:
+		frappe.throw("The original class cannot be booked as its own makeup session.")
+	selected_source_student = _validate_student_for_parent(student, students)
+	existing_leave, existing_voucher = _get_active_leave_and_voucher(
+		student=selected_source_student,
+		course_session=course_session,
+	)
+	if existing_leave and existing_voucher:
+		if (
+			existing_voucher.get("status") == "Used"
+			and existing_voucher.get("used_on_session") == session_id
+		):
+			selected_redeem_student = _get_redeem_student(redeem_student, existing_voucher, students)
+			booking_result = redeem_parent_voucher_core(
+				parent=parent,
+				students=students,
+				voucher_id=existing_voucher.name,
+				session_id=session_id,
+				student=selected_redeem_student,
+			)
+			return {
+				"leave_request": existing_leave.get("name"),
+				"voucher": booking_result["voucher"],
+				"attendance_entry": booking_result["attendance_entry"],
+				"session": booking_result["session"],
+				"leave_notification": {
+					"queued": False,
+					"skipped": True,
+					"duplicate": True,
+				},
+				"booking_notification": booking_result["notification"],
+				"parent_notification": booking_result["parent_notification"],
+				"booking_created": False,
+				"duplicate": True,
+			}
+		frappe.throw("This leave has already been confirmed. Refresh your vouchers before choosing another makeup class.")
+
+	options = get_parent_leave_makeup_options_core(
+		parent=parent,
+		students=students,
+		student=selected_source_student,
+		course_session=course_session,
+		redeem_student=redeem_student,
+	)
+	selected_redeem_student = options["selected_redeem_student"]
+	if session_id not in {row.get("session_id") for row in options["available_sessions"]}:
+		frappe.throw("This class session is not available for this makeup booking.")
+
+	leave_result = submit_parent_leave_request_core(
+		parent=parent,
+		students=students,
+		student=selected_source_student,
+		course_session=course_session,
+		notify_staff=False,
+		notify_parent_voucher=False,
+	)
+	booking_result = redeem_parent_voucher_core(
+		parent=parent,
+		students=students,
+		voucher_id=leave_result["makeup_voucher"],
+		session_id=session_id,
+		student=selected_redeem_student,
+	)
+	leave_notification = _queue_leave_requested_notification(
+		notify_staff=True,
+		course_session=course_session,
+		student=student,
+		leave_request=leave_result["leave_request"],
+	)
+	return {
+		"leave_request": leave_result["leave_request"],
+		"voucher": booking_result["voucher"],
+		"attendance_entry": booking_result["attendance_entry"],
+		"source_session": leave_result["session"],
+		"session": booking_result["session"],
+		"leave_notification": leave_notification,
+		"booking_notification": booking_result["notification"],
+		"parent_notification": booking_result["parent_notification"],
+		"booking_created": booking_result["booking_created"],
+	}
+
+
+def complete_parent_leave_and_keep_voucher_core(
+	parent,
+	students: list[dict],
+	student: str,
+	course_session: str,
+):
+	"""Create leave only after the parent explicitly chooses to retain a voucher."""
+	selected_source_student = _validate_student_for_parent(student, students)
+	existing_leave, existing_voucher = _get_active_leave_and_voucher(
+		student=selected_source_student,
+		course_session=course_session,
+	)
+	if existing_leave and existing_voucher:
+		if existing_voucher.get("status") == "Valid":
+			return {
+				"leave_request": existing_leave.get("name"),
+				"makeup_voucher": existing_voucher.name,
+				"makeup_voucher_label": get_makeup_voucher_label(existing_voucher),
+				"notification": {
+					"queued": False,
+					"skipped": True,
+					"duplicate": True,
+				},
+				"duplicate": True,
+			}
+		frappe.throw("This leave has already been confirmed and its makeup voucher has been used.")
+
+	return submit_parent_leave_request_core(
+		parent=parent,
+		students=students,
+		student=selected_source_student,
+		course_session=course_session,
+		notify_staff=True,
+		notify_parent_voucher=True,
+	)
 
 
 def cancel_parent_leave_request_core(parent, students: list[dict], voucher_id: str | None):
@@ -162,6 +330,7 @@ def get_parent_redeemable_sessions_core(
 			voucher,
 			selected_student,
 			allow_ordinary_cross_course=allow_ordinary_cross_course,
+			excluded_session_ids={voucher.get("original_session")} if voucher.get("original_session") else None,
 		),
 	}
 
@@ -435,8 +604,10 @@ def _get_redeemable_makeup_sessions(
 	student: str | None = None,
 	*,
 	allow_ordinary_cross_course: bool = False,
+	excluded_session_ids=None,
 ):
 	redeem_student = student or voucher.student
+	excluded_session_ids = {value for value in (excluded_session_ids or set()) if value}
 	session_rows = frappe.get_all(
 		"Course Sessions",
 		filters={
@@ -459,6 +630,8 @@ def _get_redeemable_makeup_sessions(
 	sessions = []
 	for session in session_rows:
 		if session.get("status") == "Cancelled":
+			continue
+		if session.get("name") in excluded_session_ids:
 			continue
 		timeslot = timeslot_map.get(session.get("weekly_timeslot"))
 		if not timeslot or not _course_accepts_makeup_voucher(
@@ -500,6 +673,7 @@ def _validate_session_can_redeem_voucher(
 			voucher,
 			student,
 			allow_ordinary_cross_course=allow_ordinary_cross_course,
+			excluded_session_ids={voucher.get("original_session")} if voucher.get("original_session") else None,
 		)
 	}
 	if session_id not in available_session_ids:
@@ -714,6 +888,21 @@ def _build_redeem_session_payload(session_id: str):
 	}
 
 
+def _build_leave_session_payload(session_doc, timeslot, student: str, attendance_status: str):
+	return {
+		"session_id": session_doc.name,
+		"student": student,
+		"course": timeslot.course,
+		"session_date": session_doc.session_date,
+		"day_of_week": timeslot.day_of_week,
+		"start_time": timeslot.start_time,
+		"end_time": timeslot.end_time,
+		"campus": timeslot.campus,
+		"classroom": timeslot.classroom,
+		"attendance_status": attendance_status,
+	}
+
+
 def _get_leave_session(
 	student: str,
 	course_session: str,
@@ -820,7 +1009,7 @@ def _mark_leave_attendance(doc, attendance_entry=None):
 	return result.get("attendance_entry") or row.name
 
 
-def _ensure_leave_makeup_voucher(doc):
+def _ensure_leave_makeup_voucher(doc, *, notify_parent: bool = True):
 	existing = frappe.db.exists("Makeup Voucher", {"leave_request": doc.name})
 	if not existing and doc.get("makeup_voucher") and frappe.db.exists("Makeup Voucher", doc.get("makeup_voucher")):
 		existing = doc.get("makeup_voucher")
@@ -859,7 +1048,8 @@ def _ensure_leave_makeup_voucher(doc):
 		voucher.expiry_date = add_days(today(), DEFAULT_VOUCHER_EXPIRY_DAYS)
 	voucher.insert(ignore_permissions=True)
 	sync_makeup_voucher_label(voucher.name)
-	queue_makeup_voucher_issued_email(voucher.name)
+	if notify_parent:
+		queue_makeup_voucher_issued_email(voucher.name)
 	return frappe.get_doc("Makeup Voucher", voucher.name)
 
 
@@ -922,6 +1112,34 @@ def _validate_no_active_leave(student: str, course_session: str):
 	)
 	if existing_voucher:
 		frappe.throw("A makeup voucher already exists for this class session.")
+
+
+def _get_active_leave_and_voucher(student: str, course_session: str):
+	"""Return an existing active leave and its voucher for safe final-action retries."""
+	leave_request = frappe.db.get_value(
+		"Leave Request",
+		{
+			"student": student,
+			"course_session": course_session,
+			"status": "Approved",
+		},
+		["name", "makeup_voucher"],
+		as_dict=True,
+	)
+	if not leave_request:
+		return None, None
+
+	voucher_id = leave_request.get("makeup_voucher") or frappe.db.exists(
+		"Makeup Voucher",
+		{
+			"student": student,
+			"original_session": course_session,
+			"status": ["in", ["Valid", "Used"]],
+		},
+	)
+	if not voucher_id:
+		return leave_request, None
+	return leave_request, frappe.get_doc("Makeup Voucher", voucher_id)
 
 
 def _get_voucher_for_leave_request(leave_request):

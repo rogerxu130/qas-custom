@@ -6,9 +6,11 @@ import frappe
 
 from qas_custom.modules.makeup.commands import (
     cancel_parent_leave_request_core,
+    complete_parent_leave_and_keep_voucher_core,
+    complete_parent_leave_and_redeem_core,
+    get_parent_leave_makeup_options_core,
     get_parent_redeemable_sessions_core,
     redeem_parent_voucher_core,
-    submit_parent_leave_request_core,
 )
 from qas_custom.services.parent_portal_read import (
     _get_parent_students,
@@ -24,13 +26,62 @@ def get_parent_csrf_token_data():
 
 def submit_parent_leave_request_data(student=None, course_session=None):
     reject_support_view_write()
+    frappe.throw(
+        "Please choose a makeup time or keep a voucher before confirming leave."
+    )
+
+
+def get_parent_leave_makeup_options_data(student=None, course_session=None, redeem_student=None):
+    payload = _get_request_payload()
+    student = student or payload.get("student")
+    course_session = course_session or payload.get("course_session")
+    redeem_student = redeem_student or payload.get("redeem_student") or payload.get("use_for_student")
+
+    parent = _require_parent()
+    students = _get_parent_students(parent.name)
+    return get_parent_leave_makeup_options_core(
+        parent=parent,
+        students=students,
+        student=student,
+        course_session=course_session,
+        redeem_student=redeem_student,
+    )
+
+
+def complete_parent_leave_and_redeem_data(
+    student=None,
+    course_session=None,
+    session_id=None,
+    redeem_student=None,
+):
+    reject_support_view_write()
+    payload = _get_request_payload()
+    student = student or payload.get("student")
+    course_session = course_session or payload.get("course_session")
+    session_id = session_id or payload.get("session_id")
+    redeem_student = redeem_student or payload.get("redeem_student") or payload.get("use_for_student")
+
+    parent = _require_parent()
+    students = _get_parent_students(parent.name)
+    return complete_parent_leave_and_redeem_core(
+        parent=parent,
+        students=students,
+        student=student,
+        course_session=course_session,
+        session_id=session_id,
+        redeem_student=redeem_student,
+    )
+
+
+def complete_parent_leave_and_keep_voucher_data(student=None, course_session=None):
+    reject_support_view_write()
     payload = _get_request_payload()
     student = student or payload.get("student")
     course_session = course_session or payload.get("course_session")
 
     parent = _require_parent()
     students = _get_parent_students(parent.name)
-    return submit_parent_leave_request_core(
+    return complete_parent_leave_and_keep_voucher_core(
         parent=parent,
         students=students,
         student=student,
