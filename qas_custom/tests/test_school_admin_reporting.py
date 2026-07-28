@@ -17,6 +17,7 @@ from qas_custom.services.school_admin_reporting import (
 	_session_in_unmarked_window,
 	_require_school_admin,
 	get_school_admin_voucher_report_data,
+	get_school_admin_term_paid_invoice_summary_data,
 	get_school_admin_reporting_rows_data,
 	start_school_admin_reporting_generation_data,
 )
@@ -339,6 +340,60 @@ class TestSchoolAdminVoucherReport(TestCase):
 		self.assertEqual(result["items"][0]["name"], "MV-002")
 		self.assertFalse(result["has_more"])
 
+
+class TestSchoolAdminTermPaidInvoiceSummary(TestCase):
+	@patch("qas_custom.services.school_admin_reporting._doctype_available", return_value=True)
+	@patch("qas_custom.services.school_admin_reporting.get_invoice_total_amount")
+	@patch("qas_custom.services.school_admin_reporting.frappe.get_all")
+	@patch("qas_custom.services.school_admin_reporting._safe_fields", side_effect=lambda _doctype, fields: fields)
+	@patch("qas_custom.services.school_admin_reporting._term_invoice_names", return_value=["SINV-001", "SINV-002", "SINV-003"])
+	@patch("qas_custom.services.school_admin_reporting._validate_term")
+	@patch("qas_custom.services.school_admin_reporting._require_school_admin")
+	def test_counts_only_submitted_paid_term_invoices_once(
+		self,
+		_mock_require,
+		_mock_validate,
+		_mock_names,
+		_mock_fields,
+		mock_get_all,
+		mock_total,
+		_mock_doctype,
+	):
+		mock_get_all.return_value = [
+			frappe._dict(name="SINV-001", docstatus=1, status="Paid", rounded_total=540),
+			frappe._dict(name="SINV-002", docstatus=1, status="Paid", rounded_total=68),
+			# The service guard must not let a partly paid row through even if a
+			# future query changes or a test double returns it.
+			frappe._dict(name="SINV-003", docstatus=1, status="Partly Paid", rounded_total=100),
+		]
+		mock_total.side_effect = lambda row: row.get("rounded_total")
+
+		result = get_school_admin_term_paid_invoice_summary_data("Term 3 2026")
+
+		self.assertEqual(result, {
+			"term": "Term 3 2026",
+			"paid_invoice_count": 2,
+			"paid_invoice_total": 608.0,
+		})
+		filters = mock_get_all.call_args.kwargs["filters"]
+		self.assertEqual(filters["name"], ["in", ["SINV-001", "SINV-002", "SINV-003"]])
+		self.assertEqual(filters["docstatus"], 1)
+		self.assertEqual(filters["status"], "Paid")
+
+	@patch("qas_custom.services.school_admin_reporting._doctype_available", return_value=True)
+	@patch("qas_custom.services.school_admin_reporting.frappe.get_all")
+	@patch("qas_custom.services.school_admin_reporting._term_invoice_names", return_value=[])
+	@patch("qas_custom.services.school_admin_reporting._validate_term")
+	@patch("qas_custom.services.school_admin_reporting._require_school_admin")
+	def test_empty_term_returns_zero_summary(self, _mock_require, _mock_validate, _mock_names, mock_get_all, _mock_doctype):
+		result = get_school_admin_term_paid_invoice_summary_data("Term 3 2026")
+
+		self.assertEqual(result["paid_invoice_count"], 0)
+		self.assertEqual(result["paid_invoice_total"], 0.0)
+		mock_get_all.assert_not_called()
+
+
+class TestSchoolAdminReportingRows(TestCase):
 	@patch("qas_custom.services.school_admin_reporting._report_filter_options", return_value={"campuses": [], "teachers": []})
 	@patch("qas_custom.services.school_admin_reporting._latest_completed_snapshot")
 	@patch("qas_custom.services.school_admin_reporting._validate_reporting_term")

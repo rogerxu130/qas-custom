@@ -8,7 +8,7 @@ import frappe
 from frappe import _
 from frappe.utils import cint, flt, getdate, now_datetime, today
 
-from qas_custom.modules.billing.store_credit import get_invoice_payable_amount
+from qas_custom.modules.billing.store_credit import get_invoice_payable_amount, get_invoice_total_amount
 from qas_custom.services.display_labels import get_student_display_name
 
 
@@ -299,6 +299,56 @@ def get_school_admin_voucher_report_data(status=None, query=None, page=1, page_l
 	}
 
 
+def get_school_admin_term_paid_invoice_summary_data(term=None):
+	"""Return the live count and face-value total of Paid invoices for one Term.
+
+	This is intentionally a small, live financial summary rather than a report
+	snapshot.  It counts a Sales Invoice once even when several of its items are
+	linked to the selected Term.  Draft, Partly Paid, Unpaid, and Cancelled
+	invoices are excluded.
+	"""
+	_require_school_admin()
+	_validate_term(term)
+	if not _doctype_available("Sales Invoice"):
+		frappe.throw(_("Sales Invoice data is not installed yet. Please run the site migration."))
+
+	invoice_names = _term_invoice_names(term)
+	if not invoice_names:
+		return {
+			"term": term,
+			"paid_invoice_count": 0,
+			"paid_invoice_total": 0.0,
+		}
+
+	fields = _safe_fields(
+		"Sales Invoice",
+		["name", "docstatus", "status", "grand_total", "rounded_total", "posting_date"],
+	)
+	rows = frappe.get_all(
+		"Sales Invoice",
+		filters={"name": ["in", invoice_names], "docstatus": 1, "status": "Paid"},
+		fields=fields,
+		order_by="posting_date desc, name asc",
+		limit_page_length=0,
+	)
+
+	paid_total = 0.0
+	paid_count = 0
+	for row in rows:
+		# Keep this defensive guard even though the query filters the rows. It
+		# protects the summary from stale/mock rows and future query changes.
+		if cint(row.get("docstatus")) != 1 or row.get("status") != "Paid":
+			continue
+		paid_count += 1
+		paid_total += flt(get_invoice_total_amount(frappe._dict(row)))
+
+	return {
+		"term": term,
+		"paid_invoice_count": paid_count,
+		"paid_invoice_total": round(paid_total, 2),
+	}
+
+
 def _build_reporting_rows(term, generated_at):
 	term_doc = frappe.get_doc("Term", term)
 	term_start = getdate(term_doc.start_date)
@@ -575,23 +625,7 @@ def _voucher_report_sort_key(row):
 def _term_invoice_map(term, parent_ids, parents):
 	if not parent_ids or not _doctype_available("Sales Invoice"):
 		return {}
-	invoice_names = set()
-	if _has_field("Sales Invoice", "term"):
-		invoice_names.update(
-			frappe.get_all(
-				"Sales Invoice",
-				filters={"term": term, "docstatus": ["!=", 2]},
-				pluck="name",
-				limit_page_length=0,
-			)
-		)
-	if _doctype_available("Sales Invoice Item") and _has_field("Sales Invoice Item", "term"):
-		filters = {"term": term}
-		if _has_field("Sales Invoice Item", "parenttype"):
-			filters["parenttype"] = "Sales Invoice"
-		invoice_names.update(
-			frappe.get_all("Sales Invoice Item", filters=filters, pluck="parent", limit_page_length=0)
-		)
+	invoice_names = _term_invoice_names(term)
 	if not invoice_names:
 		return {}
 
@@ -601,7 +635,7 @@ def _term_invoice_map(term, parent_ids, parents):
 	)
 	rows = frappe.get_all(
 		"Sales Invoice",
-		filters={"name": ["in", sorted(invoice_names)], "docstatus": ["!=", 2]},
+		filters={"name": ["in", invoice_names], "docstatus": ["!=", 2]},
 		fields=fields,
 		limit_page_length=0,
 	)
@@ -617,6 +651,31 @@ def _term_invoice_map(term, parent_ids, parents):
 			if parent in parent_ids:
 				grouped[parent].append(row)
 	return {parent: _invoice_summary(rows) for parent, rows in grouped.items()}
+
+
+def _term_invoice_names(term):
+	"""Find unique invoice IDs that are linked to a Term at either level."""
+	if not _doctype_available("Sales Invoice"):
+		return []
+
+	invoice_names = set()
+	if _has_field("Sales Invoice", "term"):
+		invoice_names.update(
+			frappe.get_all(
+				"Sales Invoice",
+				filters={"term": term},
+				pluck="name",
+				limit_page_length=0,
+			)
+		)
+	if _doctype_available("Sales Invoice Item") and _has_field("Sales Invoice Item", "term"):
+		filters = {"term": term}
+		if _has_field("Sales Invoice Item", "parenttype"):
+			filters["parenttype"] = "Sales Invoice"
+		invoice_names.update(
+			frappe.get_all("Sales Invoice Item", filters=filters, pluck="parent", limit_page_length=0)
+		)
+	return sorted(name for name in invoice_names if name)
 
 
 def _invoice_summary(rows):
@@ -857,6 +916,10 @@ def _cleanup_superseded_snapshots(term, keep=3):
 
 def _validate_reporting_term(term):
 	_assert_reporting_doctypes()
+	_validate_term(term)
+
+
+def _validate_term(term):
 	if not term:
 		frappe.throw(_("Term is required."))
 	if not frappe.db.exists("Term", term):
