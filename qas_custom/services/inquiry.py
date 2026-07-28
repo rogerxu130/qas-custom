@@ -1341,6 +1341,7 @@ def _build_inquiry_payload(doc, include_campus_address=False):
 		"external_serial_number": doc.get("external_serial_number"),
 		"external_submitted_at": _as_string(doc.get("external_submitted_at")),
 		"source_url": doc.get("source_url"),
+		"submission_data": _submission_data_rows(doc.get("raw_webhook_payload")),
 		"status": doc.status,
 		"campus": doc.campus,
 		"parent": doc.parent,
@@ -1372,6 +1373,67 @@ def _build_inquiry_payload(doc, include_campus_address=False):
 	if include_campus_address:
 		payload["campus_address"] = _get_campus_address(doc.campus)
 	return payload
+
+
+def _submission_data_rows(raw_payload):
+	if not raw_payload:
+		return []
+	if isinstance(raw_payload, str):
+		try:
+			raw_payload = json.loads(raw_payload)
+		except (TypeError, json.JSONDecodeError):
+			return []
+	if not isinstance(raw_payload, dict):
+		return []
+
+	rows = []
+	for key, value in raw_payload.items():
+		if _submission_data_key_is_hidden(key):
+			continue
+		_append_submission_data_rows(rows, _submission_data_label(key), value)
+	return rows
+
+
+def _append_submission_data_rows(rows, label, value):
+	if isinstance(value, dict):
+		visible_items = [(key, item) for key, item in value.items() if not _submission_data_key_is_hidden(key)]
+		if not visible_items:
+			rows.append({"label": label, "value": "-"})
+			return
+		for key, item in visible_items:
+			_append_submission_data_rows(rows, f"{label} · {_submission_data_label(key)}", item)
+		return
+	if isinstance(value, (list, tuple)):
+		if not value:
+			rows.append({"label": label, "value": "-"})
+			return
+		if any(isinstance(item, (dict, list, tuple)) for item in value):
+			for index, item in enumerate(value, start=1):
+				_append_submission_data_rows(rows, f"{label} · {index}", item)
+			return
+		rows.append({"label": label, "value": ", ".join(_submission_data_value(item) for item in value)})
+		return
+	rows.append({"label": label, "value": _submission_data_value(value)})
+
+
+def _submission_data_key_is_hidden(key):
+	key = str(key or "").strip().lower()
+	return key.startswith("_") or any(
+		marker in key
+		for marker in ("token", "secret", "signature", "authorization", "password", "cookie", "csrf")
+	)
+
+
+def _submission_data_label(key):
+	return re.sub(r"[_-]+", " ", str(key or "")).strip() or "Field"
+
+
+def _submission_data_value(value):
+	if value is None or value == "":
+		return "-"
+	if isinstance(value, bool):
+		return "Yes" if value else "No"
+	return str(value)
 
 
 def _get_campus_address(campus):
