@@ -1,0 +1,6 @@
+from qas_custom.modules.notifications.invoice_payment_plan_reminders import run_payment_plan_reminders
+from qas_custom.utils.environment import run_scheduled_or_skip
+
+
+def send_payment_plan_reminders():
+	return run_scheduled_or_skip("invoice_payment_plan_reminders", run_payment_plan_reminders)

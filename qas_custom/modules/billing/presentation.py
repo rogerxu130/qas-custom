@@ -53,6 +53,7 @@ def build_parent_invoice_context(
 	payable = flt(payable_amount)
 	portal_link = (invoice_link or payment_link or parent_portal_invoice_link(invoice_doc.name)) if include_portal_link else ""
 	payment_context = get_invoice_payment_context(invoice_doc)
+	from qas_custom.modules.billing.payment_plans import payment_plan_payload
 	settings = get_invoice_settings()
 	items = [build_parent_invoice_item(row) for row in invoice_doc.get("items", [])]
 	adjustments = [
@@ -75,6 +76,7 @@ def build_parent_invoice_context(
 		"payable_amount": payable,
 		"invoice_link": portal_link,
 		"payment_link": portal_link,
+		"payment_plan": payment_plan_payload(invoice_doc),
 		**payment_context,
 		"items": items,
 		"adjustments": adjustments,

@@ -10,6 +10,7 @@ from frappe import _
 from frappe.utils import cint, flt, getdate, now_datetime, today
 
 from qas_custom.modules.billing.store_credit import LEDGER_DOCTYPE, adjust_store_credit
+from qas_custom.modules.billing.payment_plans import has_active_payment_plan
 from qas_custom.services.class_attendance import ATTENDANCE_DOCTYPE
 from qas_custom.services.inquiry import (
 	create_inquiry_core,
@@ -39,6 +40,12 @@ ENROLLMENT_CHANGE_REPORT_TYPE = "Enrollment Change"
 INVOICE_ENROLLMENT_RESET_REPORT_TYPE = "Invoice Enrollment Reset"
 INVOICE_ENROLLMENT_RESET_MODE_CHANGE = "change"
 INVOICE_ENROLLMENT_RESET_MODE_WITHDRAW = "withdraw"
+INVOICE_ENROLLMENT_RESET_PAYMENT_PLAN_CREDIT_KEEP = "keep"
+INVOICE_ENROLLMENT_RESET_PAYMENT_PLAN_CREDIT_CONSUME = "consume"
+INVOICE_ENROLLMENT_RESET_PAYMENT_PLAN_CREDIT_DISPOSITIONS = {
+	INVOICE_ENROLLMENT_RESET_PAYMENT_PLAN_CREDIT_KEEP,
+	INVOICE_ENROLLMENT_RESET_PAYMENT_PLAN_CREDIT_CONSUME,
+}
 INVOICE_ENROLLMENT_RESET_MODES = {
 	INVOICE_ENROLLMENT_RESET_MODE_CHANGE,
 	INVOICE_ENROLLMENT_RESET_MODE_WITHDRAW,
@@ -459,6 +466,23 @@ def run_invoice_enrollment_reset_data(payload=None):
 				"confirm_historical_attendance",
 				_("Confirm that the historical Present or Late attendance will be retained before continuing."),
 			))
+		if _invoice_enrollment_reset_requires_payment_plan_credit_consumption_confirmation(row, preview):
+			preview["errors"].append(_invoice_enrollment_reset_issue(
+				row,
+				"confirm_payment_plan_credit_consumption",
+				_("Confirm that the payment-plan funds will be retained for attended classes or a cancellation charge, not left as store credit."),
+			))
+		if (
+			row.get("mode") == INVOICE_ENROLLMENT_RESET_MODE_WITHDRAW
+			and cint((preview.get("input") or {}).get("payment_plan_partial_payment"))
+			and row.get("payment_plan_store_credit_disposition") == INVOICE_ENROLLMENT_RESET_PAYMENT_PLAN_CREDIT_CONSUME
+			and not row.get("reason")
+		):
+			preview["errors"].append(_invoice_enrollment_reset_issue(
+				row,
+				"reason",
+				_("A reason is required when payment-plan funds are retained for attended classes or a cancellation charge."),
+			))
 		preview["blocking_error_count"] = len(preview.get("errors") or [])
 		preview["ok"] = preview["blocking_error_count"] == 0
 	if preview.get("blocking_error_count"):
@@ -844,7 +868,13 @@ def _run_enrollment_change_operation(row):
 	return result
 
 
-def _apply_enrollment_change_invoice_action(invoice_action, reason, allow_empty_reason=False, send_notifications=True):
+def _apply_enrollment_change_invoice_action(
+	invoice_action,
+	reason,
+	allow_empty_reason=False,
+	send_notifications=True,
+	payment_plan_store_credit_disposition=INVOICE_ENROLLMENT_RESET_PAYMENT_PLAN_CREDIT_KEEP,
+):
 	action = invoice_action.get("action")
 	invoice = invoice_action.get("invoice")
 	if not invoice or action in ("none", "already_cancelled"):
@@ -877,6 +907,7 @@ def _apply_enrollment_change_invoice_action(invoice_action, reason, allow_empty_
 			reason=reason,
 			allow_empty_reason=allow_empty_reason,
 			send_notifications=send_notifications,
+			payment_plan_store_credit_disposition=payment_plan_store_credit_disposition,
 		)
 		return {
 			"action": action,
@@ -996,9 +1027,13 @@ def _build_invoice_enrollment_reset_operation(payload=None):
 		"reason": _normalize_spaces(payload.get("reason")),
 		"effective_date": _parse_date(payload.get("effective_date")) or today(),
 		"mode": _normalize_spaces(payload.get("mode") or INVOICE_ENROLLMENT_RESET_MODE_CHANGE).lower(),
+		"payment_plan_store_credit_disposition": _normalize_spaces(
+			payload.get("payment_plan_store_credit_disposition") or INVOICE_ENROLLMENT_RESET_PAYMENT_PLAN_CREDIT_KEEP
+		).lower(),
 		"preview_fingerprint": _normalize_spaces(payload.get("preview_fingerprint")),
 		"confirm_multiple_withdrawal": cint(payload.get("confirm_multiple_withdrawal")),
 		"confirm_historical_attendance": cint(payload.get("confirm_historical_attendance")),
+		"confirm_payment_plan_credit_consumption": cint(payload.get("confirm_payment_plan_credit_consumption")),
 		"send_notifications": cint(payload.get("send_notifications", 1)),
 		"errors": [],
 	}
@@ -1008,6 +1043,11 @@ def _build_invoice_enrollment_reset_operation(payload=None):
 		row["errors"].append(_field_error("invoice", _("Sales Invoice {0} was not found.").format(row["invoice"])))
 	if row["mode"] not in INVOICE_ENROLLMENT_RESET_MODES:
 		row["errors"].append(_field_error("mode", _("Invoice reset mode must be Change or Withdraw.")))
+	if row["payment_plan_store_credit_disposition"] not in INVOICE_ENROLLMENT_RESET_PAYMENT_PLAN_CREDIT_DISPOSITIONS:
+		row["errors"].append(_field_error(
+			"payment_plan_store_credit_disposition",
+			_("Payment-plan credit disposition must be Keep or Consume."),
+		))
 	return {"row": row}
 
 
@@ -1023,6 +1063,15 @@ def _invoice_enrollment_reset_requires_historical_attendance_confirmation(row, p
 	return (
 		cint((preview.get("counts") or {}).get("historical_attendance_found")) > 0
 		and not cint(row.get("confirm_historical_attendance"))
+	)
+
+
+def _invoice_enrollment_reset_requires_payment_plan_credit_consumption_confirmation(row, preview):
+	return (
+		row.get("mode") == INVOICE_ENROLLMENT_RESET_MODE_WITHDRAW
+		and cint((preview.get("input") or {}).get("payment_plan_partial_payment"))
+		and row.get("payment_plan_store_credit_disposition") == INVOICE_ENROLLMENT_RESET_PAYMENT_PLAN_CREDIT_CONSUME
+		and not cint(row.get("confirm_payment_plan_credit_consumption"))
 	)
 
 
@@ -1063,6 +1112,8 @@ def _invoice_enrollment_reset_preview_snapshot(row, preview):
 		"send_notifications": cint(row.get("send_notifications", 1)),
 		"invoice_status": preview.get("invoice_status"),
 		"invoice_action": preview.get("invoice_action"),
+		"payment_plan_partial_payment": bool((preview.get("input") or {}).get("payment_plan_partial_payment")),
+		"payment_plan_paid_amount": flt((preview.get("input") or {}).get("payment_plan_paid_amount")),
 		"student_count": (preview.get("input") or {}).get("student_count", 0),
 		"historical_attendance_found": (preview.get("counts") or {}).get("historical_attendance_found", 0),
 		"enrollments": [
@@ -1107,6 +1158,9 @@ def _preview_invoice_enrollment_reset(operation):
 		"manual_action_count": 0,
 		"action": row.get("mode") or INVOICE_ENROLLMENT_RESET_MODE_CHANGE,
 		"action_label": _invoice_enrollment_reset_action_label(row.get("mode")),
+		"payment_plan_store_credit_disposition": row.get("payment_plan_store_credit_disposition"),
+		"payment_plan_partial_payment": False,
+		"payment_plan_paid_amount": 0,
 		"send_notifications": cint(row.get("send_notifications", 1)),
 	}
 	for error in row.get("errors") or []:
@@ -1124,6 +1178,8 @@ def _preview_invoice_enrollment_reset(operation):
 		result["message"] = preview.get("message")
 		result["input"]["enrollment_count"] = preview.get("enrollment_count") or 0
 		result["input"]["student_count"] = preview.get("student_count") or 0
+		result["input"]["payment_plan_partial_payment"] = bool(preview.get("payment_plan_partial_payment"))
+		result["input"]["payment_plan_paid_amount"] = preview.get("payment_plan_paid_amount") or 0
 
 	result["input"]["manual_action_count"] = _manual_action_count(result.get("parents") or [])
 	result["input"]["requires_historical_attendance_confirmation"] = bool(
@@ -1144,6 +1200,9 @@ def _preview_invoice_enrollment_reset_row(row):
 	invoice_doc = frappe.get_doc("Sales Invoice", invoice)
 	counts["invoices_matched"] += 1
 	invoice_action = _classify_invoice_enrollment_reset_invoice(row, invoice_doc)
+	payment_plan_active = has_active_payment_plan(invoice_doc)
+	payment_plan_paid_amount = max(0, flt(invoice_doc.get("grand_total")) - flt(invoice_doc.get("outstanding_amount")))
+	payment_plan_partial_payment = bool(payment_plan_active and payment_plan_paid_amount > 0.005)
 	_accumulate_counts(counts, invoice_action.get("counts") or {})
 	errors.extend(invoice_action.get("errors") or [])
 	warnings.extend(invoice_action.get("warnings") or [])
@@ -1230,6 +1289,8 @@ def _preview_invoice_enrollment_reset_row(row):
 		"invoice_status": invoice_action.get("invoice_status"),
 		"invoice_action": _invoice_action_label(invoice_action.get("action")),
 		"invoice_action_detail": invoice_action,
+		"payment_plan_partial_payment": payment_plan_partial_payment,
+		"payment_plan_paid_amount": payment_plan_paid_amount,
 		"enrollment_count": included_count,
 		"student_count": len(included_students),
 		"parents": parent_rows,
@@ -1252,6 +1313,11 @@ def _run_invoice_enrollment_reset_operation(row, preview):
 		reason,
 		allow_empty_reason=True,
 		send_notifications=row.get("send_notifications", 1),
+		payment_plan_store_credit_disposition=(
+			row.get("payment_plan_store_credit_disposition")
+			if mode == INVOICE_ENROLLMENT_RESET_MODE_WITHDRAW
+			else INVOICE_ENROLLMENT_RESET_PAYMENT_PLAN_CREDIT_KEEP
+		),
 	)
 	result = {
 		"invoice": row.get("invoice"),
