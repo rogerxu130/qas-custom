@@ -101,6 +101,7 @@ from qas_custom.services.school_admin import (
 	get_school_admin_dashboard_data,
 	get_school_admin_enrollment_data,
 	get_school_admin_enrollments_data,
+	get_school_admin_family_attendance_data,
 	get_school_admin_family_data,
 	get_school_admin_inquiries_data,
 	get_school_admin_inquiry_data,
@@ -238,6 +239,11 @@ def school_admin_global_search(query=None, limit=20):
 @frappe.whitelist()
 def school_admin_get_family(parent=None, student=None, customer=None, email=None):
 	return get_school_admin_family_data(parent=parent, student=student, customer=customer, email=email)
+
+
+@frappe.whitelist()
+def school_admin_get_family_attendance(parent=None, student=None, customer=None, email=None, term=None):
+	return get_school_admin_family_attendance_data(parent=parent, student=student, customer=customer, email=email, term=term)
 
 
 @frappe.whitelist()

@@ -313,6 +313,97 @@ def get_school_admin_family_data(parent=None, student=None, customer=None, email
 	}
 
 
+def get_school_admin_family_attendance_data(parent=None, student=None, customer=None, email=None, term=None):
+	"""Return past/current attendance for every student in one family, scoped to a term."""
+	_require_school_admin()
+	context = _resolve_family_context(parent=parent, student=student, customer=customer, email=email)
+	if not context.get("parent") and not context.get("student") and not context.get("customer"):
+		frappe.throw(_("Family was not found."))
+
+	students = _get_family_students(context.get("parent"), context.get("student"))
+	student_ids = [row.get("name") for row in students if row.get("name")]
+	terms = _get_family_attendance_terms()
+	selected_term = _resolve_family_attendance_term(term, terms)
+	if not student_ids or not selected_term or not _doctype_available(ATTENDANCE_DOCTYPE):
+		return {"term": selected_term, "terms": terms, "items": []}
+
+	attendance_rows = frappe.get_all(
+		ATTENDANCE_DOCTYPE,
+		filters={"student": ["in", student_ids]},
+		fields=["name", "student", "course_session", "enrollment_type", "status", "comments", "source_doctype", "source_document"],
+		limit_page_length=0,
+	)
+	session_ids = sorted({row.get("course_session") for row in attendance_rows if row.get("course_session")})
+	if not session_ids:
+		return {"term": selected_term, "terms": terms, "items": []}
+	sessions = frappe.get_all(
+		"Course Sessions",
+		filters={"name": ["in", session_ids], "session_date": ["<=", today()]},
+		fields=["name", "weekly_timeslot", "session_date", "status"],
+		limit_page_length=0,
+	)
+	session_map = {row.get("name"): row for row in sessions if row.get("name")}
+	timeslot_ids = sorted({row.get("weekly_timeslot") for row in sessions if row.get("weekly_timeslot")})
+	timeslots = frappe.get_all(
+		"Weekly Timeslot",
+		filters={"name": ["in", timeslot_ids], "term": selected_term.get("name")},
+		fields=["name", "term", "course", "campus", "classroom", "start_time", "end_time"],
+		limit_page_length=0,
+	) if timeslot_ids else []
+	timeslot_map = {row.get("name"): row for row in timeslots if row.get("name")}
+	student_map = {row.get("name"): row for row in students if row.get("name")}
+	items = []
+	for row in attendance_rows:
+		session = session_map.get(row.get("course_session"))
+		timeslot = timeslot_map.get((session or {}).get("weekly_timeslot"))
+		if not session or not timeslot:
+			continue
+		student_row = student_map.get(row.get("student")) or {}
+		items.append({
+			"name": row.get("name"),
+			"student": row.get("student"),
+			"student_display": student_row.get("student_display") or student_row.get("student_name") or row.get("student"),
+			"course_session": row.get("course_session"),
+			"session_date": session.get("session_date"),
+			"course": timeslot.get("course"),
+			"campus": timeslot.get("campus"),
+			"classroom": timeslot.get("classroom"),
+			"start_time": timeslot.get("start_time"),
+			"end_time": timeslot.get("end_time"),
+			"status": row.get("status") or "To be started",
+			"attendance_type": row.get("enrollment_type") or "",
+			"comments": row.get("comments") or "",
+			"needs_attendance": str(session.get("session_date")) < today() and (row.get("status") or "To be started") == "To be started",
+		})
+	items.sort(key=lambda item: (str(item.get("session_date") or ""), str(item.get("start_time") or "")), reverse=True)
+	return {"term": selected_term, "terms": terms, "items": items}
+
+
+def _get_family_attendance_terms():
+	if not _doctype_available("Term"):
+		return []
+	rows = frappe.get_all(
+		"Term",
+		fields=_safe_fields("Term", ["name", "term_name", "start_date", "end_date", "status"]),
+		order_by="start_date desc, modified desc",
+		limit_page_length=0,
+	)
+	return [_normalize_row_payload("Term", row) for row in rows]
+
+
+def _resolve_family_attendance_term(term, terms):
+	if term:
+		matched = next((row for row in terms if row.get("name") == term), None)
+		if not matched:
+			frappe.throw(_("Term was not found."))
+		return matched
+	current_date = getdate(today())
+	return next(
+		(row for row in terms if row.get("status") == "Active"),
+		next((row for row in terms if row.get("start_date") and row.get("end_date") and getdate(row.get("start_date")) <= current_date <= getdate(row.get("end_date"))), terms[0] if terms else None),
+	)
+
+
 
 
 def get_school_admin_parents_data(query=None, status=None, invite_status=None, limit=120):
