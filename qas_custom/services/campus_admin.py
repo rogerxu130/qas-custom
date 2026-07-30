@@ -720,24 +720,6 @@ def get_campus_admin_session_video_content_data(course_session=None, video_post=
 	return payload
 
 
-def update_campus_admin_student_teaching_notes_data(student=None, teaching_notes=None):
-	reject_support_view_write()
-	profile = _require_campus_admin_profile()
-	if not student:
-		frappe.throw(_("Student is required."))
-	if not frappe.db.exists("Student", student):
-		frappe.throw(_("Student was not found."), frappe.DoesNotExistError)
-	if "teaching_notes" not in _safe_fields("Student", ["teaching_notes"]):
-		frappe.throw(_("Student teaching notes are not available on this site. Please run migrate."))
-	_assert_campus_admin_student_access(student, profile["campuses"])
-
-	doc = frappe.get_doc("Student", student)
-	doc.teaching_notes = str(teaching_notes or "").strip()
-	doc.save(ignore_permissions=True)
-	frappe.db.commit()
-	return {"student": doc.name, "teaching_notes": doc.get("teaching_notes") or ""}
-
-
 def _assert_campus_admin_student_access(student, allowed_campuses):
 	attendance_sessions = frappe.get_all(
 		"Class Attendance Entry",

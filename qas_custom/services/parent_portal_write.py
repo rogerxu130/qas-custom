@@ -15,6 +15,7 @@ from qas_custom.modules.makeup.commands import (
 from qas_custom.services.parent_portal_read import (
     _get_parent_students,
     _require_parent,
+    _validate_student_filter,
 )
 from qas_custom.services.support_view import reject_support_view_write
 
@@ -22,6 +23,27 @@ from qas_custom.services.support_view import reject_support_view_write
 def get_parent_csrf_token_data():
     _require_parent()
     return {"csrf_token": frappe.sessions.get_csrf_token()}
+
+
+def update_parent_student_teaching_notes_data(student=None, teaching_notes=None):
+    reject_support_view_write()
+    parent = _require_parent()
+    students = _get_parent_students(parent.name)
+    student = _validate_student_filter(str(student or "").strip(), students)
+    if not student:
+        frappe.throw("Student is required.")
+    if not frappe.db.has_column("Student", "teaching_notes"):
+        frappe.throw("Student special-needs notes are not available on this site. Please run migrate.")
+
+    notes = str(teaching_notes or "").strip()
+    if len(notes) > 500:
+        frappe.throw("Special needs / important classroom notes must be 500 characters or fewer.")
+
+    doc = frappe.get_doc("Student", student)
+    doc.teaching_notes = notes
+    doc.save(ignore_permissions=True)
+    frappe.db.commit()
+    return {"student": doc.name, "teaching_notes": notes}
 
 
 def submit_parent_leave_request_data(student=None, course_session=None):

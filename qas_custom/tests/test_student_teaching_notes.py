@@ -3,10 +3,11 @@ from unittest.mock import Mock, patch
 
 import frappe
 
+import qas_custom.api.campus_admin as campus_admin_api
 from qas_custom.services.campus_admin import (
 	_assert_campus_admin_student_access,
-	update_campus_admin_student_teaching_notes_data,
 )
+from qas_custom.services.parent_portal_write import update_parent_student_teaching_notes_data
 from qas_custom.services.school_admin import (
 	_get_student_teaching_notes_map,
 	_normalize_student_teaching_notes,
@@ -40,36 +41,36 @@ class TestStudentTeachingNotes(TestCase):
 			limit_page_length=0,
 		)
 
-	@patch("qas_custom.services.campus_admin._assert_campus_admin_student_access")
-	@patch("qas_custom.services.campus_admin._safe_fields", return_value=["teaching_notes"])
-	@patch("qas_custom.services.campus_admin._require_campus_admin_profile")
-	@patch("qas_custom.services.campus_admin.reject_support_view_write")
-	def test_campus_admin_can_save_trimmed_note_for_accessible_student(
+	@patch("qas_custom.services.parent_portal_write._get_parent_students")
+	@patch("qas_custom.services.parent_portal_write._require_parent")
+	@patch("qas_custom.services.parent_portal_write.reject_support_view_write")
+	def test_parent_can_save_trimmed_note_for_own_student(
 		self,
 		reject_support,
-		require_profile,
-		_safe_fields,
-		assert_access,
+		require_parent,
+		get_parent_students,
 	):
-		require_profile.return_value = {"campuses": ["Campus A"]}
+		require_parent.return_value = frappe._dict(name="PARENT-1")
+		get_parent_students.return_value = [{"name": "STU-1"}]
 		doc = Mock()
 		doc.name = "STU-1"
-		doc.get.side_effect = lambda fieldname: getattr(doc, fieldname, None)
 		db = Mock()
-		db.exists.return_value = True
+		db.has_column.return_value = True
 		fake_frappe = Mock()
 		fake_frappe.db = db
 		fake_frappe.get_doc.return_value = doc
 
-		with patch("qas_custom.services.campus_admin.frappe", fake_frappe):
-			result = update_campus_admin_student_teaching_notes_data("STU-1", "  Avoid witch themes.  ")
+		with patch("qas_custom.services.parent_portal_write.frappe", fake_frappe):
+			result = update_parent_student_teaching_notes_data("STU-1", "  Avoid witch themes.  ")
 
 		reject_support.assert_called_once_with()
-		assert_access.assert_called_once_with("STU-1", ["Campus A"])
 		self.assertEqual(doc.teaching_notes, "Avoid witch themes.")
 		doc.save.assert_called_once_with(ignore_permissions=True)
 		db.commit.assert_called_once_with()
 		self.assertEqual(result, {"student": "STU-1", "teaching_notes": "Avoid witch themes."})
+
+	def test_campus_admin_note_mutation_endpoint_is_not_exposed(self):
+		self.assertFalse(hasattr(campus_admin_api, "campus_admin_update_student_teaching_notes"))
 
 	@patch("qas_custom.services.campus_admin.frappe.get_all")
 	def test_campus_admin_student_access_rejects_cross_campus_student(self, get_all):
@@ -84,16 +85,14 @@ class TestStudentTeachingNotes(TestCase):
 
 		throw.assert_called_once()
 
-	@patch("qas_custom.services.campus_admin._require_campus_admin_profile")
 	@patch(
-		"qas_custom.services.campus_admin.reject_support_view_write",
+		"qas_custom.services.parent_portal_write.reject_support_view_write",
 		side_effect=frappe.PermissionError,
 	)
-	def test_support_view_cannot_update_teaching_notes(self, _reject_support, require_profile):
+	def test_support_view_cannot_update_teaching_notes(self, _reject_support):
 		with self.assertRaises(frappe.PermissionError):
-			update_campus_admin_student_teaching_notes_data("STU-1", "note")
+			update_parent_student_teaching_notes_data("STU-1", "note")
 
-		require_profile.assert_not_called()
 
 	@patch("qas_custom.services.teacher_portal._count_leave_rows", return_value=0)
 	@patch("qas_custom.services.teacher_portal._count_special_students", return_value=0)

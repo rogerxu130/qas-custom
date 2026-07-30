@@ -37,7 +37,6 @@ from qas_custom.services.campus_admin import (
 	reopen_campus_admin_inquiry_data,
 	send_campus_admin_trial_class_reminder_data,
 	link_campus_admin_inquiry_enrollment_data,
-	update_campus_admin_student_teaching_notes_data,
 )
 
 
@@ -195,11 +194,6 @@ def campus_admin_get_course_session_video(course_session=None, video_post=None):
 	frappe.local.response.content_type = payload["content_type"]
 	frappe.local.response.display_content_as = payload["display_content_as"]
 	frappe.local.response.type = "download"
-
-
-@frappe.whitelist()
-def campus_admin_update_student_teaching_notes(student=None, teaching_notes=None):
-	return update_campus_admin_student_teaching_notes_data(student=student, teaching_notes=teaching_notes)
 
 
 @frappe.whitelist()

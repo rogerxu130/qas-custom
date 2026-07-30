@@ -23,7 +23,7 @@ def get_parent_info_data():
     students = frappe.get_all(
         "Student",
         filters={"guardian": parent_name},
-        fields=["name", "student_name", "age", "status"],
+        fields=["name", "student_name", "age", "status", "teaching_notes"],
         order_by="student_name asc",
     )
 
@@ -55,6 +55,7 @@ def get_parent_info_data():
                 "student_name": student.get("student_name"),
                 "age": student.get("age") or 0,
                 "status": student.get("status"),
+                "teaching_notes": (student.get("teaching_notes") or "").strip(),
                 "enrollments": enrollments_by_student.get(student.get("name"), []),
             }
         )

@@ -21,6 +21,7 @@ from qas_custom.services.parent_portal_write import (
     get_parent_redeemable_sessions_data,
     redeem_parent_voucher_data,
     submit_parent_leave_request_data,
+    update_parent_student_teaching_notes_data,
 )
 from qas_custom.services.password_reset import (
     confirm_password_reset,
@@ -90,6 +91,11 @@ def parent_portal_get_feed_video(video_post=None, download=0, support_token=None
 @frappe.whitelist()
 def parent_portal_get_info():
     return get_parent_info_data()
+
+
+@frappe.whitelist()
+def parent_portal_update_student_teaching_notes(student=None, teaching_notes=None):
+    return update_parent_student_teaching_notes_data(student=student, teaching_notes=teaching_notes)
 
 
 @frappe.whitelist()
