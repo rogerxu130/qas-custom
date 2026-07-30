@@ -36,8 +36,8 @@ def update_parent_student_teaching_notes_data(student=None, teaching_notes=None)
         frappe.throw("Student special-needs notes are not available on this site. Please run migrate.")
 
     notes = str(teaching_notes or "").strip()
-    if len(notes) > 50:
-        frappe.throw("Special needs / important classroom notes must be 50 characters or fewer.")
+    if len(notes) > 80:
+        frappe.throw("Special needs / important classroom notes must be 80 characters or fewer.")
 
     doc = frappe.get_doc("Student", student)
     doc.teaching_notes = notes

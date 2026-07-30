@@ -91,7 +91,7 @@ class TestStudentTeachingNotes(TestCase):
 	@patch("qas_custom.services.parent_portal_write._get_parent_students")
 	@patch("qas_custom.services.parent_portal_write._require_parent")
 	@patch("qas_custom.services.parent_portal_write.reject_support_view_write")
-	def test_parent_cannot_save_note_longer_than_fifty_characters(
+	def test_parent_cannot_save_note_longer_than_eighty_characters(
 		self,
 		reject_support,
 		require_parent,
@@ -107,12 +107,12 @@ class TestStudentTeachingNotes(TestCase):
 
 		with patch("qas_custom.services.parent_portal_write.frappe", fake_frappe):
 			with self.assertRaises(frappe.ValidationError):
-				update_parent_student_teaching_notes_data("STU-1", "x" * 51)
+				update_parent_student_teaching_notes_data("STU-1", "x" * 81)
 
 		reject_support.assert_called_once_with()
 		fake_frappe.get_doc.assert_not_called()
 		fake_frappe.throw.assert_called_once_with(
-			"Special needs / important classroom notes must be 50 characters or fewer."
+			"Special needs / important classroom notes must be 80 characters or fewer."
 		)
 
 	def test_campus_admin_note_mutation_endpoint_is_not_exposed(self):
