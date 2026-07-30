@@ -69,6 +69,33 @@ class TestStudentTeachingNotes(TestCase):
 		db.commit.assert_called_once_with()
 		self.assertEqual(result, {"student": "STU-1", "teaching_notes": "Avoid witch themes."})
 
+	@patch("qas_custom.services.parent_portal_write._get_parent_students")
+	@patch("qas_custom.services.parent_portal_write._require_parent")
+	@patch("qas_custom.services.parent_portal_write.reject_support_view_write")
+	def test_parent_cannot_save_note_longer_than_fifty_characters(
+		self,
+		reject_support,
+		require_parent,
+		get_parent_students,
+	):
+		require_parent.return_value = frappe._dict(name="PARENT-1")
+		get_parent_students.return_value = [{"name": "STU-1"}]
+		db = Mock()
+		db.has_column.return_value = True
+		fake_frappe = Mock()
+		fake_frappe.db = db
+		fake_frappe.throw.side_effect = frappe.ValidationError
+
+		with patch("qas_custom.services.parent_portal_write.frappe", fake_frappe):
+			with self.assertRaises(frappe.ValidationError):
+				update_parent_student_teaching_notes_data("STU-1", "x" * 51)
+
+		reject_support.assert_called_once_with()
+		fake_frappe.get_doc.assert_not_called()
+		fake_frappe.throw.assert_called_once_with(
+			"Special needs / important classroom notes must be 50 characters or fewer."
+		)
+
 	def test_campus_admin_note_mutation_endpoint_is_not_exposed(self):
 		self.assertFalse(hasattr(campus_admin_api, "campus_admin_update_student_teaching_notes"))
 
