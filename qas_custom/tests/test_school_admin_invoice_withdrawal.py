@@ -6,12 +6,14 @@ from qas_custom.services.school_admin_import import (
 	ATTENDANCE_DOCTYPE,
 	HISTORICAL_ATTENDANCE_BLOCKING_STATUSES,
 	INVOICE_ENROLLMENT_RESET_MODE_WITHDRAW,
+	INVOICE_ENROLLMENT_RESET_PAYMENT_PLAN_CREDIT_CONSUME,
 	_build_invoice_enrollment_reset_operation,
 	_apply_enrollment_change_invoice_action,
 	_count_historical_enrollment_attendance,
 	_invoice_enrollment_reset_preview_snapshot,
 	_invoice_enrollment_reset_requires_historical_attendance_confirmation,
 	_invoice_enrollment_reset_requires_multiple_withdrawal_confirmation,
+	_invoice_enrollment_reset_requires_payment_plan_credit_consumption_confirmation,
 )
 
 
@@ -74,7 +76,46 @@ class TestSchoolAdminInvoiceWithdrawal(TestCase):
 			reason="Family withdrew",
 			allow_empty_reason=True,
 			send_notifications=0,
+			payment_plan_store_credit_disposition="keep",
 		)
+
+	@patch("qas_custom.services.school_admin_import.cancel_school_admin_invoice_data")
+	@patch("qas_custom.services.school_admin_import._", side_effect=lambda value: value)
+	def test_submitted_payment_plan_withdrawal_passes_credit_consumption_choice(self, _mock_translate, mock_cancel):
+		_apply_enrollment_change_invoice_action(
+			{"action": "cancel_submitted", "invoice": "SINV-0001"},
+			"Family withdrew after attending classes",
+			allow_empty_reason=True,
+			payment_plan_store_credit_disposition=INVOICE_ENROLLMENT_RESET_PAYMENT_PLAN_CREDIT_CONSUME,
+		)
+
+		mock_cancel.assert_called_once_with(
+			invoice="SINV-0001",
+			reason="Family withdrew after attending classes",
+			allow_empty_reason=True,
+			send_notifications=True,
+			payment_plan_store_credit_disposition=INVOICE_ENROLLMENT_RESET_PAYMENT_PLAN_CREDIT_CONSUME,
+		)
+
+	def test_paid_payment_plan_consumption_requires_confirmation(self):
+		row = {
+			"mode": INVOICE_ENROLLMENT_RESET_MODE_WITHDRAW,
+			"payment_plan_store_credit_disposition": INVOICE_ENROLLMENT_RESET_PAYMENT_PLAN_CREDIT_CONSUME,
+			"confirm_payment_plan_credit_consumption": 0,
+		}
+		preview = {"input": {"payment_plan_partial_payment": True}}
+
+		self.assertTrue(_invoice_enrollment_reset_requires_payment_plan_credit_consumption_confirmation(row, preview))
+
+	def test_paid_payment_plan_consumption_is_allowed_after_confirmation(self):
+		row = {
+			"mode": INVOICE_ENROLLMENT_RESET_MODE_WITHDRAW,
+			"payment_plan_store_credit_disposition": INVOICE_ENROLLMENT_RESET_PAYMENT_PLAN_CREDIT_CONSUME,
+			"confirm_payment_plan_credit_consumption": 1,
+		}
+		preview = {"input": {"payment_plan_partial_payment": True}}
+
+		self.assertFalse(_invoice_enrollment_reset_requires_payment_plan_credit_consumption_confirmation(row, preview))
 
 	@patch("qas_custom.services.school_admin_import.delete_school_admin_draft_invoice_data")
 	@patch("qas_custom.services.school_admin_import._", side_effect=lambda value: value)

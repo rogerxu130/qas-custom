@@ -106,6 +106,7 @@ from qas_custom.services.school_admin import (
 	get_school_admin_inquiries_data,
 	get_school_admin_inquiry_data,
 	get_school_admin_invoice_data,
+	set_school_admin_invoice_payment_plan_data,
 	get_school_admin_invoices_data,
 	get_school_admin_invoice_settings_data,
 	get_school_admin_invoice_items_data,
@@ -627,6 +628,11 @@ def school_admin_get_invoices(status=None, customer=None, parent=None, student=N
 @frappe.whitelist()
 def school_admin_get_invoice(invoice=None):
 	return get_school_admin_invoice_data(invoice=invoice)
+
+
+@frappe.whitelist()
+def school_admin_set_invoice_payment_plan(invoice=None, payload=None):
+	return set_school_admin_invoice_payment_plan_data(invoice=invoice, payload=payload)
 
 
 @frappe.whitelist()

@@ -195,6 +195,7 @@ scheduler_events = {
 		],
 		"0 9 * * *": [
 			"qas_custom.tasks.invoice_overdue_reminders.send_overdue_invoice_reminders",
+			"qas_custom.tasks.invoice_payment_plan_reminders.send_payment_plan_reminders",
 		],
 	},
 	"hourly": [

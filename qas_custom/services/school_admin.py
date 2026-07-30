@@ -51,6 +51,7 @@ from qas_custom.modules.billing.commands import (
 	get_invoice_item,
 )
 from qas_custom.modules.billing.presentation import build_course_invoice_description, invoice_item_schedule
+from qas_custom.modules.billing.payment_plans import apply_payment_plan, has_active_payment_plan, payment_plan_payload
 from qas_custom.modules.makeup.commands import (
     DEFAULT_VOUCHER_EXPIRY_DAYS,
     _build_makeup_voucher_payload,
@@ -1432,6 +1433,22 @@ def get_school_admin_invoice_data(invoice=None):
 	return _build_invoice_payload(doc)
 
 
+def set_school_admin_invoice_payment_plan_data(invoice=None, payload=None):
+	_require_school_admin()
+	if not invoice:
+		frappe.throw(_("Invoice is required."))
+	payload = _get_payload(payload)
+	doc = frappe.get_doc("Sales Invoice", invoice)
+	doc = apply_payment_plan(doc, payload.get("installments") or [], actor=frappe.session.user)
+	_add_comment("Sales Invoice", doc.name, _("Payment plan created by School Admin with {0} installment(s).").format(len(doc.get("qas_payment_plan_installments") or [])))
+	frappe.db.commit()
+	notification = _send_invoice_notification(doc, event="payment_plan")
+	frappe.db.commit()
+	result = _build_invoice_payload(frappe.get_doc("Sales Invoice", doc.name))
+	result["notification"] = notification
+	return result
+
+
 def create_school_admin_manual_invoice_data(payload=None):
 	_require_school_admin()
 	payload = _get_payload(payload)
@@ -1699,12 +1716,21 @@ def mark_school_admin_invoice_paid_data(invoice=None, payload=None):
 	return payload
 
 
-def cancel_school_admin_invoice_data(invoice=None, reason=None, allow_empty_reason=False, send_notifications=True):
+def cancel_school_admin_invoice_data(
+	invoice=None,
+	reason=None,
+	allow_empty_reason=False,
+	send_notifications=True,
+	payment_plan_store_credit_disposition="keep",
+):
 	_require_school_admin()
 	if not invoice:
 		frappe.throw(_("Invoice is required."))
 	reason = (reason or "").strip()
 	send_notifications = cint(send_notifications)
+	payment_plan_store_credit_disposition = str(payment_plan_store_credit_disposition or "keep").strip().lower()
+	if payment_plan_store_credit_disposition not in {"keep", "consume"}:
+		frappe.throw(_("Payment-plan store-credit disposition must be Keep or Consume."))
 	if not reason and not allow_empty_reason:
 		frappe.throw(_("Cancellation reason is required."))
 
@@ -1722,11 +1748,24 @@ def cancel_school_admin_invoice_data(invoice=None, reason=None, allow_empty_reas
 	if cint(doc.docstatus) == 1:
 		if not payment_mutations_enabled():
 			frappe.throw(_(payment_block_reason()))
+		if payment_plan_store_credit_disposition == "consume":
+			if not has_active_payment_plan(doc):
+				frappe.throw(_("Only an active payment-plan invoice can consume cancellation store credit."))
+			if not reason:
+				frappe.throw(_("A reason is required when paid plan funds are retained for attended classes or a cancellation charge."))
 		paid_credit_amount = _invoice_payment_amount(doc.name)
+		applied_store_credit_amount = get_invoice_store_credit_applied(doc.name)
 		_cancel_invoice_payment_entries(doc.name)
 		cancel_store_credit_journal_entries(doc.name)
-		_reverse_invoice_store_credit_application(doc, reason)
+		returned_store_credit = _reverse_invoice_store_credit_application(doc, reason)
 		paid_credit = _create_invoice_cancellation_store_credit(doc, paid_credit_amount, reason)
+		consumed_store_credit = None
+		if payment_plan_store_credit_disposition == "consume":
+			consumed_store_credit = _consume_invoice_cancellation_store_credit(
+				doc,
+				flt(paid_credit_amount) + flt(applied_store_credit_amount),
+				reason,
+			)
 		_cancel_submitted_invoice_as_admin(doc.name)
 		_clear_deleted_invoice_enrollment_snapshot(frappe.get_doc("Sales Invoice", doc.name), action="cancelled")
 		comment = _("Invoice cancelled by School Admin.")
@@ -1748,8 +1787,14 @@ def cancel_school_admin_invoice_data(invoice=None, reason=None, allow_empty_reas
 			notification = _skipped_invoice_notification("Parent cancellation notification was skipped by School Admin.")
 		frappe.db.commit()
 		payload = _build_invoice_payload(frappe.get_doc("Sales Invoice", invoice))
-		payload["cancellation_store_credit_amount"] = paid_credit_amount if paid_credit else 0
-		payload["cancellation_store_credit"] = paid_credit.name if paid_credit else None
+		cancellation_credit_amount = flt(paid_credit_amount) + flt(applied_store_credit_amount)
+		payload["cancellation_store_credit_amount"] = cancellation_credit_amount
+		payload["cancellation_store_credit"] = paid_credit.name if paid_credit else (returned_store_credit.name if returned_store_credit else None)
+		payload["cancellation_store_credit_disposition"] = payment_plan_store_credit_disposition
+		payload["cancellation_store_credit_consumed_amount"] = (
+			cancellation_credit_amount if consumed_store_credit else 0
+		)
+		payload["cancellation_store_credit_consumption"] = consumed_store_credit.name if consumed_store_credit else None
 		payload["cancellation_notification"] = notification
 		return payload
 
@@ -1765,6 +1810,8 @@ def reopen_school_admin_unpaid_invoice_data(invoice=None, reason=None):
 		frappe.throw(_(payment_block_reason()))
 
 	doc = frappe.get_doc("Sales Invoice", invoice)
+	if has_active_payment_plan(doc):
+		frappe.throw(_("This invoice has an active payment plan. Cancel or complete the plan before reopening the invoice."))
 	if cint(doc.docstatus) == 2:
 		amendment = _invoice_amendment_for(doc.name)
 		if amendment:
@@ -6013,6 +6060,7 @@ def _build_invoice_payload(doc):
 	payload.update(_invoice_edit_totals(doc))
 	payload["comments"] = _get_comments("Sales Invoice", doc.name)
 	payload.update(_invoice_credit_payload(doc))
+	payload["payment_plan"] = payment_plan_payload(doc)
 	payload["notifications"] = get_invoice_notification_summary(doc.name)
 	payload.update(get_invoice_payment_request_summary(doc.name))
 	return payload
@@ -6334,6 +6382,44 @@ def _create_invoice_cancellation_store_credit(doc, amount, reason):
 	)
 	_add_comment("Sales Invoice", doc.name, _("Paid amount moved to store credit: {0}.").format(amount))
 	return credit
+
+
+def _consume_invoice_cancellation_store_credit(doc, amount, reason):
+	"""Record that paid plan funds are retained rather than left for future use.
+
+	The cancellation path first creates/reverses the same ledger credit as every
+	other paid-invoice cancellation.  This matching debit preserves an auditable
+	ledger trail rather than silently deleting a family balance.
+	"""
+	amount = flt(amount)
+	if amount <= 0 or not doc.get("customer"):
+		return None
+	notes = _(
+		"Consumed cancellation credit from payment-plan invoice {0} for attended classes or a cancellation charge."
+	).format(doc.name)
+	if reason:
+		notes = _("{0} Reason: {1}").format(notes, reason)
+	entry = create_store_credit_entry(
+		parent=doc.get("parent"),
+		customer=doc.get("customer"),
+		student=doc.get("primary_student") or doc.get("student"),
+		transaction_type="Correction",
+		debit_amount=amount,
+		invoice=doc.name,
+		enrollment=doc.get("enrollment"),
+		reference_doctype="Sales Invoice",
+		reference_document=doc.name,
+		source_doctype="Sales Invoice",
+		source_document=doc.name,
+		reason="Payment-plan withdrawal retained funds",
+		notes=notes,
+	)
+	_add_comment(
+		"Sales Invoice",
+		doc.name,
+		_("Cancellation store credit of {0} was consumed for attended classes or a cancellation charge.").format(amount),
+	)
+	return entry
 
 
 def _detach_invoice_operation_report_links(invoice):

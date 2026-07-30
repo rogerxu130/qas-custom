@@ -1671,6 +1671,8 @@ def _invoice_email_message(invoice_doc, event, store_credit_applied, payable_amo
 	intro = (
 		_("Your invoice is attached to this email.")
 		if event == "approved"
+		else _("We have set up the payment plan below for this invoice.")
+		if event == "payment_plan"
 		else _("We have resent this invoice for your reference.")
 	)
 	if flt(context["payable_amount"]) > 0:
@@ -1680,6 +1682,8 @@ def _invoice_email_message(invoice_doc, event, store_credit_applied, payable_amo
 	else:
 		payment_line = _("No payment is required for this invoice.")
 	invoice_message = _html_multiline(context.get("invoice_message"))
+	payment_plan = context.get("payment_plan") or {}
+	payment_plan_html = _invoice_payment_plan_html(payment_plan)
 	bank_details = _invoice_email_bank_details(context) if flt(context["payable_amount"]) > 0 else ""
 	rows = "\n".join(_invoice_email_item_row(item) for item in _invoice_parent_lines(context))
 	if not rows:
@@ -1698,6 +1702,7 @@ def _invoice_email_message(invoice_doc, event, store_credit_applied, payable_amo
 						<p style="margin:0 0 14px;font-size:16px;line-height:1.5;">{greeting}</p>
 						<p style="margin:0 0 18px;font-size:16px;line-height:1.5;">{intro}</p>
 						{invoice_message}
+						{payment_plan_html}
 
 						<table style="width:100%;border-collapse:collapse;margin:0 0 18px;">
 							<tr>
@@ -1744,6 +1749,7 @@ def _invoice_email_message(invoice_doc, event, store_credit_applied, payable_amo
 		greeting=greeting,
 		intro=intro,
 		invoice_message=invoice_message,
+		payment_plan_html=payment_plan_html,
 		due_date=context["due_date"] or "-",
 		total=flt(context["total"]),
 		credit=flt(context["store_credit_applied"]),
@@ -1752,6 +1758,25 @@ def _invoice_email_message(invoice_doc, event, store_credit_applied, payable_amo
 		payment_line=payment_line,
 		bank_details=bank_details,
 		portal_action=_invoice_email_portal_action(context),
+	)
+
+
+def _invoice_payment_plan_html(payment_plan):
+	if not payment_plan.get("enabled"):
+		return ""
+	rows = "".join(
+		"<tr><td style='padding:8px 0;color:#64748b;'>Installment {0}</td><td style='padding:8px 0;'>{1}</td><td style='padding:8px 0;text-align:right;font-weight:700;'>AUD ${2:.2f}</td></tr>".format(
+			row.get("sequence"), escape_html(formatdate(row.get("due_date")) if row.get("due_date") else "-"), flt(row.get("cumulative_amount_due"))
+		)
+		for row in payment_plan.get("installments", [])
+	)
+	current = payment_plan.get("current_installment") or {}
+	return """<div style='margin:0 0 18px;padding:14px;border:1px solid #99f6e4;border-radius:10px;background:#f0fdfa;'>
+	<p style='margin:0 0 8px;font-size:16px;font-weight:700;'>Payment plan</p>
+	<p style='margin:0 0 8px;font-size:14px;'>Total paid: AUD ${paid:.2f} · Outstanding: AUD ${outstanding:.2f}</p>
+	{current_line}<table style='width:100%;border-collapse:collapse'>{rows}</table></div>""".format(
+		paid=flt(payment_plan.get("total_paid")), outstanding=flt(payment_plan.get("outstanding")),
+		current_line=("<p style='margin:0 0 8px;font-size:14px;'><strong>Current installment shortfall: AUD ${0:.2f}</strong></p>".format(flt(current.get("shortfall"))) if current else ""), rows=rows
 	)
 
 

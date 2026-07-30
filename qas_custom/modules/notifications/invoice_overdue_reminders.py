@@ -146,6 +146,9 @@ def overdue_reminder_eligibility(invoice, attempts=None, today=None):
 		return _ineligible("not_overdue", _("Invoice is not overdue."))
 	if flt(invoice.get("outstanding_amount")) <= 0.005:
 		return _ineligible("no_outstanding", _("Invoice no longer has an outstanding balance."))
+	from qas_custom.modules.billing.payment_plans import has_active_payment_plan
+	if has_active_payment_plan(invoice):
+		return _ineligible("payment_plan", _("Invoice is managed by a payment plan."))
 
 	attempt_dates = sorted(
 		(value for value in (_attempt_datetime(row) for row in (attempts or [])) if value),
@@ -384,6 +387,8 @@ def _get_overdue_invoice_candidates(today):
 		"outstanding_amount": [">", 0.005],
 	}
 	fields = ["name", "due_date", "outstanding_amount", "docstatus"]
+	if frappe.db.has_column("Sales Invoice", "qas_has_payment_plan"):
+		fields.append("qas_has_payment_plan")
 	if frappe.db.has_column("Sales Invoice", "is_return"):
 		filters["is_return"] = 0
 		fields.append("is_return")
@@ -506,6 +511,9 @@ def _invoice_ineligible_reason(invoice_doc, today):
 		return "Invoice is not overdue."
 	if _invoice_outstanding_amount(invoice_doc) <= 0.005:
 		return "Invoice no longer has an outstanding balance."
+	from qas_custom.modules.billing.payment_plans import has_active_payment_plan
+	if has_active_payment_plan(invoice_doc):
+		return "Invoice is managed by a payment plan."
 	return None
 
 
