@@ -77,6 +77,18 @@ def get_teacher_sessions_data(from_date=None, to_date=None):
     timeslot_map.update(override_timeslots)
 
     attendance_by_session = _get_attendance_by_session([row["name"] for row in session_rows])
+    visible_attendance_by_session = {
+        session_id: _visible_attendance_rows(rows)
+        for session_id, rows in attendance_by_session.items()
+    }
+    student_map = _get_student_map(
+        [
+            row.get("student")
+            for rows in visible_attendance_by_session.values()
+            for row in rows
+            if row.get("student")
+        ]
+    )
     items = []
     for session in session_rows:
         timeslot = timeslot_map.get(session.get("weekly_timeslot"))
@@ -84,7 +96,7 @@ def get_teacher_sessions_data(from_date=None, to_date=None):
             continue
 
         attendance_rows = attendance_by_session.get(session["name"], [])
-        visible_attendance_rows = _visible_attendance_rows(attendance_rows)
+        visible_attendance_rows = visible_attendance_by_session.get(session["name"], [])
         special_counts = _count_special_students(visible_attendance_rows)
         items.append(
             {
@@ -100,6 +112,9 @@ def get_teacher_sessions_data(from_date=None, to_date=None):
                 "student_count": len(visible_attendance_rows),
                 "leave_count": _count_leave_rows(attendance_rows),
                 "special_students": special_counts,
+                "special_needs_count": _count_students_with_teaching_notes(
+                    visible_attendance_rows, student_map
+                ),
             }
         )
 
@@ -803,6 +818,13 @@ def _count_special_students(attendance_rows: list[dict]):
         "makeup": counter.get("Makeup", 0),
         "pay_as_you_go": counter.get("Pay-as-you-go", 0),
     }
+
+
+def _count_students_with_teaching_notes(attendance_rows: list[dict], student_map: dict):
+    return sum(
+        bool((student_map.get(row.get("student"), {}).get("teaching_notes") or "").strip())
+        for row in attendance_rows
+    )
 
 
 def _get_attendance_status_options():

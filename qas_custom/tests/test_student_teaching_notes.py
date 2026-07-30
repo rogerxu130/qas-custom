@@ -12,10 +12,29 @@ from qas_custom.services.school_admin import (
 	_get_student_teaching_notes_map,
 	_normalize_student_teaching_notes,
 )
-from qas_custom.services.teacher_portal import get_teacher_session_detail_data
+from qas_custom.services.teacher_portal import (
+	_count_students_with_teaching_notes,
+	get_teacher_session_detail_data,
+)
 
 
 class TestStudentTeachingNotes(TestCase):
+	def test_teacher_session_summary_counts_students_with_special_needs(self):
+		count = _count_students_with_teaching_notes(
+			[
+				{"student": "STU-1"},
+				{"student": "STU-2"},
+				{"student": "STU-3"},
+			],
+			{
+				"STU-1": {"teaching_notes": "Avoid witch themes."},
+				"STU-2": {"teaching_notes": "   "},
+				"STU-3": {"teaching_notes": None},
+			},
+		)
+
+		self.assertEqual(count, 1)
+
 	def test_school_admin_payload_trims_teaching_notes(self):
 		payload = {"student_name": "Student", "teaching_notes": "  No Christmas activities.  "}
 
