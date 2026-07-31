@@ -13,6 +13,7 @@ from qas_custom.services.announcements import (
 	publish_school_admin_announcement_data,
 	save_school_admin_announcement_data,
 	search_school_admin_announcement_students_data,
+	upload_school_admin_announcement_inline_image_data,
 	upload_school_admin_announcement_image_data,
 )
 from qas_custom.services.support_view import create_support_view_token, get_support_view_targets
@@ -227,6 +228,11 @@ def school_admin_save_announcement(announcement=None, payload=None):
 @frappe.whitelist()
 def school_admin_upload_announcement_image(announcement=None):
 	return upload_school_admin_announcement_image_data(announcement=announcement)
+
+
+@frappe.whitelist()
+def school_admin_upload_announcement_inline_image(announcement=None):
+	return upload_school_admin_announcement_inline_image_data(announcement=announcement)
 
 
 @frappe.whitelist()

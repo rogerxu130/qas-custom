@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import imghdr
 import json
+import re
 
 import frappe
 from frappe import _, safe_encode
@@ -104,6 +105,7 @@ def save_school_admin_announcement_data(announcement=None, payload=None):
 
 	_apply_announcement_payload(doc, payload)
 	doc.save(ignore_permissions=True)
+	_delete_unused_announcement_inline_images(doc)
 	frappe.db.commit()
 	return get_school_admin_announcement_data(doc.name)
 
@@ -211,6 +213,25 @@ def clear_school_admin_announcement_image_data(announcement=None):
 	return get_school_admin_announcement_data(doc.name)
 
 
+def upload_school_admin_announcement_inline_image_data(announcement=None):
+	"""Store a Draft-only rich-text image and return its generated public URL."""
+	_require_school_admin()
+	doc = _get_editable_announcement(announcement)
+	upload = _get_announcement_image_upload()
+	content = _read_announcement_image(upload)
+	image_format = _validate_announcement_image_content(content)
+	file_doc = save_file(
+		_normalise_announcement_image_filename(upload, image_format),
+		content,
+		ANNOUNCEMENT_DOCTYPE,
+		doc.name,
+		is_private=0,
+		df="inline_image",
+	)
+	frappe.db.commit()
+	return {"image_url": get_url(file_doc.file_url)}
+
+
 def get_parent_announcements_data(limit=30):
 	parent = _require_parent()
 	if not _announcement_available():
@@ -245,8 +266,7 @@ def get_parent_announcements_data(limit=30):
 			{
 				"name": announcement.name,
 				"title": announcement.title,
-				"body": _message_html(announcement.body),
-				"image_url": _announcement_image_url(announcement),
+				"body": _announcement_content_html(announcement, announcement.body),
 				"audience_type": announcement.audience_type,
 				"publish_at": announcement.publish_at,
 				"published_at": announcement.published_at,
@@ -382,14 +402,16 @@ def _set_announcement_recipient_email_status(row_names, status, error="", sent_a
 
 
 def _announcement_email_message(doc):
-	body = _message_html(doc.email_body or doc.body or "")
-	image = _announcement_email_image(doc)
+	body = _announcement_content_html(doc, doc.email_body or doc.body or "")
+	body = body.replace(
+		"<img ",
+		'<img style="display:block;max-width:100%;height:auto;border-radius:8px;" ',
+	)
 	link = f"{_parent_portal_base_url()}/announcements"
 	return f"""
 		<div style="font-family:Arial,sans-serif;color:#1a2b4a;line-height:1.55;">
 			<h2>{escape_html(doc.title)}</h2>
 			<div>{body}</div>
-			{image}
 			<p style="margin-top:20px;">
 				<a href="{link}" style="display:inline-block;background:#1a2b4a;color:white;padding:10px 14px;border-radius:8px;text-decoration:none;">View in Parent Portal</a>
 			</p>
@@ -397,18 +419,28 @@ def _announcement_email_message(doc):
 	"""
 
 
-def _message_html(value):
+def _message_html(value, allowed_image_urls=None):
 	import bleach
 
 	text = str(value or "")
+	allowed_image_urls = {str(url).strip() for url in (allowed_image_urls or []) if str(url).strip()}
+
+	def allowed_attributes(tag, name, value):
+		if tag == "a":
+			return name in {"href", "title", "target", "rel"}
+		if tag == "img":
+			return name == "alt" or (name == "src" and str(value).strip() in allowed_image_urls)
+		return False
+
 	sanitized = bleach.clean(
 		text,
-		tags={"p", "br", "strong", "b", "em", "i", "ul", "ol", "li", "a"},
-		attributes={"a": ["href", "title", "target", "rel"]},
+		tags={"p", "br", "strong", "b", "em", "i", "ul", "ol", "li", "a", "img"},
+		attributes=allowed_attributes,
 		protocols={"http", "https"},
 		strip=True,
 		strip_comments=True,
 	)
+	sanitized = re.sub(r"<img\b[^>]*>", lambda match: match.group(0) if " src=" in match.group(0).lower() else "", sanitized, flags=re.IGNORECASE)
 	if "<" not in text and ">" not in text:
 		sanitized = sanitized.replace("\n", "<br>")
 	return bleach.linkify(sanitized, callbacks=[])
@@ -423,23 +455,52 @@ def _parent_portal_base_url():
 	return str(base_url).rstrip("/")
 
 
-def _announcement_email_image(doc):
-	image_url = _announcement_image_url(doc)
-	if not image_url:
-		return ""
-	return (
-		'<p style="margin:20px 0;">'
-		f'<img src="{escape_html(image_url)}" alt="{escape_html(doc.title)} announcement image" '
-		'style="display:block;max-width:100%;height:auto;border-radius:8px;" />'
-		"</p>"
-	)
-
-
 def _announcement_image_url(doc):
 	image_path = str((doc or {}).get("announcement_image") or "").strip()
 	if not image_path.startswith("/files/"):
 		return ""
 	return get_url(image_path)
+
+
+def _announcement_image_urls(doc):
+	"""Return only supported public image Files attached to this Announcement."""
+	image_urls = set()
+	legacy_image_url = _announcement_image_url(doc)
+	if legacy_image_url:
+		image_urls.add(legacy_image_url)
+	announcement = str((doc or {}).get("name") or "").strip()
+	if not announcement:
+		return image_urls
+	rows = frappe.get_all(
+		"File",
+		filters={
+			"attached_to_doctype": ANNOUNCEMENT_DOCTYPE,
+			"attached_to_name": announcement,
+			"attached_to_field": "inline_image",
+			"is_private": 0,
+		},
+		fields=["file_url"],
+		limit=0,
+	)
+	for row in rows:
+		file_url = str(row.get("file_url") or "").strip()
+		if _is_supported_announcement_image_path(file_url):
+			image_urls.add(get_url(file_url))
+	return image_urls
+
+
+def _announcement_content_html(doc, value):
+	content = _message_html(value, allowed_image_urls=_announcement_image_urls(doc))
+	legacy_image_url = _announcement_image_url(doc)
+	if legacy_image_url and f'src="{legacy_image_url}"' not in content:
+		content += (
+			'<p><img src="'
+			+ escape_html(legacy_image_url)
+			+ '" alt="'
+			+ escape_html(f"{doc.title} announcement image")
+			+ '" /></p>'
+		)
+	return content
 
 
 def _apply_announcement_payload(doc, payload):
@@ -460,7 +521,7 @@ def _apply_announcement_payload(doc, payload):
 		if fieldname in payload:
 			value = payload.get(fieldname)
 			if fieldname in {"body", "email_body"}:
-				value = _message_html(value)
+				value = _message_html(value, allowed_image_urls=_announcement_image_urls(doc))
 			doc.set(fieldname, value)
 	_validate_announcement(doc)
 
@@ -712,6 +773,7 @@ def _delete_existing_recipients(announcement):
 def _doc_payload(doc):
 	data = {field.fieldname: doc.get(field.fieldname) for field in doc.meta.fields if field.fieldtype not in {"Section Break", "Column Break", "Tab Break", "Button", "HTML"}}
 	data["name"] = doc.name
+	data["body"] = _announcement_content_html(doc, doc.body)
 	data["image_url"] = _announcement_image_url(doc)
 	return data
 
@@ -769,6 +831,34 @@ def _normalise_announcement_image_filename(upload, image_format):
 	stem = filename.rsplit(".", 1)[0].strip() if "." in filename else filename
 	stem = stem or "announcement-image"
 	return f"{stem}.{ANNOUNCEMENT_IMAGE_FORMATS[image_format]}"
+
+
+def _is_supported_announcement_image_path(file_url):
+	path = str(file_url or "").lower()
+	return path.startswith("/files/") and path.endswith((".jpg", ".jpeg", ".png", ".webp"))
+
+
+def _delete_unused_announcement_inline_images(doc):
+	"""Remove abandoned Draft uploads without touching the legacy image field."""
+	announcement = str((doc or {}).get("name") or "").strip()
+	if not announcement:
+		return
+	referenced_html = f"{doc.get('body') or ''}\n{doc.get('email_body') or ''}"
+	rows = frappe.get_all(
+		"File",
+		filters={
+			"attached_to_doctype": ANNOUNCEMENT_DOCTYPE,
+			"attached_to_name": announcement,
+			"attached_to_field": "inline_image",
+		},
+		fields=["name", "file_url"],
+		limit=0,
+	)
+	for row in rows:
+		file_url = str(row.get("file_url") or "").strip()
+		if file_url and get_url(file_url) in referenced_html:
+			continue
+		frappe.delete_doc("File", row.name, ignore_permissions=True)
 
 
 def _delete_announcement_image_file(announcement, image_path):

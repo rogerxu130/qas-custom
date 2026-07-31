@@ -61,6 +61,18 @@ class TestSingleStudentAnnouncements(TestCase):
 		self.assertNotIn("<script", result)
 		self.assertNotIn("javascript:", result)
 
+	def test_message_html_keeps_only_authorized_inline_images(self):
+		allowed = "https://qas.example/files/announcement-guide.png"
+		result = _message_html(
+			f'<p>Before</p><img src="{allowed}" alt="Guide"><p>After</p><img src="https://tracker.example/pixel.png">',
+			allowed_image_urls={allowed},
+		)
+
+		self.assertIn(f'<img src="{allowed}" alt="Guide">', result)
+		self.assertNotIn("tracker.example", result)
+		self.assertLess(result.index("Before"), result.index(allowed))
+		self.assertLess(result.index(allowed), result.index("After"))
+
 	def test_single_student_audience_requires_student(self):
 		doc = frappe._dict(title="Test", body="Message", audience_type="Single Student", student="")
 
