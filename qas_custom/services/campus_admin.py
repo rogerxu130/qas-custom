@@ -24,6 +24,7 @@ from qas_custom.services.inquiry import (
 	send_trial_class_reminder_core,
 )
 from qas_custom.services.school_admin import (
+	_create_payment_entry_for_invoice,
 	_count_leave_attendance_rows,
 	_course_session_sort_key,
 	_document_payload,
@@ -35,6 +36,8 @@ from qas_custom.services.school_admin import (
 	_roster_course_session_attendance_rows,
 	_visible_course_session_attendance_rows,
 )
+from qas_custom.modules.billing.store_credit import get_invoice_payable_amount, sync_invoice_store_credit_snapshot
+from qas_custom.utils.environment import payment_block_reason, payment_mutations_enabled
 from qas_custom.services.teacher_directory import get_active_teacher_directory_data
 from qas_custom.services.support_view import get_support_view_campus_admin_profile, reject_support_view_write
 
@@ -51,6 +54,7 @@ CAMPUS_ADMIN_INQUIRY_SEARCH_FIELDS = (
 	"contact_email",
 	"contact_phone",
 )
+CAMPUS_ADMIN_TRIAL_PAYMENT_METHODS = {"Cash", "EFTPOS", "Bank Transfer", "Other"}
 
 
 def get_campus_admin_me_data():
@@ -67,6 +71,75 @@ def get_campus_admin_csrf_token_data():
 	_require_campus_admin_profile()
 	return {
 		"csrf_token": frappe.sessions.get_csrf_token(),
+	}
+
+
+def mark_campus_admin_trial_invoice_paid_data(invoice=None, payload=None):
+	"""Settle one assigned-campus Trial Invoice in full and keep the payment audit trail."""
+	reject_support_view_write()
+	profile = _require_campus_admin_profile()
+	if not payment_mutations_enabled():
+		frappe.throw(_(payment_block_reason()))
+	invoice = str(invoice or "").strip()
+	if not invoice:
+		frappe.throw(_("Trial Invoice is required."))
+	payload = frappe.parse_json(payload) if isinstance(payload, str) else (payload or {})
+	payment_method = str(payload.get("payment_method") or "").strip()
+	if payment_method not in CAMPUS_ADMIN_TRIAL_PAYMENT_METHODS:
+		frappe.throw(_("Select a valid payment method."))
+	note = str(payload.get("note") or "").strip()
+
+	inquiry_rows = frappe.get_all(
+		"Inquiry",
+		filters={
+			"trial_invoice": invoice,
+			"inquiry_type": "Trial Lesson",
+			"campus": ["in", profile["campuses"]],
+		},
+		fields=["name", "campus"],
+		limit=2,
+	)
+	if len(inquiry_rows) != 1:
+		frappe.throw(_("This Trial Invoice is not available for your assigned campus."), frappe.PermissionError)
+
+	doc = frappe.get_doc("Sales Invoice", invoice)
+	if cint(doc.docstatus) != 1 or str(doc.get("status") or "").lower() == "cancelled":
+		frappe.throw(_("Only submitted, active Trial Invoices can be paid."))
+	amount = max(flt(get_invoice_payable_amount(doc)), 0)
+	if amount <= 0.005:
+		frappe.throw(_("This Trial Invoice has already been paid."))
+
+	audit_note = "Campus Admin {0} recorded {1} payment for Trial Inquiry {2}.".format(
+		frappe.session.user,
+		payment_method,
+		inquiry_rows[0].get("name"),
+	)
+	if note:
+		audit_note = "{0}\nNote: {1}".format(audit_note, note)
+	payment_entry = _create_payment_entry_for_invoice(
+		doc,
+		amount=amount,
+		mode_of_payment=payment_method,
+		reference_no="Campus Admin payment {0}".format(now_datetime()),
+		notes=audit_note,
+	)
+	frappe.get_doc({
+		"doctype": "Comment",
+		"comment_type": "Info",
+		"reference_doctype": "Sales Invoice",
+		"reference_name": doc.name,
+		"content": "{0} Payment Entry: {1}".format(audit_note, payment_entry.name),
+	}).insert(ignore_permissions=True)
+	sync_invoice_store_credit_snapshot(doc.name)
+	frappe.db.commit()
+	return {
+		"invoice": doc.name,
+		"inquiry": inquiry_rows[0].get("name"),
+		"campus": inquiry_rows[0].get("campus"),
+		"payment_entry": payment_entry.name,
+		"paid_amount": amount,
+		"payment_method": payment_method,
+		"note": note,
 	}
 
 

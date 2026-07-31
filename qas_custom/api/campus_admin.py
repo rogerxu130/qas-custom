@@ -34,6 +34,7 @@ from qas_custom.services.campus_admin import (
 	mark_campus_admin_inquiry_follow_up_data,
 	mark_campus_admin_inquiry_inactive_data,
 	mark_campus_admin_inquiry_no_show_data,
+	mark_campus_admin_trial_invoice_paid_data,
 	reopen_campus_admin_inquiry_data,
 	send_campus_admin_trial_class_reminder_data,
 	link_campus_admin_inquiry_enrollment_data,
@@ -83,6 +84,11 @@ def campus_admin_get_payment_requests(status=None, campus=None, query=None, limi
 @frappe.whitelist()
 def campus_admin_create_payment_request(payload=None):
 	return create_campus_payment_request_data(payload=payload)
+
+
+@frappe.whitelist()
+def campus_admin_mark_trial_invoice_paid(invoice=None, payload=None):
+	return mark_campus_admin_trial_invoice_paid_data(invoice=invoice, payload=payload)
 
 
 @frappe.whitelist()
