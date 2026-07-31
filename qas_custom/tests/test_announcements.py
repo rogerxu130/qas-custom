@@ -6,11 +6,13 @@ import frappe
 
 from qas_custom.services.announcements import (
 	ANNOUNCEMENT_VISIBLE_RECIPIENT,
+	_announcement_email_message,
 	_announcement_student_preview,
 	_message_html,
 	_resolve_announcement_recipients,
 	_send_announcement_bcc_batch,
 	_student_search_rank,
+	_validate_announcement_image_content,
 	_validate_announcement,
 	search_school_admin_announcement_students_data,
 	send_school_announcement_email_job,
@@ -18,6 +20,34 @@ from qas_custom.services.announcements import (
 
 
 class TestSingleStudentAnnouncements(TestCase):
+	@patch("qas_custom.services.announcements._parent_portal_base_url", return_value="https://portal.example")
+	@patch("qas_custom.services.announcements.get_url", return_value="https://qas.example/files/announcement.png")
+	def test_email_includes_public_announcement_image_and_portal_button(self, _get_url, _portal_url):
+		doc = frappe._dict(
+			title="Parent Portal guide",
+			body="See the steps below.",
+			email_body="",
+			announcement_image="/files/announcement.png",
+		)
+
+		message = _announcement_email_message(doc)
+
+		self.assertIn('src="https://qas.example/files/announcement.png"', message)
+		self.assertIn('alt="Parent Portal guide announcement image"', message)
+		self.assertIn("View in Parent Portal", message)
+
+	def test_announcement_image_content_rejects_non_image_uploads(self):
+		with patch("qas_custom.services.announcements._", side_effect=lambda message: message), patch(
+			"qas_custom.services.announcements.frappe.throw", side_effect=frappe.ValidationError
+		):
+			with self.assertRaises(frappe.ValidationError):
+				_validate_announcement_image_content(b"This is not an image.")
+
+	def test_announcement_image_content_accepts_png_uploads(self):
+		content = b"\x89PNG\r\n\x1a\n" + (b"0" * 24)
+
+		self.assertEqual(_validate_announcement_image_content(content), "png")
+
 	def test_message_html_linkifies_plain_urls(self):
 		result = _message_html("Read the guide:\nhttps://example.com/guide")
 

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import imghdr
 import json
 
 import frappe
 from frappe import _, safe_encode
 from frappe.email.doctype.email_queue.email_queue import QueueBuilder
-from frappe.utils import cint, escape_html, get_datetime, now_datetime, strip_html
+from frappe.utils import cint, escape_html, get_datetime, get_url, now_datetime, strip_html
+from frappe.utils.file_manager import save_file
 
 from qas_custom.utils.environment import email_block_reason, outbound_email_enabled
 from qas_custom.services.support_view import get_support_view_parent
@@ -17,6 +19,8 @@ RECIPIENT_DOCTYPE = "School Announcement Recipient"
 DEFAULT_PARENT_PORTAL_URL = "https://portal.queenslandartschool.com"
 ANNOUNCEMENT_BCC_BATCH_SIZE = 50
 ANNOUNCEMENT_VISIBLE_RECIPIENT = "queenslandartschool@gmail.com"
+MAX_ANNOUNCEMENT_IMAGE_BYTES = 5 * 1024 * 1024
+ANNOUNCEMENT_IMAGE_FORMATS = {"jpeg": "jpg", "png": "png", "webp": "webp"}
 
 
 def get_school_admin_announcements_data(status=None, limit=80):
@@ -173,6 +177,40 @@ def archive_school_admin_announcement_data(announcement=None):
 	return get_school_admin_announcement_data(announcement)
 
 
+def upload_school_admin_announcement_image_data(announcement=None):
+	_require_school_admin()
+	doc = _get_editable_announcement(announcement)
+	upload = _get_announcement_image_upload()
+	content = _read_announcement_image(upload)
+	image_format = _validate_announcement_image_content(content)
+	file_doc = save_file(
+		_normalise_announcement_image_filename(upload, image_format),
+		content,
+		ANNOUNCEMENT_DOCTYPE,
+		doc.name,
+		is_private=0,
+	)
+	previous_image = doc.get("announcement_image")
+	doc.announcement_image = file_doc.file_url
+	doc.save(ignore_permissions=True)
+	if previous_image and previous_image != file_doc.file_url:
+		_delete_announcement_image_file(doc.name, previous_image)
+	frappe.db.commit()
+	return get_school_admin_announcement_data(doc.name)
+
+
+def clear_school_admin_announcement_image_data(announcement=None):
+	_require_school_admin()
+	doc = _get_editable_announcement(announcement)
+	previous_image = doc.get("announcement_image")
+	if previous_image:
+		doc.announcement_image = ""
+		doc.save(ignore_permissions=True)
+		_delete_announcement_image_file(doc.name, previous_image)
+		frappe.db.commit()
+	return get_school_admin_announcement_data(doc.name)
+
+
 def get_parent_announcements_data(limit=30):
 	parent = _require_parent()
 	if not _announcement_available():
@@ -192,7 +230,7 @@ def get_parent_announcements_data(limit=30):
 	announcement_rows = frappe.get_all(
 		ANNOUNCEMENT_DOCTYPE,
 		filters={"name": ["in", announcement_ids], "status": "Published"},
-		fields=["name", "title", "body", "audience_type", "publish_at", "expires_at", "published_at"],
+		fields=["name", "title", "body", "announcement_image", "audience_type", "publish_at", "expires_at", "published_at"],
 		order_by="publish_at desc, published_at desc",
 	)
 	by_name = {row.name: row for row in announcement_rows if _is_parent_visible_announcement(row)}
@@ -208,6 +246,7 @@ def get_parent_announcements_data(limit=30):
 				"name": announcement.name,
 				"title": announcement.title,
 				"body": _message_html(announcement.body),
+				"image_url": _announcement_image_url(announcement),
 				"audience_type": announcement.audience_type,
 				"publish_at": announcement.publish_at,
 				"published_at": announcement.published_at,
@@ -344,11 +383,13 @@ def _set_announcement_recipient_email_status(row_names, status, error="", sent_a
 
 def _announcement_email_message(doc):
 	body = _message_html(doc.email_body or doc.body or "")
+	image = _announcement_email_image(doc)
 	link = f"{_parent_portal_base_url()}/announcements"
 	return f"""
 		<div style="font-family:Arial,sans-serif;color:#1a2b4a;line-height:1.55;">
 			<h2>{escape_html(doc.title)}</h2>
 			<div>{body}</div>
+			{image}
 			<p style="margin-top:20px;">
 				<a href="{link}" style="display:inline-block;background:#1a2b4a;color:white;padding:10px 14px;border-radius:8px;text-decoration:none;">View in Parent Portal</a>
 			</p>
@@ -380,6 +421,25 @@ def _parent_portal_base_url():
 		or DEFAULT_PARENT_PORTAL_URL
 	)
 	return str(base_url).rstrip("/")
+
+
+def _announcement_email_image(doc):
+	image_url = _announcement_image_url(doc)
+	if not image_url:
+		return ""
+	return (
+		'<p style="margin:20px 0;">'
+		f'<img src="{escape_html(image_url)}" alt="{escape_html(doc.title)} announcement image" '
+		'style="display:block;max-width:100%;height:auto;border-radius:8px;" />'
+		"</p>"
+	)
+
+
+def _announcement_image_url(doc):
+	image_path = str((doc or {}).get("announcement_image") or "").strip()
+	if not image_path.startswith("/files/"):
+		return ""
+	return get_url(image_path)
 
 
 def _apply_announcement_payload(doc, payload):
@@ -652,6 +712,7 @@ def _delete_existing_recipients(announcement):
 def _doc_payload(doc):
 	data = {field.fieldname: doc.get(field.fieldname) for field in doc.meta.fields if field.fieldtype not in {"Section Break", "Column Break", "Tab Break", "Button", "HTML"}}
 	data["name"] = doc.name
+	data["image_url"] = _announcement_image_url(doc)
 	return data
 
 
@@ -663,6 +724,65 @@ def _parse_payload(payload):
 	if isinstance(payload, str):
 		return json.loads(payload or "{}")
 	return payload or {}
+
+
+def _get_editable_announcement(announcement):
+	if not announcement:
+		frappe.throw(_("Save the draft before uploading an image."))
+	doc = frappe.get_doc(ANNOUNCEMENT_DOCTYPE, announcement)
+	if doc.status != "Draft":
+		frappe.throw(_("Images can only be changed while an announcement is a Draft."))
+	return doc
+
+
+def _get_announcement_image_upload():
+	files = getattr(getattr(frappe, "request", None), "files", None)
+	upload = files.get("image") if files else None
+	if not upload:
+		frappe.throw(_("An image file is required."))
+	return upload
+
+
+def _read_announcement_image(upload):
+	if hasattr(upload, "stream") and upload.stream:
+		content = upload.stream.read()
+	elif hasattr(upload, "read"):
+		content = upload.read()
+	else:
+		frappe.throw(_("Could not read the uploaded image."))
+	if not content:
+		frappe.throw(_("The uploaded image is empty."))
+	if len(content) > MAX_ANNOUNCEMENT_IMAGE_BYTES:
+		frappe.throw(_("Please upload an image smaller than 5 MB."))
+	return content
+
+
+def _validate_announcement_image_content(content):
+	image_format = imghdr.what(None, content)
+	if image_format not in ANNOUNCEMENT_IMAGE_FORMATS:
+		frappe.throw(_("Only JPEG, PNG, or WebP images can be uploaded."))
+	return image_format
+
+
+def _normalise_announcement_image_filename(upload, image_format):
+	filename = str(getattr(upload, "filename", "") or "announcement-image").strip()
+	stem = filename.rsplit(".", 1)[0].strip() if "." in filename else filename
+	stem = stem or "announcement-image"
+	return f"{stem}.{ANNOUNCEMENT_IMAGE_FORMATS[image_format]}"
+
+
+def _delete_announcement_image_file(announcement, image_path):
+	file_name = frappe.db.get_value(
+		"File",
+		{
+			"file_url": image_path,
+			"attached_to_doctype": ANNOUNCEMENT_DOCTYPE,
+			"attached_to_name": announcement,
+		},
+		"name",
+	)
+	if file_name:
+		frappe.delete_doc("File", file_name, ignore_permissions=True)
 
 
 def _announcement_available():

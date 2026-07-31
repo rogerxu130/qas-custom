@@ -7,11 +7,13 @@ from qas_custom.services.payment_collection_requests import (
 
 from qas_custom.services.announcements import (
 	archive_school_admin_announcement_data,
+	clear_school_admin_announcement_image_data,
 	get_school_admin_announcement_data,
 	get_school_admin_announcements_data,
 	publish_school_admin_announcement_data,
 	save_school_admin_announcement_data,
 	search_school_admin_announcement_students_data,
+	upload_school_admin_announcement_image_data,
 )
 from qas_custom.services.support_view import create_support_view_token, get_support_view_targets
 from qas_custom.services.school_admin_reporting import (
@@ -220,6 +222,16 @@ def school_admin_get_announcement(announcement=None):
 @frappe.whitelist()
 def school_admin_save_announcement(announcement=None, payload=None):
 	return save_school_admin_announcement_data(announcement=announcement, payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_upload_announcement_image(announcement=None):
+	return upload_school_admin_announcement_image_data(announcement=announcement)
+
+
+@frappe.whitelist()
+def school_admin_clear_announcement_image(announcement=None):
+	return clear_school_admin_announcement_image_data(announcement=announcement)
 
 
 @frappe.whitelist()

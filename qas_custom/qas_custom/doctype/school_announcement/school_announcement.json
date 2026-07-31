@@ -17,6 +17,7 @@
   "student",
   "content_section",
   "body",
+  "announcement_image",
   "publish_at",
   "expires_at",
   "email_section",
@@ -101,6 +102,11 @@
    "fieldtype": "Text Editor",
    "label": "Body",
    "reqd": 1
+  },
+  {
+   "fieldname": "announcement_image",
+   "fieldtype": "Attach Image",
+   "label": "Announcement Image"
   },
   {
    "fieldname": "publish_at",
