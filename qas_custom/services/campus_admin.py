@@ -3,7 +3,7 @@ from __future__ import annotations
 import frappe
 from frappe import _
 
-from frappe.utils import add_days, cint, flt, getdate, now_datetime, today
+from frappe.utils import add_days, cint, escape_html, flt, getdate, now_datetime, today
 
 from qas_custom.services.billing_enrollment import (
 	convert_inquiry_to_full_term_core,
@@ -37,7 +37,9 @@ from qas_custom.services.school_admin import (
 	_visible_course_session_attendance_rows,
 )
 from qas_custom.modules.billing.store_credit import get_invoice_payable_amount, sync_invoice_store_credit_snapshot
-from qas_custom.utils.environment import payment_block_reason, payment_mutations_enabled
+from qas_custom.modules.billing.invoice_settings import get_invoice_settings
+from qas_custom.modules.notifications import enqueue_parent_invoice_paid_receipt
+from qas_custom.utils.environment import email_block_reason, payment_block_reason, payment_mutations_enabled, sendmail_or_skip
 from qas_custom.services.teacher_directory import get_active_teacher_directory_data
 from qas_custom.services.support_view import get_support_view_campus_admin_profile, reject_support_view_write
 
@@ -97,7 +99,7 @@ def mark_campus_admin_trial_invoice_paid_data(invoice=None, payload=None):
 			"inquiry_type": "Trial Lesson",
 			"campus": ["in", profile["campuses"]],
 		},
-		fields=["name", "campus"],
+		fields=["name", "campus", "student", "parent", "submitted_student_name", "contact_name", "contact_email"],
 		limit=2,
 	)
 	if len(inquiry_rows) != 1:
@@ -135,6 +137,21 @@ def mark_campus_admin_trial_invoice_paid_data(invoice=None, payload=None):
 	}).insert(ignore_permissions=True)
 	sync_invoice_store_credit_snapshot(doc.name)
 	frappe.db.commit()
+	receipt_notification = enqueue_parent_invoice_paid_receipt(
+		frappe.get_doc("Sales Invoice", doc.name),
+		payment_entry=payment_entry,
+		source="campus_admin_mark_paid",
+	)
+	school_admin_notification = _enqueue_campus_admin_trial_payment_notification(
+		invoice=doc.name,
+		payment_entry=payment_entry.name,
+		inquiry=inquiry_rows[0],
+		amount=amount,
+		payment_method=payment_method,
+		note=note,
+		campus_admin=frappe.session.user,
+	)
+	frappe.db.commit()
 	return {
 		"invoice": doc.name,
 		"inquiry": inquiry_rows[0].get("name"),
@@ -143,7 +160,100 @@ def mark_campus_admin_trial_invoice_paid_data(invoice=None, payload=None):
 		"paid_amount": amount,
 		"payment_method": payment_method,
 		"note": note,
+		"receipt_notification": receipt_notification,
+		"school_admin_notification": school_admin_notification,
 	}
+
+
+def _enqueue_campus_admin_trial_payment_notification(*, invoice, payment_entry, inquiry, amount, payment_method, note, campus_admin):
+	"""Queue the School Admin audit email after a Campus Admin settles a trial invoice."""
+	job_id = "qas-campus-trial-payment-{0}".format(payment_entry)
+	try:
+		frappe.enqueue(
+			"qas_custom.services.campus_admin.send_campus_admin_trial_payment_notification_job",
+			queue="short",
+			timeout=300,
+			enqueue_after_commit=True,
+			deduplicate=True,
+			job_id=job_id,
+			invoice=invoice,
+			payment_entry=payment_entry,
+			inquiry=inquiry.get("name"),
+			campus=inquiry.get("campus"),
+			student=inquiry.get("submitted_student_name") or inquiry.get("student"),
+			parent=inquiry.get("contact_name") or inquiry.get("parent"),
+			amount=amount,
+			payment_method=payment_method,
+			note=note,
+			campus_admin=campus_admin,
+		)
+		return {"queued": True, "job_id": job_id}
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "QAS Campus Admin trial payment notification queue failed: {0}".format(payment_entry))
+		return {"queued": False, "reason": "School Admin notification could not be queued."}
+
+
+def send_campus_admin_trial_payment_notification_job(
+	invoice=None,
+	payment_entry=None,
+	inquiry=None,
+	campus=None,
+	student=None,
+	parent=None,
+	amount=None,
+	payment_method=None,
+	note=None,
+	campus_admin=None,
+):
+	"""Deliver a School Admin audit email for one Campus Admin trial payment."""
+	from qas_custom.services.maintenance import _get_school_admin_emails
+
+	recipients = _get_school_admin_emails()
+	if not recipients:
+		return {"sent": False, "reason": "No active School Admin email recipients were found."}
+	if not invoice or not payment_entry:
+		return {"sent": False, "reason": "Invoice and Payment Entry are required."}
+	settings = get_invoice_settings()
+	subject = _("Campus Admin recorded Trial payment – {0} – AUD {1:.2f}").format(campus or "Campus", flt(amount))
+	message = """
+		<p><strong>{school}</strong></p>
+		<p>A Campus Admin has recorded a Trial Invoice payment.</p>
+		<ul>
+			<li><strong>Campus:</strong> {campus}</li>
+			<li><strong>Trial inquiry:</strong> {inquiry}</li>
+			<li><strong>Student:</strong> {student}</li>
+			<li><strong>Parent:</strong> {parent}</li>
+			<li><strong>Invoice:</strong> {invoice}</li>
+			<li><strong>Payment Entry:</strong> {payment_entry}</li>
+			<li><strong>Amount:</strong> AUD {amount:.2f}</li>
+			<li><strong>Payment method:</strong> {payment_method}</li>
+			<li><strong>Recorded by:</strong> {campus_admin}</li>
+			<li><strong>Note:</strong> {note}</li>
+		</ul>
+	""".format(
+		school=escape_html(settings.get("school_name") or "Queensland Art School"),
+		campus=escape_html(campus or "-"), inquiry=escape_html(inquiry or "-"),
+		student=escape_html(student or "-"), parent=escape_html(parent or "-"),
+		invoice=escape_html(invoice), payment_entry=escape_html(payment_entry), amount=flt(amount),
+		payment_method=escape_html(payment_method or "-"), campus_admin=escape_html(campus_admin or "-"),
+		note=escape_html(note or "-"),
+	)
+	try:
+		result = sendmail_or_skip(
+			action="campus_admin_trial_payment_recorded",
+			recipients=recipients,
+			subject=subject,
+			message=message,
+			reference_doctype="Sales Invoice",
+			reference_name=invoice,
+			delayed=False,
+		)
+		if result and result.get("skipped"):
+			return {"sent": False, "skipped": True, "reason": result.get("reason") or email_block_reason()}
+		return {"sent": True, "recipients": recipients}
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "QAS Campus Admin trial payment notification failed: {0}".format(payment_entry))
+		return {"sent": False, "reason": "School Admin notification email failed."}
 
 
 def _ensure_eftpos_mode_of_payment():
