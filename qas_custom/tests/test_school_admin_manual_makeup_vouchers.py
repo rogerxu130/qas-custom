@@ -7,6 +7,7 @@ from qas_custom.api.school_admin import (
 	school_admin_issue_manual_makeup_voucher,
 )
 from qas_custom.services.school_admin import (
+	_school_admin_manual_voucher_expiry_date,
 	cancel_school_admin_unused_makeup_voucher_data,
 	issue_school_admin_manual_makeup_voucher_data,
 )
@@ -30,6 +31,10 @@ class FakeDoc:
 
 
 class TestSchoolAdminManualMakeupVouchers(TestCase):
+	@patch("qas_custom.services.school_admin.today", return_value="2026-08-01")
+	def test_manual_voucher_default_expiry_is_one_year(self, _mock_today):
+		self.assertEqual(str(_school_admin_manual_voucher_expiry_date(None)), "2027-08-01")
+
 	@patch("qas_custom.services.school_admin._build_school_admin_makeup_voucher_payload", return_value={"voucher_id": "MV-001"})
 	@patch("qas_custom.services.school_admin.queue_makeup_voucher_issued_email", return_value={"queued": True})
 	@patch("qas_custom.services.school_admin._add_comment")

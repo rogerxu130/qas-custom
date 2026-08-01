@@ -17,7 +17,9 @@ from qas_custom.services.display_labels import get_makeup_voucher_label, sync_ma
 
 
 MAKEUP_ENROLLMENT_TYPE = "Makeup"
-DEFAULT_VOUCHER_EXPIRY_DAYS = 90
+DEFAULT_VOUCHER_EXPIRY_DAYS = 365
+LEGACY_VOUCHER_EXPIRY_DAYS = 90
+MAKEUP_REDEEMABLE_SESSION_WINDOW_DAYS = 365
 REDEEMABLE_EXISTING_ATTENDANCE_STATUSES = {"Cancelled", "Leave"}
 DEFAULT_LEAVE_ATTENDANCE_STATUSES = {"To be started"}
 MARKED_MAKEUP_ATTENDANCE_STATUSES = {"Present", "Late", "Absent"}
@@ -611,11 +613,14 @@ def _get_redeemable_makeup_sessions(
 	session_rows = frappe.get_all(
 		"Course Sessions",
 		filters={
-			"session_date": ["between", [getdate(today()), getdate(add_days(today(), 90))]],
+			"session_date": [
+				"between",
+				[getdate(today()), getdate(add_days(today(), MAKEUP_REDEEMABLE_SESSION_WINDOW_DAYS))],
+			],
 		},
 		fields=["name", "weekly_timeslot", "session_date", "status"],
 		order_by="session_date asc, modified asc",
-		limit=300,
+		limit=0,
 	)
 	if not session_rows:
 		return []

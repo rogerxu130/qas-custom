@@ -4,6 +4,7 @@ from unittest.mock import Mock, patch
 
 from qas_custom.modules.makeup.commands import (
 	_ensure_leave_makeup_voucher,
+	_get_redeemable_makeup_sessions,
 	complete_parent_leave_and_keep_voucher_core,
 	complete_parent_leave_and_redeem_core,
 	get_parent_leave_makeup_options_core,
@@ -31,6 +32,34 @@ class FakeDoc:
 
 
 class TestParentLeaveMakeupChoice(TestCase):
+	@patch("qas_custom.modules.makeup.commands.today", return_value="2026-08-01")
+	def test_new_leave_voucher_uses_one_year_expiry(self, _mock_today):
+		created = FakeDoc(name="MV-001")
+		refreshed = FakeDoc(name="MV-001", status="Valid")
+		leave = FakeDoc(name="LR-001", student="STU-001", course="Anime", course_session="CS-LEAVE")
+		fake_frappe = SimpleNamespace(
+			db=SimpleNamespace(exists=Mock(return_value=None)),
+			new_doc=Mock(return_value=created),
+			get_doc=Mock(return_value=refreshed),
+		)
+
+		with patch("qas_custom.modules.makeup.commands.frappe", fake_frappe), patch(
+			"qas_custom.modules.makeup.commands.sync_makeup_voucher_label"
+		), patch("qas_custom.modules.makeup.commands.queue_makeup_voucher_issued_email"):
+			_ensure_leave_makeup_voucher(leave)
+
+		self.assertEqual(str(created.expiry_date), "2027-08-01")
+
+	@patch("qas_custom.modules.makeup.commands.frappe.get_all", return_value=[])
+	@patch("qas_custom.modules.makeup.commands.today", return_value="2026-08-01")
+	def test_redeemable_sessions_search_a_full_year(self, _mock_today, mock_get_all):
+		result = _get_redeemable_makeup_sessions(FakeDoc(student="STU-001", course="Anime"))
+
+		self.assertEqual(result, [])
+		kwargs = mock_get_all.call_args.kwargs
+		self.assertEqual([str(value) for value in kwargs["filters"]["session_date"][1]], ["2026-08-01", "2027-08-01"])
+		self.assertEqual(kwargs["limit"], 0)
+
 	def test_preview_returns_options_without_creating_leave_or_voucher(self):
 		session = SimpleNamespace(name="CS-LEAVE", session_date="2026-08-01")
 		timeslot = SimpleNamespace(
