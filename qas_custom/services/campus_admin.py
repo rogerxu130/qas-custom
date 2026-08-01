@@ -57,6 +57,7 @@ CAMPUS_ADMIN_INQUIRY_SEARCH_FIELDS = (
 	"contact_phone",
 )
 CAMPUS_ADMIN_TRIAL_PAYMENT_METHODS = {"Cash", "EFTPOS", "Bank Transfer", "Other"}
+CASH_MODE_OF_PAYMENT = "Cash"
 EFTPOS_MODE_OF_PAYMENT = "EFTPOS"
 
 
@@ -119,8 +120,7 @@ def mark_campus_admin_trial_invoice_paid_data(invoice=None, payload=None):
 	)
 	if note:
 		audit_note = "{0}\nNote: {1}".format(audit_note, note)
-	if payment_method == EFTPOS_MODE_OF_PAYMENT:
-		_ensure_eftpos_mode_of_payment()
+	_ensure_campus_admin_trial_mode_of_payment(payment_method)
 	payment_entry = _create_payment_entry_for_invoice(
 		doc,
 		amount=amount,
@@ -256,14 +256,19 @@ def send_campus_admin_trial_payment_notification_job(
 		return {"sent": False, "reason": "School Admin notification email failed."}
 
 
-def _ensure_eftpos_mode_of_payment():
-	"""Create EFTPOS once from Cash's receiving-account configuration."""
-	if frappe.db.exists("Mode of Payment", EFTPOS_MODE_OF_PAYMENT):
-		return EFTPOS_MODE_OF_PAYMENT
-	if not frappe.db.exists("Mode of Payment", "Cash"):
-		frappe.throw(_("EFTPOS cannot be set up because Cash is not configured."))
+def _ensure_campus_admin_trial_mode_of_payment(payment_method):
+	"""Ensure every Campus Admin Trial payment label has an ERPNext payment mode."""
+	payment_method = str(payment_method or "").strip()
+	if payment_method not in CAMPUS_ADMIN_TRIAL_PAYMENT_METHODS:
+		frappe.throw(_("Select a valid payment method."))
+	if frappe.db.exists("Mode of Payment", payment_method):
+		return payment_method
+	if not frappe.db.exists("Mode of Payment", CASH_MODE_OF_PAYMENT):
+		frappe.throw(
+			_("{0} cannot be set up because Cash is not configured.").format(payment_method)
+		)
 
-	cash_mode = frappe.get_doc("Mode of Payment", "Cash")
+	cash_mode = frappe.get_doc("Mode of Payment", CASH_MODE_OF_PAYMENT)
 	accounts = [
 		{
 			"company": row.get("company"),
@@ -273,16 +278,18 @@ def _ensure_eftpos_mode_of_payment():
 		if row.get("company") and row.get("default_account")
 	]
 	if not accounts:
-		frappe.throw(_("EFTPOS cannot be set up because Cash has no receiving account configuration."))
+		frappe.throw(
+			_("{0} cannot be set up because Cash has no receiving account configuration.").format(payment_method)
+		)
 
 	original_user = frappe.session.user or "Administrator"
 	try:
 		frappe.set_user("Administrator")
-		if frappe.db.exists("Mode of Payment", EFTPOS_MODE_OF_PAYMENT):
-			return EFTPOS_MODE_OF_PAYMENT
+		if frappe.db.exists("Mode of Payment", payment_method):
+			return payment_method
 		mode = frappe.get_doc({
 			"doctype": "Mode of Payment",
-			"mode_of_payment": EFTPOS_MODE_OF_PAYMENT,
+			"mode_of_payment": payment_method,
 			"type": cash_mode.get("type") or "General",
 			"accounts": accounts,
 		})
@@ -290,6 +297,11 @@ def _ensure_eftpos_mode_of_payment():
 		return mode.name
 	finally:
 		frappe.set_user(original_user)
+
+
+def _ensure_eftpos_mode_of_payment():
+	"""Compatibility wrapper for the original EFTPOS provisioning helper."""
+	return _ensure_campus_admin_trial_mode_of_payment(EFTPOS_MODE_OF_PAYMENT)
 
 
 def get_campus_admin_teacher_directory_data(query=None, limit=300):

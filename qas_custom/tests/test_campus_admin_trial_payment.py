@@ -5,6 +5,7 @@ from unittest.mock import Mock, patch
 from qas_custom.services.campus_admin import (
 	EFTPOS_MODE_OF_PAYMENT,
 	_enqueue_campus_admin_trial_payment_notification,
+	_ensure_campus_admin_trial_mode_of_payment,
 	_ensure_eftpos_mode_of_payment,
 	send_campus_admin_trial_payment_notification_job,
 )
@@ -49,6 +50,33 @@ class TestCampusAdminTrialPayment(TestCase):
 
 		self.assertEqual(result, EFTPOS_MODE_OF_PAYMENT)
 		fake_frappe.get_doc.assert_not_called()
+
+	def test_bank_transfer_and_other_modes_are_created_from_cash_receiving_accounts(self):
+		for payment_method in ("Bank Transfer", "Other"):
+			with self.subTest(payment_method=payment_method):
+				session = SimpleNamespace(user="campus@example.com")
+				cash_mode = Mock()
+				cash_mode.get.side_effect = lambda field, default=None: {
+					"type": "Receive",
+					"accounts": [
+						{"company": "Queensland Art School", "default_account": "Cash - QAS"},
+					],
+				}.get(field, default)
+				created_mode = Mock(name=payment_method)
+				created_mode.name = payment_method
+				fake_frappe = Mock()
+				fake_frappe.session = session
+				fake_frappe.db.exists.side_effect = [False, True, False]
+				fake_frappe.get_doc.side_effect = [cash_mode, created_mode]
+
+				with patch("qas_custom.services.campus_admin.frappe", fake_frappe):
+					result = _ensure_campus_admin_trial_mode_of_payment(payment_method)
+
+				self.assertEqual(result, payment_method)
+				create_payload = fake_frappe.get_doc.call_args_list[1].args[0]
+				self.assertEqual(create_payload["mode_of_payment"], payment_method)
+				self.assertEqual(create_payload["accounts"], [{"company": "Queensland Art School", "default_account": "Cash - QAS"}])
+				created_mode.insert.assert_called_once_with(ignore_permissions=True)
 
 	def test_eftpos_mode_requires_cash_configuration(self):
 		fake_frappe = Mock()
