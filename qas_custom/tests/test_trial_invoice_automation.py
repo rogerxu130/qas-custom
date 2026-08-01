@@ -6,7 +6,11 @@ from unittest.mock import Mock, patch
 import frappe
 
 from qas_custom.services import maintenance
-from qas_custom.services.inquiry import _build_webhook_response, assign_inquiry_course_session_core
+from qas_custom.services.inquiry import (
+	_build_webhook_response,
+	_cancel_linked_trial_invoice_for_cancelled_inquiry,
+	assign_inquiry_course_session_core,
+)
 from qas_custom.services.trial_invoice import (
 	_check_rescheduled_trial_fee,
 	_classify_replacement_invoices,
@@ -20,6 +24,79 @@ from qas_custom.services.trial_invoice import (
 
 
 class TestTrialInvoiceAutomation(TestCase):
+	@patch("qas_custom.services.inquiry._add_cancelled_trial_invoice_note")
+	@patch("qas_custom.services.trial_invoice._find_inquiry_invoice", return_value=None)
+	@patch("qas_custom.services.school_admin.cancel_school_admin_invoice_data")
+	def test_cancelling_trial_inquiry_cancels_submitted_invoice_and_preserves_payment_credit(
+		self, mock_cancel, _mock_find, add_note
+	):
+		inquiry = frappe._dict(name="INQ-0001", inquiry_type="Trial Lesson", trial_invoice="SINV-0001", student="STU-1")
+		invoice = frappe._dict(name="SINV-0001", docstatus=1)
+		fake_frappe = SimpleNamespace(
+			db=SimpleNamespace(exists=Mock(return_value=True)),
+			get_doc=Mock(return_value=invoice),
+			session=SimpleNamespace(user="campus@example.com"),
+		)
+		mock_cancel.return_value = {"cancellation_store_credit_amount": 0}
+
+		with patch("qas_custom.services.inquiry.frappe", fake_frappe), patch(
+			"qas_custom.services.inquiry._", side_effect=lambda value: value
+		):
+			result = _cancel_linked_trial_invoice_for_cancelled_inquiry(inquiry, actor="campus@example.com")
+
+		mock_cancel.assert_called_once_with(
+			invoice="SINV-0001",
+			reason="Trial Inquiry INQ-0001 was cancelled.",
+			send_notifications=True,
+			allow_campus_admin=True,
+		)
+		add_note.assert_called_once()
+		self.assertEqual(result["cancellation_store_credit_amount"], 0)
+
+	@patch("qas_custom.services.inquiry._add_cancelled_trial_invoice_note")
+	@patch("qas_custom.services.trial_invoice._find_inquiry_invoice", return_value=None)
+	@patch("qas_custom.services.school_admin.cancel_school_admin_invoice_data")
+	def test_cancelling_paid_trial_inquiry_records_store_credit(self, mock_cancel, _mock_find, add_note):
+		inquiry = frappe._dict(name="INQ-0003", inquiry_type="Trial Lesson", trial_invoice="SINV-0003", student="STU-3")
+		invoice = frappe._dict(name="SINV-0003", docstatus=1)
+		fake_frappe = SimpleNamespace(
+			db=SimpleNamespace(exists=Mock(return_value=True)),
+			get_doc=Mock(return_value=invoice),
+			session=SimpleNamespace(user="school@example.com"),
+			format_value=Mock(return_value="$68.00"),
+		)
+		mock_cancel.return_value = {"cancellation_store_credit_amount": 68}
+
+		with patch("qas_custom.services.inquiry.frappe", fake_frappe), patch(
+			"qas_custom.services.inquiry._", side_effect=lambda value: value
+		):
+			_cancel_linked_trial_invoice_for_cancelled_inquiry(inquiry, actor="school@example.com")
+
+		self.assertIn("$68.00", add_note.call_args.args[1])
+		self.assertIn("Store Credit", add_note.call_args.args[1])
+
+	@patch("qas_custom.services.inquiry._add_cancelled_trial_invoice_note")
+	@patch("qas_custom.services.trial_invoice._find_inquiry_invoice", return_value=None)
+	@patch("qas_custom.services.school_admin.delete_school_admin_draft_invoice_data")
+	def test_cancelling_trial_inquiry_deletes_linked_draft_invoice(self, mock_delete, _mock_find, add_note):
+		inquiry = frappe._dict(name="INQ-0002", inquiry_type="Trial Lesson", trial_invoice="SINV-0002", student="STU-2")
+		invoice = frappe._dict(name="SINV-0002", docstatus=0)
+		fake_frappe = SimpleNamespace(
+			db=SimpleNamespace(exists=Mock(return_value=True)),
+			get_doc=Mock(return_value=invoice),
+			session=SimpleNamespace(user="school@example.com"),
+		)
+
+		with patch("qas_custom.services.inquiry.frappe", fake_frappe), patch(
+			"qas_custom.services.inquiry._", side_effect=lambda value: value
+		):
+			result = _cancel_linked_trial_invoice_for_cancelled_inquiry(inquiry, actor="school@example.com")
+
+		mock_delete.assert_called_once_with(invoice="SINV-0002", allow_campus_admin=True)
+		self.assertIsNone(inquiry.trial_invoice)
+		add_note.assert_called_once()
+		self.assertEqual(result, {"invoice": "SINV-0002", "action": "draft_deleted"})
+
 	def test_only_booked_or_rescheduled_trial_with_session_is_eligible(self):
 		base = frappe._dict(inquiry_type="Trial Lesson", status="Booked", course_session="SESSION-001")
 		self.assertTrue(_is_eligible(base))

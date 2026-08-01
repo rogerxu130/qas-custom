@@ -1593,8 +1593,8 @@ def update_school_admin_draft_invoice_data(invoice=None, payload=None):
 		raise
 
 
-def delete_school_admin_draft_invoice_data(invoice=None):
-	_require_school_admin()
+def delete_school_admin_draft_invoice_data(invoice=None, allow_campus_admin=False):
+	_require_invoice_cancellation_actor(allow_campus_admin=allow_campus_admin)
 	if not invoice:
 		frappe.throw(_("Invoice is required."))
 	doc = frappe.get_doc("Sales Invoice", invoice)
@@ -1722,8 +1722,9 @@ def cancel_school_admin_invoice_data(
 	allow_empty_reason=False,
 	send_notifications=True,
 	payment_plan_store_credit_disposition="keep",
+	allow_campus_admin=False,
 ):
-	_require_school_admin()
+	_require_invoice_cancellation_actor(allow_campus_admin=allow_campus_admin)
 	if not invoice:
 		frappe.throw(_("Invoice is required."))
 	reason = (reason or "").strip()
@@ -4849,6 +4850,18 @@ def _require_school_admin():
 	roles = set(frappe.get_roles(frappe.session.user))
 	if not roles.intersection(ADMIN_ROLES):
 		frappe.throw(_("Only School Admin or System Manager users can access School Admin APIs."), frappe.PermissionError)
+
+
+def _require_invoice_cancellation_actor(allow_campus_admin=False):
+	"""Allow campus staff only for a Trial Inquiry cancellation they already own."""
+	if not allow_campus_admin:
+		_require_school_admin()
+		return
+	if frappe.session.user == "Guest":
+		frappe.throw(_("Login required."), frappe.PermissionError)
+	roles = set(frappe.get_roles(frappe.session.user))
+	if not roles.intersection(ADMIN_ROLES | {"Campus Admin"}):
+		frappe.throw(_("Only School Admin, Campus Admin, or System Manager users can cancel a Trial Invoice."), frappe.PermissionError)
 
 
 def _get_payload(payload=None):

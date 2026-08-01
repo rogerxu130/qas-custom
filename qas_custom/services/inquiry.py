@@ -7,7 +7,7 @@ from hmac import compare_digest
 
 import frappe
 from frappe import _
-from frappe.utils import get_time, getdate, now_datetime
+from frappe.utils import cint, flt, get_time, getdate, now_datetime
 
 from qas_custom.services.billing_enrollment import (
 	convert_inquiry_to_full_term_core,
@@ -359,10 +359,80 @@ def mark_inquiry_status_core(inquiry: str | None, status: str, actor=None):
 		frappe.throw(_("Follow-up can only be started after the trial lesson is completed."))
 	if status in {"Completed", "No-show"} and inquiry_doc.status == "Cancelled":
 		frappe.throw(_("A cancelled inquiry cannot be marked as attended or no-show."))
+	if status == "Cancelled":
+		_cancel_linked_trial_invoice_for_cancelled_inquiry(inquiry_doc, actor=actor)
 	inquiry_doc.status = status
 	inquiry_doc.save(ignore_permissions=True)
 	frappe.db.commit()
 	return build_inquiry_detail(inquiry_doc.name)
+
+
+def _cancel_linked_trial_invoice_for_cancelled_inquiry(inquiry_doc, actor=None):
+	"""Keep a cancelled Trial Inquiry from retaining an active Trial Invoice.
+
+	The standard invoice cancellation service remains the single owner of payment
+	reversal and Store Credit creation. Campus access has already been checked by
+	the public Campus Admin action before it reaches this shared lifecycle core.
+	"""
+	if inquiry_doc.get("inquiry_type") != "Trial Lesson":
+		return None
+
+	from qas_custom.services.school_admin import (
+		cancel_school_admin_invoice_data,
+		delete_school_admin_draft_invoice_data,
+	)
+	from qas_custom.services.trial_invoice import _find_inquiry_invoice
+
+	invoice_name = inquiry_doc.get("trial_invoice") or _find_inquiry_invoice(inquiry_doc.name)
+	if not invoice_name or not frappe.db.exists("Sales Invoice", invoice_name):
+		return None
+
+	invoice = frappe.get_doc("Sales Invoice", invoice_name)
+	if cint(invoice.docstatus) == 2:
+		return {"invoice": invoice_name, "action": "already_cancelled"}
+
+	reason = _("Trial Inquiry {0} was cancelled.").format(inquiry_doc.name)
+	if cint(invoice.docstatus) == 0:
+		delete_school_admin_draft_invoice_data(invoice=invoice_name, allow_campus_admin=True)
+		if inquiry_doc.get("trial_invoice") == invoice_name:
+			inquiry_doc.trial_invoice = None
+		_add_cancelled_trial_invoice_note(
+			inquiry_doc,
+			_("Draft Trial Invoice {0} was deleted automatically because this Trial Inquiry was cancelled.").format(
+				invoice_name
+			),
+			actor=actor,
+		)
+		return {"invoice": invoice_name, "action": "draft_deleted"}
+
+	result = cancel_school_admin_invoice_data(
+		invoice=invoice_name,
+		reason=reason,
+		send_notifications=True,
+		allow_campus_admin=True,
+	)
+	credit_amount = flt(result.get("cancellation_store_credit_amount"))
+	note = _("Trial Invoice {0} was cancelled automatically because this Trial Inquiry was cancelled.").format(invoice_name)
+	if credit_amount > 0:
+		note = _("{0} Payment of {1} was converted to the family's Store Credit.").format(
+			note,
+			frappe.format_value(credit_amount, {"fieldtype": "Currency"}),
+		)
+	_add_cancelled_trial_invoice_note(inquiry_doc, note, actor=actor)
+	return result
+
+
+def _add_cancelled_trial_invoice_note(inquiry_doc, note, actor=None):
+	note_doc = frappe.new_doc("Inquiry Note")
+	note_doc.inquiry = inquiry_doc.name
+	note_doc.student = inquiry_doc.student
+	note_doc.note = note
+	note_doc.author = actor or frappe.session.user
+	note_doc.edited_at = now_datetime()
+	if note_doc.meta.has_field("note_type"):
+		note_doc.note_type = "System"
+	note_doc.flags.ignore_permissions = True
+	note_doc.insert()
 
 
 def add_inquiry_note_core(inquiry: str | None, note: str | None, actor=None, commit=True):
