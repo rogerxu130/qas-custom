@@ -21,6 +21,11 @@ RUNNING_STATUSES = ("Queued", "Running")
 REPORT_TYPES = (FAMILY_REPORT_TYPE, UNMARKED_REPORT_TYPE)
 ADMIN_ROLES = {"School Admin", "System Manager"}
 PAGE_LENGTH_MAX = 200
+TRIAL_ATTENDED_STATUSES = {"Present", "Late"}
+TRIAL_COUNTABLE_ATTENDANCE_STATUSES = TRIAL_ATTENDED_STATUSES | {"To be started"}
+TRIAL_FOLLOWING_UP_STATUSES = {"Completed", "Follow-up"}
+TRIAL_EXCLUDED_INQUIRY_STATUSES = {"No-show"}
+TRIAL_TEACHER_UNASSIGNED_LABEL = "No teacher assigned"
 
 
 def get_school_admin_reporting_snapshot_data(term=None):
@@ -347,6 +352,174 @@ def get_school_admin_term_paid_invoice_summary_data(term=None):
 		"paid_invoice_count": paid_count,
 		"paid_invoice_total": round(paid_total, 2),
 	}
+
+
+def get_school_admin_teacher_trial_conversion_report_data(term=None):
+	"""Return live, teacher-attributed outcomes for Trials actually attended in one Term."""
+	_require_school_admin()
+	_validate_term(term)
+	for doctype in ("Weekly Timeslot", "Course Sessions", "Class Attendance Entry", "Inquiry"):
+		if not _doctype_available(doctype):
+			frappe.throw(_("{0} data is not installed yet. Please run the site migration.").format(doctype))
+
+	timeslots = frappe.get_all(
+		"Weekly Timeslot",
+		filters={"term": term},
+		fields=_safe_fields("Weekly Timeslot", ["name", "teacher"]),
+		limit_page_length=0,
+	)
+	timeslot_map = {row.get("name"): dict(row) for row in timeslots if row.get("name")}
+	if not timeslot_map:
+		return _empty_teacher_trial_conversion_report(term)
+
+	sessions = frappe.get_all(
+		"Course Sessions",
+		filters={"weekly_timeslot": ["in", sorted(timeslot_map)]},
+		fields=_safe_fields("Course Sessions", ["name", "weekly_timeslot", "teacher_override", "session_date"]),
+		order_by="session_date desc, name asc",
+		limit_page_length=0,
+	)
+	session_map = {row.get("name"): dict(row) for row in sessions if row.get("name")}
+	if not session_map:
+		return _empty_teacher_trial_conversion_report(term)
+
+	attendance_rows = frappe.get_all(
+		"Class Attendance Entry",
+		filters={
+			"course_session": ["in", sorted(session_map)],
+			"enrollment_type": "Trial",
+			"source_doctype": "Inquiry",
+			"status": ["in", sorted(TRIAL_COUNTABLE_ATTENDANCE_STATUSES)],
+		},
+		fields=_safe_fields("Class Attendance Entry", ["name", "course_session", "source_document", "status"]),
+		order_by="creation asc, name asc",
+		limit_page_length=0,
+	)
+	inquiry_ids = sorted({row.get("source_document") for row in attendance_rows if row.get("source_document")})
+	inquiries = {}
+	if inquiry_ids:
+		inquiries = {
+			row.get("name"): dict(row)
+			for row in frappe.get_all(
+				"Inquiry",
+				filters={"name": ["in", inquiry_ids], "inquiry_type": "Trial Lesson"},
+				fields=_safe_fields("Inquiry", ["name", "status"]),
+				limit_page_length=0,
+			)
+			if row.get("name")
+		}
+
+	teacher_ids = {
+		session.get("teacher_override") or (timeslot_map.get(session.get("weekly_timeslot")) or {}).get("teacher")
+			for session in session_map.values()
+		}
+	teacher_ids.discard(None)
+	teacher_ids.discard("")
+	teacher_names = _teacher_name_map(teacher_ids)
+	items = _build_teacher_trial_conversion_items(
+		attendance_rows=attendance_rows,
+		session_map=session_map,
+		timeslot_map=timeslot_map,
+		inquiries=inquiries,
+		teacher_names=teacher_names,
+	)
+	return {
+		"term": term,
+		"summary": {
+			"trial_attended_count": sum(row["trial_attended_count"] for row in items),
+			"converted_count": sum(row["converted_count"] for row in items),
+			"inactive_count": sum(row["inactive_count"] for row in items),
+			"following_up_count": sum(row["following_up_count"] for row in items),
+		},
+		"items": items,
+	}
+
+
+def _empty_teacher_trial_conversion_report(term):
+	return {
+		"term": term,
+		"summary": {
+			"trial_attended_count": 0,
+			"converted_count": 0,
+			"inactive_count": 0,
+			"following_up_count": 0,
+		},
+		"items": [],
+	}
+
+
+def _teacher_name_map(teacher_ids):
+	if not teacher_ids or not _doctype_available("Teacher"):
+		return {}
+	fields = _safe_fields("Teacher", ["name", "teacher_name"])
+	return {
+		row.get("name"): row.get("teacher_name") or row.get("name")
+		for row in frappe.get_all(
+			"Teacher",
+			filters={"name": ["in", sorted(teacher_ids)]},
+			fields=fields,
+			limit_page_length=0,
+		)
+		if row.get("name")
+	}
+
+
+def _build_teacher_trial_conversion_items(*, attendance_rows, session_map, timeslot_map, inquiries, teacher_names):
+	grouped = defaultdict(
+		lambda: {
+			"trial_attended_count": 0,
+			"converted_count": 0,
+			"inactive_count": 0,
+			"following_up_count": 0,
+		}
+	)
+	seen_inquiries = set()
+	for attendance in attendance_rows:
+		if attendance.get("status") not in TRIAL_COUNTABLE_ATTENDANCE_STATUSES:
+			continue
+		inquiry_id = attendance.get("source_document")
+		inquiry = inquiries.get(inquiry_id) or {}
+		session = session_map.get(attendance.get("course_session")) or {}
+		timeslot = timeslot_map.get(session.get("weekly_timeslot")) or {}
+		if (
+			not inquiry_id
+			or not inquiry
+			or not session
+			or inquiry_id in seen_inquiries
+			or inquiry.get("status") in TRIAL_EXCLUDED_INQUIRY_STATUSES
+			or not _is_countable_trial_attendance(attendance, session, timeslot)
+		):
+			continue
+		seen_inquiries.add(inquiry_id)
+		teacher = session.get("teacher_override") or timeslot.get("teacher") or ""
+		row = grouped[teacher]
+		row["trial_attended_count"] += 1
+		if inquiry.get("status") == "Converted":
+			row["converted_count"] += 1
+		elif inquiry.get("status") == "Inactive":
+			row["inactive_count"] += 1
+		elif inquiry.get("status") in TRIAL_FOLLOWING_UP_STATUSES:
+			row["following_up_count"] += 1
+
+	items = []
+	for teacher, counts in grouped.items():
+		items.append(
+			{
+				"teacher": teacher,
+				"teacher_name": teacher_names.get(teacher) or teacher or TRIAL_TEACHER_UNASSIGNED_LABEL,
+				**counts,
+			}
+		)
+	return sorted(items, key=lambda row: (-row["trial_attended_count"], row["teacher_name"].lower(), row["teacher"]))
+
+
+def _is_countable_trial_attendance(attendance, session, timeslot):
+	"""Include forgotten attendance marks only after the Trial session has passed."""
+	if attendance.get("status") in TRIAL_ATTENDED_STATUSES:
+		return True
+	if attendance.get("status") != "To be started" or not session.get("session_date"):
+		return False
+	return _session_end_datetime(session, timeslot) < now_datetime()
 
 
 def _build_reporting_rows(term, generated_at):
