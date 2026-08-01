@@ -7,7 +7,7 @@ from urllib.parse import urlencode
 
 import frappe
 from frappe import _
-from frappe.utils import add_days, cint, getdate, now_datetime, today
+from frappe.utils import add_days, cint, get_time, getdate, now_datetime, today
 from frappe.utils.file_manager import save_file
 
 from qas_custom.services.attendance import update_attendance_status
@@ -118,7 +118,7 @@ def get_teacher_sessions_data(from_date=None, to_date=None):
             }
         )
 
-    items.sort(key=lambda row: (row.get("session_date") or "", row.get("start_time") or ""))
+    items.sort(key=_teacher_session_sort_key)
     return {"items": items}
 
 
@@ -541,6 +541,22 @@ def _get_timeslot_map(timeslot_names):
 
 def _resolved_session_teacher(session, timeslot):
     return session.get("teacher_override") or (timeslot or {}).get("teacher")
+
+
+def _teacher_session_sort_key(item):
+    time_key = (1, 0)
+    start_time = item.get("start_time")
+    if start_time:
+        try:
+            parsed_time = get_time(start_time)
+            time_key = (0, parsed_time.hour * 3600 + parsed_time.minute * 60 + parsed_time.second)
+        except (TypeError, ValueError):
+            pass
+    return (
+        str(item.get("session_date") or "9999-12-31"),
+        *time_key,
+        str(item.get("id") or item.get("session_id") or "").casefold(),
+    )
 
 
 def _get_owned_session(course_session: str, teacher_name: str):
