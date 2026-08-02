@@ -1,6 +1,7 @@
 from unittest import TestCase
 from unittest.mock import patch
 
+from frappe import _dict
 from frappe.utils import getdate
 
 from qas_custom.api.school_admin import school_admin_get_course_sessions
@@ -36,12 +37,13 @@ class TestSchoolAdminCourseSessions(TestCase):
 		self.assertEqual({row["name"] for row in result[1:]}, {"SESSION-INVALID", "SESSION-MISSING"})
 
 	@patch("qas_custom.api.school_admin.get_school_admin_course_sessions_data")
-	def test_api_accepts_and_passes_course_session_status(self, get_sessions):
+	def test_api_accepts_and_passes_course_session_status_and_teacher(self, get_sessions):
 		get_sessions.return_value = {"items": []}
 
 		result = school_admin_get_course_sessions.__wrapped__(
 			course="COURSE-1",
 			campus="CAMPUS-1",
+			teacher="TEACHER-1",
 			status="Scheduled",
 			from_date="2026-07-17",
 		)
@@ -52,6 +54,7 @@ class TestSchoolAdminCourseSessions(TestCase):
 			term=None,
 			course="COURSE-1",
 			campus="CAMPUS-1",
+			teacher="TEACHER-1",
 			status="Scheduled",
 			from_date="2026-07-17",
 			to_date=None,
@@ -63,12 +66,13 @@ class TestSchoolAdminCourseSessions(TestCase):
 	@patch("qas_custom.services.school_admin._get_course_session_rows")
 	@patch("qas_custom.services.school_admin._require_school_admin")
 	@patch("qas_custom.services.school_admin._doctype_available", return_value=True)
-	def test_service_passes_scheduled_status_to_session_query(self, _doctype, _require, get_rows):
+	def test_service_passes_scheduled_status_and_teacher_to_session_query(self, _doctype, _require, get_rows):
 		get_rows.return_value = []
 
 		result = get_school_admin_course_sessions_data(
 			course="COURSE-1",
 			campus="CAMPUS-1",
+			teacher="TEACHER-1",
 			status="Scheduled",
 			from_date="2026-07-17",
 			limit=1000,
@@ -80,6 +84,7 @@ class TestSchoolAdminCourseSessions(TestCase):
 			term=None,
 			course="COURSE-1",
 			campus="CAMPUS-1",
+			teacher="TEACHER-1",
 			status="Scheduled",
 			from_date="2026-07-17",
 			to_date=None,
@@ -122,3 +127,36 @@ class TestSchoolAdminCourseSessions(TestCase):
 				"weekly_timeslot": ["in", ["WT-1"]],
 			},
 		)
+
+	@patch("qas_custom.services.school_admin._get_course_session_leave_counts", return_value={})
+	@patch("qas_custom.services.school_admin._get_course_session_trial_counts", return_value={})
+	@patch("qas_custom.services.school_admin._get_course_session_student_counts", return_value={})
+	@patch("qas_custom.services.school_admin._get_timeslot_map")
+	@patch("qas_custom.services.school_admin._safe_fields", return_value=["name", "weekly_timeslot", "session_date", "status", "teacher_override"])
+	@patch("qas_custom.services.school_admin._doctype_available", return_value=True)
+	@patch("qas_custom.services.school_admin.frappe.get_all")
+	def test_session_query_filters_by_actual_teacher_including_override(
+		self,
+		get_all,
+		_doctype,
+		_safe_fields,
+		get_timeslot_map,
+		_student_counts,
+		_trial_counts,
+		_leave_counts,
+	):
+		get_all.return_value = [
+			_dict(name="SESSION-WEEKLY", weekly_timeslot="WT-1", session_date="2026-08-01", status="Scheduled", teacher_override=None),
+			_dict(name="SESSION-OVERRIDE", weekly_timeslot="WT-2", session_date="2026-08-01", status="Scheduled", teacher_override="TEACHER-1"),
+			_dict(name="SESSION-OTHER", weekly_timeslot="WT-3", session_date="2026-08-01", status="Scheduled", teacher_override=None),
+		]
+		get_timeslot_map.return_value = {
+			"WT-1": {"name": "WT-1", "teacher": "TEACHER-1", "course": "COURSE-1"},
+			"WT-2": {"name": "WT-2", "teacher": "TEACHER-2", "course": "COURSE-1"},
+			"WT-3": {"name": "WT-3", "teacher": "TEACHER-3", "course": "COURSE-1"},
+		}
+
+		result = _get_course_session_rows(teacher="TEACHER-1", limit=160)
+
+		self.assertEqual([item["name"] for item in result], ["SESSION-OVERRIDE", "SESSION-WEEKLY"])
+		self.assertEqual(get_all.call_args.kwargs["limit"], 3000)

@@ -3238,6 +3238,7 @@ def get_school_admin_course_sessions_data(
 	term=None,
 	course=None,
 	campus=None,
+	teacher=None,
 	from_date=None,
 	to_date=None,
 	status=None,
@@ -3254,6 +3255,7 @@ def get_school_admin_course_sessions_data(
 			term=term,
 			course=course,
 			campus=campus,
+			teacher=teacher,
 			status=status,
 			from_date=from_date,
 			to_date=to_date,
@@ -7227,6 +7229,7 @@ def _get_course_session_rows(
 	term=None,
 	course=None,
 	campus=None,
+	teacher=None,
 	from_date=None,
 	to_date=None,
 	status=None,
@@ -7273,12 +7276,18 @@ def _get_course_session_rows(
 			"modified",
 		],
 	)
+	requested_limit = _limit(limit, default=160, max_value=3000)
+	# A session-level teacher override must take precedence over the weekly teacher.
+	# Fetch the complete bounded result set before applying that derived filter so an
+	# overridden session is never omitted simply because its weekly timeslot belongs
+	# to a different teacher.
+	query_limit = 3000 if teacher else requested_limit
 	rows = frappe.get_all(
 		"Course Sessions",
 		filters=filters,
 		fields=fields,
 		order_by="session_date asc, modified asc",
-		limit=limit,
+		limit=query_limit,
 	)
 	timeslot_map = _get_timeslot_map([row.weekly_timeslot for row in rows if row.get("weekly_timeslot")])
 	student_counts = _get_course_session_student_counts([row.get("name") for row in rows])
@@ -7291,13 +7300,15 @@ def _get_course_session_rows(
 		timeslot_teacher = (item.get("weekly_timeslot_detail") or {}).get("teacher")
 		item["teacher"] = item.get("teacher_override") or timeslot_teacher
 		item["teacher_assignment_source"] = "Session override" if item.get("teacher_override") else "Weekly timeslot"
+		if teacher and item.get("teacher") != teacher:
+			continue
 		item["student_count"] = student_counts.get(row.get("name"), 0)
 		item["trial_count"] = trial_counts.get(row.get("name"), 0)
 		item["leave_count"] = leave_counts.get(row.get("name"), 0)
 		if item.get("weekly_timeslot_detail"):
 			_attach_course_label(item, item["weekly_timeslot_detail"].get("course"), item["weekly_timeslot_detail"])
 		items.append(item)
-	return sorted(items, key=_course_session_sort_key)
+	return sorted(items, key=_course_session_sort_key)[:requested_limit]
 
 
 def _course_session_sort_key(item):
