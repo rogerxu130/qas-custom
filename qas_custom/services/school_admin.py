@@ -4,6 +4,7 @@ from collections import defaultdict
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 import hashlib
+from io import BytesIO
 import json
 import mimetypes
 import re
@@ -13,6 +14,7 @@ import frappe
 from frappe import _
 from frappe.sessions import clear_sessions
 from frappe.utils import add_days, cint, flt, get_time, getdate, now_datetime, nowdate, today, validate_email_address
+from PIL import Image, ImageOps
 
 from qas_custom.services.billing_enrollment import (
 	convert_inquiry_to_full_term_core,
@@ -3312,6 +3314,53 @@ def get_school_admin_session_photo_content_data(course_session=None, photo_post=
 		raise frappe.DoesNotExistError
 
 	return _get_school_admin_file_content(photo_row.image)
+
+
+def get_school_admin_session_photo_preview_content_data(course_session=None, photo_post=None, photo_idx=None):
+	"""Return a bounded JPEG preview without creating a public File record.
+
+	Class photos can contain student information, so previews must use the same
+	School Admin permission check as original images.  Keeping the bytes in the
+	response also avoids accidentally publishing thumbnails under ``/files``.
+	"""
+	payload = get_school_admin_session_photo_content_data(
+		course_session=course_session,
+		photo_post=photo_post,
+		photo_idx=photo_idx,
+	)
+	preview = _school_admin_photo_preview_bytes(payload["content"])
+	if not preview:
+		frappe.throw(_("Could not create a preview for this class photo."))
+	return {
+		"filename": "preview-{0}.jpg".format(payload["filename"].rsplit(".", 1)[0]),
+		"content": preview,
+		"content_type": "image/jpeg",
+	}
+
+
+def _school_admin_photo_preview_bytes(content):
+	"""Resize photo bytes for the report without retaining metadata or alpha."""
+	try:
+		with Image.open(BytesIO(content)) as source:
+			image = ImageOps.exif_transpose(source)
+			if image.mode in {"RGBA", "LA"}:
+				background = Image.new("RGB", image.size, "white")
+				alpha = image.getchannel("A")
+				background.paste(image.convert("RGB"), mask=alpha)
+				image = background
+			elif image.mode != "RGB":
+				image = image.convert("RGB")
+
+			for dimension, quality in ((640, 72), (480, 62), (360, 52)):
+				preview = image.copy()
+				preview.thumbnail((dimension, dimension), Image.Resampling.LANCZOS)
+				output = BytesIO()
+				preview.save(output, format="JPEG", optimize=True, progressive=True, quality=quality)
+				data = output.getvalue()
+				if len(data) <= 100 * 1024 or dimension == 360:
+					return data
+	except Exception:
+		return None
 
 
 def get_school_admin_session_video_content_data(course_session=None, video_post=None):

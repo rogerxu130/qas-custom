@@ -3,10 +3,11 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import datetime, time, timedelta
 import json
+from urllib.parse import urlencode
 
 import frappe
 from frappe import _
-from frappe.utils import cint, flt, getdate, now_datetime, today
+from frappe.utils import cint, flt, get_datetime_in_timezone, getdate, now_datetime, today
 
 from qas_custom.modules.billing.store_credit import get_invoice_payable_amount, get_invoice_total_amount
 from qas_custom.services.display_labels import get_student_display_name
@@ -26,6 +27,9 @@ TRIAL_COUNTABLE_ATTENDANCE_STATUSES = TRIAL_ATTENDED_STATUSES | {"To be started"
 TRIAL_FOLLOWING_UP_STATUSES = {"Completed", "Follow-up"}
 TRIAL_EXCLUDED_INQUIRY_STATUSES = {"No-show"}
 TRIAL_TEACHER_UNASSIGNED_LABEL = "No teacher assigned"
+BRISBANE_TIMEZONE = "Australia/Brisbane"
+DAILY_REPORT_UNMARKED_ATTENDANCE_STATUSES = {"", "Scheduled", "To be started"}
+DAILY_REPORT_PHOTO_PREVIEW_LIMIT = 3
 
 
 def get_school_admin_reporting_snapshot_data(term=None):
@@ -432,6 +436,348 @@ def get_school_admin_teacher_trial_conversion_report_data(term=None):
 			"following_up_count": sum(row["following_up_count"] for row in items),
 		},
 		"items": items,
+	}
+
+
+def get_school_admin_daily_teacher_report_data(session_date=None, campus=None):
+	"""Return one live, read-only teaching-quality report for a Brisbane calendar day.
+
+	The report deliberately uses Course Sessions as the row owner. It aggregates all
+	attendance and published teacher content in bulk so the client never has to infer
+	completeness from a cached classes list or make a request per session.
+	"""
+	_require_school_admin()
+	for doctype in ("Course Sessions", "Weekly Timeslot", "Class Attendance Entry"):
+		if not _doctype_available(doctype):
+			frappe.throw(_("{0} data is not installed yet. Please run the site migration.").format(doctype))
+
+	target_date = _daily_report_date(session_date)
+	campus_options = _daily_report_campus_options()
+	campus = str(campus or "").strip()
+	if campus and campus not in {row["value"] for row in campus_options}:
+		frappe.throw(_("Select a valid campus."))
+
+	sessions = frappe.get_all(
+		"Course Sessions",
+		filters={"session_date": target_date, "status": ["!=", "Cancelled"]},
+		fields=_safe_fields("Course Sessions", ["name", "weekly_timeslot", "teacher_override", "session_date", "status"]),
+		order_by="name asc",
+		limit_page_length=0,
+	)
+	if not sessions:
+		return _empty_daily_teacher_report(target_date, campus, campus_options)
+
+	timeslots = _daily_report_timeslots(sessions)
+	if campus:
+		sessions = [
+			row for row in sessions if (timeslots.get(row.get("weekly_timeslot")) or {}).get("campus") == campus
+		]
+	if not sessions:
+		return _empty_daily_teacher_report(target_date, campus, campus_options)
+
+	session_ids = sorted({row.get("name") for row in sessions if row.get("name")})
+	attendance_rows = frappe.get_all(
+		"Class Attendance Entry",
+		filters={"course_session": ["in", session_ids]},
+		fields=_safe_fields("Class Attendance Entry", ["course_session", "status"]),
+		order_by="course_session asc, creation asc",
+		limit_page_length=0,
+	)
+	updates = _daily_report_class_updates(session_ids)
+	photo_posts, photo_items = _daily_report_photo_posts(session_ids)
+	videos = _daily_report_videos(session_ids)
+	teacher_names = _teacher_name_map(
+		{
+			row.get("teacher_override")
+			or (timeslots.get(row.get("weekly_timeslot")) or {}).get("teacher")
+			for row in sessions
+		}
+		| {row.get("teacher") for row in updates + photo_posts + videos}
+	)
+	items = _build_daily_teacher_report_items(
+		sessions=sessions,
+		timeslots=timeslots,
+		attendance_rows=attendance_rows,
+		updates=updates,
+		photo_posts=photo_posts,
+		photo_items=photo_items,
+		videos=videos,
+		teacher_names=teacher_names,
+	)
+	return {
+		"session_date": str(target_date),
+		"campus": campus,
+		"options": {"campuses": campus_options},
+		"summary": _daily_teacher_report_summary(items),
+		"items": items,
+	}
+
+
+def _daily_report_date(value):
+	if not value:
+		return get_datetime_in_timezone(BRISBANE_TIMEZONE).date()
+	try:
+		return getdate(value)
+	except Exception:
+		frappe.throw(_("Select a valid session date."))
+
+
+def _daily_report_campus_options():
+	rows = frappe.get_all(
+		"Weekly Timeslot",
+		filters={"campus": ["!=", ""]},
+		fields=["campus"],
+		distinct=True,
+		limit_page_length=0,
+	)
+	return [
+		{"value": row.get("campus"), "label": row.get("campus")}
+		for row in sorted(rows, key=lambda row: str(row.get("campus") or "").lower())
+		if row.get("campus")
+	]
+
+
+def _daily_report_timeslots(sessions):
+	timeslot_ids = sorted({row.get("weekly_timeslot") for row in sessions if row.get("weekly_timeslot")})
+	if not timeslot_ids:
+		return {}
+	fields = _safe_fields(
+		"Weekly Timeslot",
+		["name", "course", "campus", "classroom", "teacher", "start_time", "end_time"],
+	)
+	return {
+		row.get("name"): dict(row)
+		for row in frappe.get_all(
+			"Weekly Timeslot",
+			filters={"name": ["in", timeslot_ids]},
+			fields=fields,
+			limit_page_length=0,
+		)
+		if row.get("name")
+	}
+
+
+def _daily_report_class_updates(session_ids):
+	if not session_ids or not _doctype_available("Session Homework"):
+		return []
+	return [
+		dict(row)
+		for row in frappe.get_all(
+			"Session Homework",
+			filters={"course_session": ["in", session_ids], "status": "Published"},
+			fields=_safe_fields("Session Homework", ["name", "course_session", "title", "description", "teacher", "published_at"]),
+			order_by="published_at asc, creation asc",
+			limit_page_length=0,
+		)
+	]
+
+
+def _daily_report_photo_posts(session_ids):
+	if not session_ids or not _doctype_available("Session Photo Post"):
+		return [], []
+	posts = [
+		dict(row)
+		for row in frappe.get_all(
+			"Session Photo Post",
+			filters={"course_session": ["in", session_ids], "status": "Published"},
+			fields=_safe_fields("Session Photo Post", ["name", "course_session", "title", "caption", "teacher", "posted_at"]),
+			order_by="posted_at asc, creation asc",
+			limit_page_length=0,
+		)
+	]
+	post_ids = sorted({row.get("name") for row in posts if row.get("name")})
+	if not post_ids or not _doctype_available("Session Photo Item"):
+		return posts, []
+	items = [
+		dict(row)
+		for row in frappe.get_all(
+			"Session Photo Item",
+			filters={
+				"parent": ["in", post_ids],
+				"parenttype": "Session Photo Post",
+				"parentfield": "photos",
+			},
+			fields=["parent", "idx"],
+			order_by="parent asc, idx asc",
+			limit_page_length=0,
+		)
+	]
+	return posts, items
+
+
+def _daily_report_videos(session_ids):
+	if not session_ids or not _doctype_available("Session Video Post"):
+		return []
+	return [
+		dict(row)
+		for row in frappe.get_all(
+			"Session Video Post",
+			filters={"course_session": ["in", session_ids], "status": "Published"},
+			fields=_safe_fields("Session Video Post", ["name", "course_session", "teacher"]),
+			limit_page_length=0,
+		)
+	]
+
+
+def _build_daily_teacher_report_items(
+	*, sessions, timeslots, attendance_rows, updates, photo_posts, photo_items, videos, teacher_names
+):
+	attendance_by_session = defaultdict(list)
+	for row in attendance_rows:
+		attendance_by_session[row.get("course_session")].append(row)
+	updates_by_session = defaultdict(list)
+	for row in updates:
+		updates_by_session[row.get("course_session")].append(row)
+	posts_by_session = defaultdict(list)
+	for row in photo_posts:
+		posts_by_session[row.get("course_session")].append(row)
+	photos_by_post = defaultdict(list)
+	for row in photo_items:
+		photos_by_post[row.get("parent")].append(row)
+	videos_by_session = defaultdict(list)
+	for row in videos:
+		videos_by_session[row.get("course_session")].append(row)
+
+	items = []
+	for session in sessions:
+		session_id = session.get("name")
+		timeslot = timeslots.get(session.get("weekly_timeslot")) or {}
+		teacher = session.get("teacher_override") or timeslot.get("teacher") or ""
+		photo_post_rows = posts_by_session.get(session_id, [])
+		photos = []
+		photo_post_payloads = []
+		for post in photo_post_rows:
+			post_photos = [
+				_daily_report_photo_payload(session_id, post.get("name"), photo.get("idx"))
+				for photo in photos_by_post.get(post.get("name"), [])
+			]
+			photos.extend(post_photos)
+			photo_post_payloads.append(
+				{
+					"id": post.get("name"),
+					"title": post.get("title") or _("Class Photos"),
+					"caption": post.get("caption") or "",
+					"teacher": post.get("teacher") or "",
+					"teacher_name": teacher_names.get(post.get("teacher")) or post.get("teacher") or "",
+					"photo_count": len(post_photos),
+				}
+			)
+		attendance = _daily_report_attendance_counts(attendance_by_session.get(session_id, []))
+		class_updates = [
+			{
+				"id": row.get("name"),
+				"title": row.get("title") or _("Class Update"),
+				"description": row.get("description") or "",
+				"teacher": row.get("teacher") or "",
+				"teacher_name": teacher_names.get(row.get("teacher")) or row.get("teacher") or "",
+			}
+			for row in updates_by_session.get(session_id, [])
+		]
+		items.append(
+			{
+				"course_session": session_id,
+				"course": timeslot.get("course") or _("Class"),
+				"campus": timeslot.get("campus") or _("Not assigned"),
+				"classroom": timeslot.get("classroom") or _("Not assigned"),
+				"teacher": teacher,
+				"teacher_name": teacher_names.get(teacher) or teacher or TRIAL_TEACHER_UNASSIGNED_LABEL,
+				"start_time": _daily_report_time(timeslot.get("start_time")),
+				"end_time": _daily_report_time(timeslot.get("end_time")),
+				"attendance": attendance,
+				"class_updates": class_updates,
+				"photo_post_count": len(photo_post_rows),
+				"photo_posts": photo_post_payloads,
+				"photo_count": len(photos),
+				"photos": photos,
+				"photo_preview_limit": DAILY_REPORT_PHOTO_PREVIEW_LIMIT,
+				"video_count": len(videos_by_session.get(session_id, [])),
+				"needs_attention": {
+					"attendance": attendance["unmarked"] > 0,
+					"class_update": not class_updates,
+					"media": not photos and not videos_by_session.get(session_id),
+				},
+			}
+		)
+	items.sort(
+		key=lambda row: (
+			row.get("start_time") or "",
+			row.get("course") or "",
+			row.get("campus") or "",
+			row.get("course_session") or "",
+		)
+	)
+	return items
+
+
+def _daily_report_attendance_counts(rows):
+	counts = {
+		"expected": 0,
+		"marked": 0,
+		"unmarked": 0,
+		"present": 0,
+		"absent": 0,
+		"late": 0,
+		"leave": 0,
+		"cancelled": 0,
+	}
+	for row in rows:
+		status = str(row.get("status") or "").strip()
+		if status == "Leave":
+			counts["leave"] += 1
+			continue
+		if status == "Cancelled":
+			counts["cancelled"] += 1
+			continue
+		counts["expected"] += 1
+		if status in DAILY_REPORT_UNMARKED_ATTENDANCE_STATUSES:
+			counts["unmarked"] += 1
+		else:
+			counts["marked"] += 1
+		if status == "Present":
+			counts["present"] += 1
+		elif status == "Absent":
+			counts["absent"] += 1
+		elif status == "Late":
+			counts["late"] += 1
+	return counts
+
+
+def _daily_report_photo_payload(course_session, photo_post, photo_idx):
+	params = {"course_session": course_session, "photo_post": photo_post, "photo_idx": cint(photo_idx)}
+	return {
+		"photo_post": photo_post,
+		"idx": cint(photo_idx),
+		"preview_url": _daily_report_media_url("school_admin_get_course_session_photo_preview", params),
+		"full_url": _daily_report_media_url("school_admin_get_course_session_photo", params),
+	}
+
+
+def _daily_report_media_url(method, params):
+	return "/api/method/qas_custom.api.school_admin.{0}?{1}".format(method, urlencode(params))
+
+
+def _daily_report_time(value):
+	text = str(value or "").strip()
+	return text[:5] if len(text) >= 5 else text or "-"
+
+
+def _daily_teacher_report_summary(items):
+	return {
+		"session_count": len(items),
+		"incomplete_attendance_count": sum(1 for row in items if row["needs_attention"]["attendance"]),
+		"missing_class_update_count": sum(1 for row in items if row["needs_attention"]["class_update"]),
+		"missing_media_count": sum(1 for row in items if row["needs_attention"]["media"]),
+		"photo_count": sum(cint(row.get("photo_count")) for row in items),
+	}
+
+
+def _empty_daily_teacher_report(target_date, campus, campus_options):
+	return {
+		"session_date": str(target_date),
+		"campus": campus,
+		"options": {"campuses": campus_options},
+		"summary": _daily_teacher_report_summary([]),
+		"items": [],
 	}
 
 

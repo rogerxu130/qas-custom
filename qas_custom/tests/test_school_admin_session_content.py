@@ -3,10 +3,12 @@ from unittest import TestCase
 from unittest.mock import Mock, patch
 
 import frappe
+from PIL import Image
 
 from qas_custom.services.school_admin import (
 	_get_school_admin_session_content_rows,
 	get_school_admin_session_photo_content_data,
+	get_school_admin_session_photo_preview_content_data,
 	get_school_admin_session_video_content_data,
 )
 
@@ -65,6 +67,28 @@ class TestSchoolAdminSessionContent(TestCase):
 
 		with self.assertRaises(frappe.PermissionError):
 			get_school_admin_session_photo_content_data("SESSION-2", "PHOTO-1", 1)
+
+	@patch("qas_custom.services.school_admin.get_school_admin_session_photo_content_data")
+	def test_photo_preview_is_a_bounded_jpeg_without_needing_a_public_file(self, get_photo):
+		from io import BytesIO
+
+		original = Image.new("RGB", (1800, 1200), "navy")
+		input_bytes = BytesIO()
+		original.save(input_bytes, format="PNG")
+		get_photo.return_value = {
+			"filename": "class-photo.png",
+			"content": input_bytes.getvalue(),
+			"content_type": "image/png",
+		}
+
+		payload = get_school_admin_session_photo_preview_content_data("SESSION-1", "PHOTO-1", 1)
+
+		self.assertEqual(payload["filename"], "preview-class-photo.jpg")
+		self.assertEqual(payload["content_type"], "image/jpeg")
+		self.assertLessEqual(len(payload["content"]), 100 * 1024)
+		with Image.open(BytesIO(payload["content"])) as preview:
+			self.assertEqual(preview.format, "JPEG")
+			self.assertLessEqual(max(preview.size), 640)
 
 	@patch("qas_custom.services.school_admin._get_school_admin_file_content")
 	@patch("qas_custom.services.school_admin.frappe.get_doc")

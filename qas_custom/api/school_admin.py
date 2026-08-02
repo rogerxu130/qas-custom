@@ -18,6 +18,7 @@ from qas_custom.services.announcements import (
 )
 from qas_custom.services.support_view import create_support_view_token, get_support_view_targets
 from qas_custom.services.school_admin_reporting import (
+	get_school_admin_daily_teacher_report_data,
 	get_school_admin_teacher_trial_conversion_report_data,
 	get_school_admin_term_paid_invoice_summary_data,
 	get_school_admin_voucher_report_data,
@@ -98,6 +99,7 @@ from qas_custom.services.school_admin import (
 	get_school_admin_conversion_sessions_data,
 	get_school_admin_course_session_data,
 	get_school_admin_session_photo_content_data,
+	get_school_admin_session_photo_preview_content_data,
 	get_school_admin_session_video_content_data,
 	get_school_admin_course_sessions_data,
 	get_school_admin_csrf_token_data,
@@ -419,6 +421,11 @@ def school_admin_get_term_paid_invoice_summary(term=None):
 @frappe.whitelist()
 def school_admin_get_teacher_trial_conversion_report(term=None):
 	return get_school_admin_teacher_trial_conversion_report_data(term=term)
+
+
+@frappe.whitelist()
+def school_admin_get_daily_teacher_report(session_date=None, campus=None):
+	return get_school_admin_daily_teacher_report_data(session_date=session_date, campus=campus)
 
 
 @frappe.whitelist()
@@ -939,6 +946,20 @@ def school_admin_get_course_session(course_session=None):
 @frappe.whitelist()
 def school_admin_get_course_session_photo(course_session=None, photo_post=None, photo_idx=None):
 	payload = get_school_admin_session_photo_content_data(
+		course_session=course_session,
+		photo_post=photo_post,
+		photo_idx=photo_idx,
+	)
+	frappe.local.response.filename = payload["filename"]
+	frappe.local.response.filecontent = payload["content"]
+	frappe.local.response.content_type = payload["content_type"]
+	frappe.local.response.display_content_as = "inline"
+	frappe.local.response.type = "download"
+
+
+@frappe.whitelist()
+def school_admin_get_course_session_photo_preview(course_session=None, photo_post=None, photo_idx=None):
+	payload = get_school_admin_session_photo_preview_content_data(
 		course_session=course_session,
 		photo_post=photo_post,
 		photo_idx=photo_idx,
