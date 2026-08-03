@@ -11,6 +11,7 @@
  ],
  "istable": 1,
  "module": "QAS Custom",
+ "name": "Teacher Training Link",
  "sort_field": "idx",
  "sort_order": "ASC"
 }
