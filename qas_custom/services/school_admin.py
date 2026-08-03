@@ -1553,6 +1553,13 @@ def update_school_admin_draft_invoice_data(invoice=None, payload=None):
 		]:
 			if fieldname in payload:
 				_set_if_field(doc, fieldname, payload.get(fieldname))
+		if "qas_additional_description" in payload:
+			additional_description = str(payload.get("qas_additional_description") or "").strip()
+			if additional_description and not _has_field("Sales Invoice", "qas_additional_description"):
+				frappe.throw(
+					_("Additional description is not available until the latest site migration has completed.")
+				)
+			_set_if_field(doc, "qas_additional_description", additional_description)
 		if "apply_store_credit_on_submit" in payload and is_manual_invoice:
 			_set_if_field(
 				doc,

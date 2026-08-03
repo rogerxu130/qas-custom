@@ -267,6 +267,10 @@ def _parent_invoice_print_html():
 		</tbody>
 	</table>
 
+	{% if doc.qas_additional_description %}
+	<div class="qas-message"><strong>Additional description</strong><br>{{ doc.qas_additional_description }}</div>
+	{% endif %}
+
 	<table class="qas-total">
 		<tr><td>Invoice total</td><td style="text-align:right;"><strong>AUD ${{ "%.2f"|format(invoice_total) }}</strong></td></tr>
 		<tr><td>Store credit applied</td><td style="text-align:right;"><strong>AUD ${{ "%.2f"|format(credit_applied) }}</strong></td></tr>

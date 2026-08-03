@@ -19,6 +19,7 @@ def invoice_context():
 		"payable_amount": 450,
 		"accepted_payment_methods": "Bank transfer",
 		"invoice_message": "",
+		"additional_description": "",
 		"invoice_link": "https://portal.example.com/invoices?invoice=SINV-0001",
 		"items": [],
 		"adjustments": [],
@@ -26,6 +27,7 @@ def invoice_context():
 
 
 class TestParentInvoicePortalActions(TestCase):
+	@patch("qas_custom.modules.notifications.commands._", side_effect=lambda value: value)
 	@patch("qas_custom.modules.notifications.commands._school_identity_email_html", return_value="")
 	@patch("qas_custom.modules.notifications.commands._invoice_email_bank_details", return_value="")
 	@patch("qas_custom.modules.notifications.commands.build_parent_invoice_context")
@@ -34,6 +36,7 @@ class TestParentInvoicePortalActions(TestCase):
 		mock_context,
 		_mock_bank,
 		_mock_identity,
+		_translate,
 	):
 		mock_context.return_value = invoice_context()
 		invoice = SimpleNamespace(name="SINV-0001")
@@ -50,13 +53,52 @@ class TestParentInvoicePortalActions(TestCase):
 		self.assertIn("https://portal.example.com/invoices?invoice=SINV-0001", html)
 		self.assertTrue(mock_context.call_args.kwargs["include_portal_link"])
 
+	@patch("qas_custom.modules.notifications.commands._", side_effect=lambda value: value)
+	@patch("qas_custom.modules.notifications.commands._school_identity_email_html", return_value="")
+	@patch("qas_custom.modules.notifications.commands._invoice_email_bank_details", return_value="")
+	@patch("qas_custom.modules.notifications.commands.build_parent_invoice_context")
+	def test_invoice_email_shows_optional_additional_description_below_invoice_items(
+		self,
+		mock_context,
+		_mock_bank,
+		_mock_identity,
+		_translate,
+	):
+		context = invoice_context()
+		context.update(
+			{
+				"additional_description": "Capacity-building support delivered through a small-group visual arts session.",
+				"lines": [
+					{
+						"student": "Alex",
+						"description": "Community Participation Activities",
+						"amount": 60,
+					}
+				],
+			}
+		)
+		mock_context.return_value = context
+
+		html = _invoice_email_message(
+			SimpleNamespace(name="SINV-0001"),
+			event="approved",
+			store_credit_applied=0,
+			payable_amount=60,
+			payment_link="https://portal.example.com/invoices?invoice=SINV-0001",
+		)
+
+		self.assertIn("Additional description", html)
+		self.assertIn("Capacity-building support delivered through a small-group visual arts session.", html)
+		self.assertLess(html.index("Community Participation Activities"), html.index("Additional description"))
+
+	@patch("qas_custom.modules.notifications.commands._", side_effect=lambda value: value)
 	@patch("qas_custom.modules.notifications.commands._school_identity_email_html", return_value="")
 	@patch(
 		"qas_custom.modules.notifications.commands.parent_portal_invoice_link",
 		return_value="https://portal.example.com/invoices?invoice=SINV-0001",
 	)
 	@patch("qas_custom.modules.notifications.commands.build_parent_invoice_context")
-	def test_receipt_email_always_displays_invoice_portal_action(self, mock_context, _mock_link, _mock_identity):
+	def test_receipt_email_always_displays_invoice_portal_action(self, mock_context, _mock_link, _mock_identity, _translate):
 		mock_context.return_value = invoice_context()
 		invoice = SimpleNamespace(name="SINV-0001")
 

@@ -343,6 +343,7 @@ def get_parent_invoices_data():
                 "payment_link": parent_portal_invoice_link(doc.name),
                 "payment_status": payment_status,
                 "status": doc.status,
+                "additional_description": str(doc.get("qas_additional_description") or "").strip(),
                 "payment_plan": _invoice_payment_plan_payload(doc),
                 **get_invoice_payment_context(doc),
                 "items": [build_parent_invoice_item(item) for item in doc.items],

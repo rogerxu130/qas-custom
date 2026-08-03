@@ -1421,6 +1421,7 @@ def _invoice_pdf_html(context):
 
 	payment_block = _invoice_pdf_payment_block(context)
 	invoice_message = _invoice_pdf_message(context.get("invoice_message"))
+	additional_description = _invoice_pdf_additional_description(context.get("additional_description"))
 	return """
 <!doctype html>
 <html>
@@ -1488,6 +1489,8 @@ def _invoice_pdf_html(context):
 		<tbody>{rows}</tbody>
 	</table>
 
+	{additional_description}
+
 	<table class="totals">
 		<tr><td>Invoice total</td><td class="right"><strong>AUD ${total:.2f}</strong></td></tr>
 		<tr><td>Store credit applied</td><td class="right"><strong>AUD ${credit:.2f}</strong></td></tr>
@@ -1507,6 +1510,7 @@ def _invoice_pdf_html(context):
 		credit=flt(context["store_credit_applied"]),
 		payable=flt(context["payable_amount"]),
 		invoice_message=invoice_message,
+		additional_description=additional_description,
 		rows=rows,
 		payment_block=payment_block,
 	)
@@ -1621,6 +1625,14 @@ def _invoice_pdf_message(value):
 	return """<div class="note">{0}</div>""".format(escape_html(value).replace("\n", "<br>"))
 
 
+def _invoice_pdf_additional_description(value):
+	if not value:
+		return ""
+	return """<div class="note"><strong>Additional description</strong><br>{0}</div>""".format(
+		escape_html(value).replace("\n", "<br>")
+	)
+
+
 def _invoice_pdf_payment_block(context):
 	if flt(context["payable_amount"]) <= 0:
 		message = (
@@ -1682,6 +1694,7 @@ def _invoice_email_message(invoice_doc, event, store_credit_applied, payable_amo
 	else:
 		payment_line = _("No payment is required for this invoice.")
 	invoice_message = _html_multiline(context.get("invoice_message"))
+	additional_description = _invoice_email_additional_description(context.get("additional_description"))
 	payment_plan = context.get("payment_plan") or {}
 	payment_plan_html = _invoice_payment_plan_html(payment_plan)
 	bank_details = _invoice_email_bank_details(context) if flt(context["payable_amount"]) > 0 else ""
@@ -1734,6 +1747,8 @@ def _invoice_email_message(invoice_doc, event, store_credit_applied, payable_amo
 							<tbody>{rows}</tbody>
 						</table>
 
+						{additional_description}
+
 						<p style="margin:0 0 18px;font-size:15px;line-height:1.5;color:#334155;">{payment_line}</p>
 						{bank_details}
 						{portal_action}
@@ -1749,6 +1764,7 @@ def _invoice_email_message(invoice_doc, event, store_credit_applied, payable_amo
 		greeting=greeting,
 		intro=intro,
 		invoice_message=invoice_message,
+		additional_description=additional_description,
 		payment_plan_html=payment_plan_html,
 		due_date=context["due_date"] or "-",
 		total=flt(context["total"]),
@@ -1897,6 +1913,16 @@ def _html_multiline(value):
 	return """<p style="margin:0 0 18px;font-size:15px;line-height:1.5;color:#334155;">{0}</p>""".format(
 		escape_html(value).replace("\n", "<br>")
 	)
+
+
+def _invoice_email_additional_description(value):
+	content = _html_multiline(value)
+	if not content:
+		return ""
+	return """<div style="margin:0 0 18px;padding:14px 16px;border:1px solid #e5e7eb;border-radius:10px;background:#f8fafc;">
+		<p style="margin:0 0 8px;font-size:15px;font-weight:700;color:#172033;">Additional description</p>
+		{content}
+	</div>""".format(content=content)
 
 
 def _invoice_email_bank_details(context):

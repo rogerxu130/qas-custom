@@ -123,8 +123,10 @@ class TestSchoolAdminDraftInvoiceAdjustments(TestCase):
 		return_value={"store_credit_applied": 0, "payable_amount": 450},
 	)
 	@patch("qas_custom.modules.billing.presentation._invoice_recipient_name", return_value="Taylor")
+	@patch("qas_custom.modules.billing.payment_plans.payment_plan_payload", return_value={})
 	def test_parent_context_exposes_adjustment_as_independent_line(
 		self,
+		_payment_plan,
 		_recipient_name,
 		_amounts,
 		_total,
@@ -134,6 +136,7 @@ class TestSchoolAdminDraftInvoiceAdjustments(TestCase):
 		invoice = _Invoice(
 			name="SINV-0001",
 			customer_name="Taylor Family",
+			qas_additional_description="Capacity-building support delivered through a small-group visual arts session.",
 			items=[
 				_Child(
 					item_code="Tuition Fee",
@@ -158,6 +161,10 @@ class TestSchoolAdminDraftInvoiceAdjustments(TestCase):
 		self.assertEqual(len(context["lines"]), 2)
 		self.assertEqual(context["lines"][1]["description"], "Sibling discount")
 		self.assertEqual(context["lines"][1]["amount"], -30)
+		self.assertEqual(
+			context["additional_description"],
+			"Capacity-building support delivered through a small-group visual arts session.",
+		)
 
 	@patch("qas_custom.modules.notifications.commands._school_identity_pdf_html", return_value="")
 	def test_parent_pdf_hides_unit_and_unit_price_and_shows_adjustment(self, _identity):
@@ -171,6 +178,7 @@ class TestSchoolAdminDraftInvoiceAdjustments(TestCase):
 				"store_credit_applied": 0,
 				"payable_amount": 450,
 				"invoice_message": "",
+				"additional_description": "Capacity-building support\nwith peers.",
 				"accepted_payment_methods": "",
 				"lines": [
 					{"student": "Alex", "description": "Term 3 course", "amount": 480},
@@ -180,6 +188,8 @@ class TestSchoolAdminDraftInvoiceAdjustments(TestCase):
 		)
 
 		self.assertIn("Sibling discount", html)
+		self.assertIn("Additional description", html)
+		self.assertIn("Capacity-building support<br>with peers.", html)
 		self.assertNotIn("Unit price", html)
 		self.assertNotIn(">Qty<", html)
 		self.assertNotIn(">Rate<", html)

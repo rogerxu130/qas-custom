@@ -78,6 +78,7 @@ def build_parent_invoice_context(
 		"payment_link": portal_link,
 		"payment_plan": payment_plan_payload(invoice_doc),
 		**payment_context,
+		"additional_description": str(invoice_doc.get("qas_additional_description") or "").strip(),
 		"items": items,
 		"adjustments": adjustments,
 		"lines": [*items, *adjustments],
