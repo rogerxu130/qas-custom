@@ -9,6 +9,7 @@ from qas_custom.services.announcements import (
 	_announcement_email_message,
 	_announcement_student_preview,
 	_message_html,
+	publish_school_admin_announcement_data,
 	_resolve_announcement_recipients,
 	_send_announcement_bcc_batch,
 	_student_search_rank,
@@ -20,6 +21,53 @@ from qas_custom.services.announcements import (
 
 
 class TestSingleStudentAnnouncements(TestCase):
+	def test_publish_uses_current_editor_payload_without_prior_draft_save(self):
+		announcement = SimpleNamespace(
+			name="ANN-0001",
+			status="Draft",
+			send_email_on_publish=0,
+			publish_at=None,
+			insert=Mock(),
+			save=Mock(),
+		)
+		recipient_row = SimpleNamespace(name="ANR-0001", insert=Mock())
+		fake_db = SimpleNamespace(savepoint=Mock(), commit=Mock(), rollback=Mock(), get_value=Mock(return_value="Not Requested"))
+		fake_frappe = SimpleNamespace(
+			db=fake_db,
+			session=SimpleNamespace(user="school-admin@example.com"),
+			new_doc=Mock(side_effect=[announcement, recipient_row]),
+		)
+		current_payload = {"title": "Current title", "body": "Current message", "audience_type": "All Parents"}
+
+		with patch("qas_custom.services.announcements.frappe", fake_frappe), patch(
+			"qas_custom.services.announcements._require_school_admin"
+		), patch(
+			"qas_custom.services.announcements._apply_announcement_payload"
+		) as apply_payload, patch(
+			"qas_custom.services.announcements._validate_announcement"
+		), patch(
+			"qas_custom.services.announcements._resolve_announcement_recipients",
+			return_value=[{"parent": "PAR-1", "email": "parent@example.com"}],
+		), patch(
+			"qas_custom.services.announcements._delete_existing_recipients"
+		), patch(
+			"qas_custom.services.announcements._delete_unused_announcement_inline_images"
+		), patch(
+			"qas_custom.services.announcements.outbound_email_enabled", return_value=False
+		), patch(
+			"qas_custom.services.announcements.now_datetime", return_value="2026-08-03 12:00:00"
+		), patch(
+			"qas_custom.services.announcements.get_school_admin_announcement_data",
+			return_value={"name": "ANN-0001", "status": "Published"},
+		):
+			result = publish_school_admin_announcement_data(payload=current_payload)
+
+		apply_payload.assert_called_once_with(announcement, current_payload)
+		announcement.insert.assert_called_once_with(ignore_permissions=True)
+		announcement.save.assert_called_once_with(ignore_permissions=True)
+		self.assertEqual(announcement.status, "Published")
+		self.assertEqual(result["status"], "Published")
+
 	@patch("qas_custom.services.announcements._parent_portal_base_url", return_value="https://portal.example")
 	@patch("qas_custom.services.announcements.get_url", return_value="https://qas.example/files/announcement.png")
 	def test_email_includes_public_announcement_image_and_portal_button(self, _get_url, _portal_url):
@@ -76,8 +124,11 @@ class TestSingleStudentAnnouncements(TestCase):
 	def test_single_student_audience_requires_student(self):
 		doc = frappe._dict(title="Test", body="Message", audience_type="Single Student", student="")
 
-		with self.assertRaises(frappe.ValidationError):
-			_validate_announcement(doc)
+		with patch("qas_custom.services.announcements._", side_effect=lambda message: message), patch(
+			"qas_custom.services.announcements.frappe.throw", side_effect=frappe.ValidationError
+		):
+			with self.assertRaises(frappe.ValidationError):
+				_validate_announcement(doc)
 
 	@patch("qas_custom.services.announcements._recipient_from_parent_name")
 	@patch("qas_custom.services.announcements._student_parent", return_value="PAR-1")
@@ -105,7 +156,11 @@ class TestSingleStudentAnnouncements(TestCase):
 	@patch("qas_custom.services.announcements._student_parent", return_value=None)
 	def test_single_student_without_parent_is_blocked(self, _parent):
 		db = SimpleNamespace(exists=Mock(return_value=True))
-		with patch("qas_custom.services.announcements.frappe.db", db):
+		with patch("qas_custom.services.announcements.frappe.db", db), patch(
+			"qas_custom.services.announcements._", side_effect=lambda message: message
+		), patch(
+			"qas_custom.services.announcements.frappe.throw", side_effect=frappe.ValidationError
+		):
 			with self.assertRaises(frappe.ValidationError):
 				_resolve_announcement_recipients(
 					frappe._dict(audience_type="Single Student", student="STU-1")

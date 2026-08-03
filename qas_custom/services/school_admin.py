@@ -1522,77 +1522,19 @@ def update_school_admin_draft_invoice_data(invoice=None, payload=None):
 	savepoint = "school_admin_update_draft_invoice"
 	frappe.db.savepoint(savepoint)
 	try:
-		frappe.db.sql(
-			"select name from `tabSales Invoice` where name = %s for update",
-			(invoice,),
-		)
-		doc = frappe.get_doc("Sales Invoice", invoice)
-		if cint(doc.docstatus) != 0:
-			frappe.throw(_("Only draft invoices can be edited."))
-		previous_total = get_invoice_total_amount(doc)
-		fallback_accounts = _invoice_item_financial_values(doc, "income_account")
-		fallback_cost_centers = _invoice_item_financial_values(doc, "cost_center")
-		is_manual_invoice = cint(doc.get("qas_is_manual_invoice")) or (doc.get("source_type") or "").strip().lower() == "manual"
-
-		for fieldname in ["customer", "due_date", "remarks"]:
-			if fieldname in payload:
-				doc.set(fieldname, payload.get(fieldname))
-		for fieldname in [
-			"parent",
-			"student",
-			"primary_student",
-			"enrollment",
-			"course",
-			"term",
-			"qas_invoice_type",
-			"source_doctype",
-			"source_document",
-			"billing_note",
-			"source_inquiry",
-			"source_type",
-		]:
-			if fieldname in payload:
-				_set_if_field(doc, fieldname, payload.get(fieldname))
-		if "qas_additional_description" in payload:
-			additional_description = str(payload.get("qas_additional_description") or "").strip()
-			if additional_description and not _has_field("Sales Invoice", "qas_additional_description"):
-				frappe.throw(
-					_("Additional description is not available until the latest site migration has completed.")
-				)
-			_set_if_field(doc, "qas_additional_description", additional_description)
-		if "apply_store_credit_on_submit" in payload and is_manual_invoice:
-			_set_if_field(
-				doc,
-				"qas_apply_store_credit_on_submit",
-				cint(payload.get("apply_store_credit_on_submit")),
-			)
-		_apply_invoice_payment_payload(doc, payload)
-		apply_invoice_payment_snapshot(doc)
-		if "items" in payload:
-			_apply_invoice_items(doc, payload.get("items") or [])
-		if "adjustments" in payload:
-			_apply_invoice_adjustments(
-				doc,
-				payload.get("adjustments") or [],
-				fallback_accounts=fallback_accounts,
-				fallback_cost_centers=fallback_cost_centers,
-			)
-		_sync_invoice_student_summary(doc)
-		doc.calculate_taxes_and_totals()
-		if flt(doc.get("grand_total")) < 0:
-			frappe.throw(_("Invoice total cannot be negative."))
+		doc = _lock_school_admin_draft_invoice(invoice)
+		change = _apply_school_admin_draft_invoice_payload(doc, payload)
 		_run_school_admin_invoice_mutation(lambda: doc.save(ignore_permissions=True))
-		new_total = get_invoice_total_amount(doc)
 		_add_comment(
 			"Sales Invoice",
 			doc.name,
 			_(
 				"Draft invoice updated by School Admin: total {0} → {1}; {2} item(s); {3} adjustment(s)."
 			).format(
-				flt(previous_total),
-				flt(new_total),
-				len(doc.get("items") or []),
-				len(_invoice_adjustment_rows(doc)),
+				flt(change["previous_total"]),
+				flt(change["new_total"]),
+				change["item_count"],
+				change["adjustment_count"],
 			),
 		)
 		frappe.db.commit()
@@ -1600,6 +1542,84 @@ def update_school_admin_draft_invoice_data(invoice=None, payload=None):
 	except Exception:
 		frappe.db.rollback(save_point=savepoint)
 		raise
+
+
+def _lock_school_admin_draft_invoice(invoice):
+	frappe.db.sql(
+		"select name from `tabSales Invoice` where name = %s for update",
+		(invoice,),
+	)
+	doc = frappe.get_doc("Sales Invoice", invoice)
+	if cint(doc.docstatus) != 0:
+		frappe.throw(_("Only draft invoices can be edited or submitted."))
+	return doc
+
+
+def _apply_school_admin_draft_invoice_payload(doc, payload):
+	"""Apply editor values to a locked Draft without saving or committing.
+
+	This shared mutation is used by Save Draft and the final Submit actions.  The
+	caller controls the lifecycle transition so a final action never needs an
+	operator to save an intermediate Draft first.
+	"""
+	previous_total = get_invoice_total_amount(doc)
+	fallback_accounts = _invoice_item_financial_values(doc, "income_account")
+	fallback_cost_centers = _invoice_item_financial_values(doc, "cost_center")
+	is_manual_invoice = cint(doc.get("qas_is_manual_invoice")) or (doc.get("source_type") or "").strip().lower() == "manual"
+
+	for fieldname in ["customer", "due_date", "remarks"]:
+		if fieldname in payload:
+			doc.set(fieldname, payload.get(fieldname))
+	for fieldname in [
+		"parent",
+		"student",
+		"primary_student",
+		"enrollment",
+		"course",
+		"term",
+		"qas_invoice_type",
+		"source_doctype",
+		"source_document",
+		"billing_note",
+		"source_inquiry",
+		"source_type",
+	]:
+		if fieldname in payload:
+			_set_if_field(doc, fieldname, payload.get(fieldname))
+	if "qas_additional_description" in payload:
+		additional_description = str(payload.get("qas_additional_description") or "").strip()
+		if additional_description and not _has_field("Sales Invoice", "qas_additional_description"):
+			frappe.throw(
+				_("Additional description is not available until the latest site migration has completed.")
+			)
+		_set_if_field(doc, "qas_additional_description", additional_description)
+	if "apply_store_credit_on_submit" in payload and is_manual_invoice:
+		_set_if_field(
+			doc,
+			"qas_apply_store_credit_on_submit",
+			cint(payload.get("apply_store_credit_on_submit")),
+		)
+	_apply_invoice_payment_payload(doc, payload)
+	apply_invoice_payment_snapshot(doc)
+	if "items" in payload:
+		_apply_invoice_items(doc, payload.get("items") or [])
+	if "adjustments" in payload:
+		_apply_invoice_adjustments(
+			doc,
+			payload.get("adjustments") or [],
+			fallback_accounts=fallback_accounts,
+			fallback_cost_centers=fallback_cost_centers,
+		)
+	_sync_invoice_student_summary(doc)
+	doc.calculate_taxes_and_totals()
+	if flt(doc.get("grand_total")) < 0:
+		frappe.throw(_("Invoice total cannot be negative."))
+	return {
+		"previous_total": previous_total,
+		"new_total": get_invoice_total_amount(doc),
+		"item_count": len(doc.get("items") or []),
+		"adjustment_count": len(_invoice_adjustment_rows(doc)),
+	}
 
 
 def delete_school_admin_draft_invoice_data(invoice=None, allow_campus_admin=False):
@@ -1617,31 +1637,50 @@ def delete_school_admin_draft_invoice_data(invoice=None, allow_campus_admin=Fals
 	return {"deleted": deleted}
 
 
-def submit_school_admin_invoice_data(invoice=None, enqueue_notification=False, send_notifications=True):
+def submit_school_admin_invoice_data(invoice=None, enqueue_notification=False, send_notifications=True, payload=None):
 	_require_school_admin()
 	if not invoice:
 		frappe.throw(_("Invoice is required."))
 	send_notifications = cint(send_notifications)
-	doc = frappe.get_doc("Sales Invoice", invoice)
-	if cint(doc.docstatus) != 0:
-		frappe.throw(_("Only draft invoices can be submitted."))
+	draft_payload = _get_payload(payload) if payload is not None else None
+	savepoint = "school_admin_submit_invoice"
+	frappe.db.savepoint(savepoint)
+	try:
+		doc = _lock_school_admin_draft_invoice(invoice)
+		change = _apply_school_admin_draft_invoice_payload(doc, draft_payload) if draft_payload is not None else None
 
-	def submit_invoice():
-		if apply_invoice_payment_snapshot(doc):
-			doc.save(ignore_permissions=True)
-		doc.flags.ignore_permissions = True
-		doc.submit()
+		def submit_invoice():
+			if apply_invoice_payment_snapshot(doc):
+				doc.save(ignore_permissions=True)
+			doc.flags.ignore_permissions = True
+			doc.submit()
 
-	_run_school_admin_invoice_mutation(submit_invoice)
-	_add_comment("Sales Invoice", doc.name, "Invoice approved and submitted by School Admin.")
-	application = apply_store_credit_to_invoice(doc)
-	if flt(application.get("applied")) > 0:
-		_add_comment("Sales Invoice", doc.name, _("Store credit applied: {0}.").format(flt(application.get("applied"))))
-	doc = frappe.get_doc("Sales Invoice", doc.name)
-	sync_invoice_store_credit_snapshot(doc)
-	applied_amount = flt(get_invoice_store_credit_applied(doc.name))
-	frappe.db.commit()
-	doc = frappe.get_doc("Sales Invoice", doc.name)
+		_run_school_admin_invoice_mutation(submit_invoice)
+		if change:
+			_add_comment(
+				"Sales Invoice",
+				doc.name,
+				_(
+					"Invoice submitted with current editor values by School Admin: total {0} → {1}; {2} item(s); {3} adjustment(s)."
+				).format(
+					flt(change["previous_total"]),
+					flt(change["new_total"]),
+					change["item_count"],
+					change["adjustment_count"],
+				),
+			)
+		_add_comment("Sales Invoice", doc.name, "Invoice approved and submitted by School Admin.")
+		application = apply_store_credit_to_invoice(doc)
+		if flt(application.get("applied")) > 0:
+			_add_comment("Sales Invoice", doc.name, _("Store credit applied: {0}.").format(flt(application.get("applied"))))
+		doc = frappe.get_doc("Sales Invoice", doc.name)
+		sync_invoice_store_credit_snapshot(doc)
+		applied_amount = flt(get_invoice_store_credit_applied(doc.name))
+		frappe.db.commit()
+		doc = frappe.get_doc("Sales Invoice", doc.name)
+	except Exception:
+		frappe.db.rollback(save_point=savepoint)
+		raise
 	receipt_notification = None
 	if not send_notifications:
 		_add_comment("Sales Invoice", doc.name, "Invoice submitted without parent notifications by School Admin.")

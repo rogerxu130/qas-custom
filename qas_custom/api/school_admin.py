@@ -253,8 +253,8 @@ def school_admin_clear_announcement_image(announcement=None):
 
 
 @frappe.whitelist()
-def school_admin_publish_announcement(announcement=None):
-	return publish_school_admin_announcement_data(announcement=announcement)
+def school_admin_publish_announcement(announcement=None, payload=None):
+	return publish_school_admin_announcement_data(announcement=announcement, payload=payload)
 
 
 @frappe.whitelist()
@@ -278,8 +278,8 @@ def school_admin_save_training_article(article=None, payload=None):
 
 
 @frappe.whitelist()
-def school_admin_publish_training_article(article=None):
-	return publish_school_admin_training_article_data(article=article)
+def school_admin_publish_training_article(article=None, payload=None):
+	return publish_school_admin_training_article_data(article=article, payload=payload)
 
 
 @frappe.whitelist()
@@ -751,8 +751,12 @@ def school_admin_delete_draft_invoice(invoice=None):
 
 
 @frappe.whitelist()
-def school_admin_submit_invoice(invoice=None, send_notifications=True):
-	return submit_school_admin_invoice_data(invoice=invoice, send_notifications=send_notifications)
+def school_admin_submit_invoice(invoice=None, send_notifications=True, payload=None):
+	return submit_school_admin_invoice_data(
+		invoice=invoice,
+		send_notifications=send_notifications,
+		payload=payload,
+	)
 
 
 @frappe.whitelist()

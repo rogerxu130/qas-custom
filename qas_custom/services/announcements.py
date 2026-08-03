@@ -110,63 +110,84 @@ def save_school_admin_announcement_data(announcement=None, payload=None):
 	return get_school_admin_announcement_data(doc.name)
 
 
-def publish_school_admin_announcement_data(announcement=None):
+def publish_school_admin_announcement_data(announcement=None, payload=None):
+	"""Publish the current editor state without requiring a prior Draft save."""
 	_require_school_admin()
-	if not announcement:
-		frappe.throw(_("Announcement is required."))
-	doc = frappe.get_doc(ANNOUNCEMENT_DOCTYPE, announcement)
-	if doc.status == "Published":
-		return get_school_admin_announcement_data(doc.name)
-	if doc.status == "Archived":
-		frappe.throw(_("Archived announcements cannot be published."))
+	payload = _parse_payload(payload) if payload is not None else None
+	savepoint = "school_admin_publish_announcement"
+	frappe.db.savepoint(savepoint)
+	try:
+		if announcement:
+			doc = frappe.get_doc(ANNOUNCEMENT_DOCTYPE, announcement)
+			if doc.status == "Published":
+				return get_school_admin_announcement_data(doc.name)
+			if doc.status == "Archived":
+				frappe.throw(_("Archived announcements cannot be published."))
+		else:
+			doc = frappe.new_doc(ANNOUNCEMENT_DOCTYPE)
+			doc.status = "Draft"
 
-	_validate_announcement(doc)
-	recipients = _resolve_announcement_recipients(doc)
-	if not recipients:
-		frappe.throw(_("No parent recipients matched this announcement audience."))
+		if payload is not None:
+			_apply_announcement_payload(doc, payload)
+		_validate_announcement(doc)
 
-	_delete_existing_recipients(doc.name)
-	email_requested = bool(cint(doc.send_email_on_publish))
-	email_enabled = outbound_email_enabled()
-	created = []
-	for recipient in recipients:
-		row = frappe.new_doc(RECIPIENT_DOCTYPE)
-		row.announcement = doc.name
-		row.parent = recipient.get("parent")
-		row.customer = recipient.get("customer")
-		row.student = recipient.get("student")
-		row.linked_user = recipient.get("linked_user")
-		row.email = recipient.get("email")
-		row.audience_source = recipient.get("audience_source")
-		row.source_document = recipient.get("source_document")
-		row.email_status = "Queued" if email_requested and email_enabled and recipient.get("email") else "Not Requested"
-		if email_requested and not email_enabled and recipient.get("email"):
-			row.email_status = "Skipped"
-			row.email_error = email_block_reason()
-		if email_requested and not recipient.get("email"):
-			row.email_status = "Failed"
-			row.email_error = "No parent email found."
-		row.insert(ignore_permissions=True)
-		created.append(row.name)
+		# A new record needs a permanent name before recipient rows can link to it,
+		# but this insertion remains inside the same transaction as publication.
+		if not announcement:
+			doc.insert(ignore_permissions=True)
 
-	doc.status = "Published"
-	doc.published_by = frappe.session.user
-	doc.published_at = now_datetime()
-	doc.publish_at = doc.publish_at or doc.published_at
-	doc.recipient_count = len(created)
-	doc.email_queued_count = len([name for name in created if frappe.db.get_value(RECIPIENT_DOCTYPE, name, "email_status") == "Queued"])
-	doc.save(ignore_permissions=True)
+		recipients = _resolve_announcement_recipients(doc)
+		if not recipients:
+			frappe.throw(_("No parent recipients matched this announcement audience."))
 
-	if email_requested and email_enabled and doc.email_queued_count:
-		frappe.enqueue(
-			"qas_custom.services.announcements.send_school_announcement_email_job",
-			queue="short",
-			timeout=600,
-			enqueue_after_commit=True,
-			announcement=doc.name,
+		_delete_existing_recipients(doc.name)
+		email_requested = bool(cint(doc.send_email_on_publish))
+		email_enabled = outbound_email_enabled()
+		created = []
+		for recipient in recipients:
+			row = frappe.new_doc(RECIPIENT_DOCTYPE)
+			row.announcement = doc.name
+			row.parent = recipient.get("parent")
+			row.customer = recipient.get("customer")
+			row.student = recipient.get("student")
+			row.linked_user = recipient.get("linked_user")
+			row.email = recipient.get("email")
+			row.audience_source = recipient.get("audience_source")
+			row.source_document = recipient.get("source_document")
+			row.email_status = "Queued" if email_requested and email_enabled and recipient.get("email") else "Not Requested"
+			if email_requested and not email_enabled and recipient.get("email"):
+				row.email_status = "Skipped"
+				row.email_error = email_block_reason()
+			if email_requested and not recipient.get("email"):
+				row.email_status = "Failed"
+				row.email_error = "No parent email found."
+			row.insert(ignore_permissions=True)
+			created.append(row.name)
+
+		doc.status = "Published"
+		doc.published_by = frappe.session.user
+		doc.published_at = now_datetime()
+		doc.publish_at = doc.publish_at or doc.published_at
+		doc.recipient_count = len(created)
+		doc.email_queued_count = len(
+			[name for name in created if frappe.db.get_value(RECIPIENT_DOCTYPE, name, "email_status") == "Queued"]
 		)
+		doc.save(ignore_permissions=True)
+		_delete_unused_announcement_inline_images(doc)
 
-	frappe.db.commit()
+		if email_requested and email_enabled and doc.email_queued_count:
+			frappe.enqueue(
+				"qas_custom.services.announcements.send_school_announcement_email_job",
+				queue="short",
+				timeout=600,
+				enqueue_after_commit=True,
+				announcement=doc.name,
+			)
+
+		frappe.db.commit()
+	except Exception:
+		frappe.db.rollback(save_point=savepoint)
+		raise
 	return get_school_admin_announcement_data(doc.name)
 
 
@@ -790,7 +811,7 @@ def _parse_payload(payload):
 
 def _get_editable_announcement(announcement):
 	if not announcement:
-		frappe.throw(_("Save the draft before uploading an image."))
+		frappe.throw(_("The announcement record must be created before uploading an image."))
 	doc = frappe.get_doc(ANNOUNCEMENT_DOCTYPE, announcement)
 	if doc.status != "Draft":
 		frappe.throw(_("Images can only be changed while an announcement is a Draft."))

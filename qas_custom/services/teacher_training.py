@@ -82,17 +82,27 @@ def save_school_admin_training_article_data(article=None, payload=None):
     return _article_payload(doc)
 
 
-def publish_school_admin_training_article_data(article=None):
+def publish_school_admin_training_article_data(article=None, payload=None):
+    """Publish the current editor state without requiring a manual Draft save."""
     _require_school_admin()
-    doc = _get_article(article)
-    _validate_article(doc, require_content=True)
-    doc.status = "Published"
-    if not doc.published_at:
-        doc.published_at = now_datetime()
-        doc.published_by = frappe.session.user
-    doc.save(ignore_permissions=True)
-    frappe.db.commit()
-    return _article_payload(doc)
+    data = _parse_payload(payload) if payload is not None else None
+    savepoint = "school_admin_publish_training_article"
+    frappe.db.savepoint(savepoint)
+    try:
+        doc = _get_article(article) if article else frappe.new_doc(ARTICLE_DOCTYPE)
+        if data is not None:
+            _apply_article(doc, data)
+        _validate_article(doc, require_content=True)
+        doc.status = "Published"
+        if not doc.published_at:
+            doc.published_at = now_datetime()
+            doc.published_by = frappe.session.user
+        doc.save(ignore_permissions=True)
+        frappe.db.commit()
+        return _article_payload(doc)
+    except Exception:
+        frappe.db.rollback(save_point=savepoint)
+        raise
 
 
 def unpublish_school_admin_training_article_data(article=None):
