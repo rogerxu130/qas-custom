@@ -1,0 +1,31 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "TRN-.YYYY.-.#####",
+ "doctype": "DocType",
+ "document_type": "Document",
+ "engine": "InnoDB",
+ "field_order": ["title", "summary", "status", "sort_order", "content_section", "content", "links_section", "links", "published_by", "published_at"],
+ "fields": [
+  {"fieldname": "title", "fieldtype": "Data", "in_list_view": 1, "label": "Title", "reqd": 1},
+  {"fieldname": "summary", "fieldtype": "Small Text", "label": "Summary"},
+  {"default": "Draft", "fieldname": "status", "fieldtype": "Select", "in_list_view": 1, "label": "Status", "options": "Draft\nPublished", "reqd": 1},
+  {"default": "0", "fieldname": "sort_order", "fieldtype": "Int", "in_list_view": 1, "label": "Sort Order"},
+  {"fieldname": "content_section", "fieldtype": "Section Break", "label": "Content"},
+  {"fieldname": "content", "fieldtype": "Text Editor", "label": "Content", "reqd": 1},
+  {"fieldname": "links_section", "fieldtype": "Section Break", "label": "External Links"},
+  {"fieldname": "links", "fieldtype": "Table", "label": "Links", "options": "Teacher Training Link"},
+  {"fieldname": "published_by", "fieldtype": "Link", "label": "Published By", "options": "User", "read_only": 1},
+  {"fieldname": "published_at", "fieldtype": "Datetime", "label": "Published At", "read_only": 1}
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "module": "QAS Custom",
+ "permissions": [
+  {"create": 1, "delete": 1, "email": 1, "export": 1, "print": 1, "read": 1, "report": 1, "role": "System Manager", "share": 1, "write": 1},
+  {"create": 1, "delete": 1, "email": 1, "export": 1, "print": 1, "read": 1, "report": 1, "role": "School Admin", "share": 1, "write": 1}
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1
+}

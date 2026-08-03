@@ -85,6 +85,7 @@ jinja = {
 
 # before_install = "qas_custom.install.before_install"
 # after_install = "qas_custom.install.after_install"
+after_migrate = "qas_custom.services.teacher_training.ensure_teacher_training_starter_article"
 
 # Uninstallation
 # ------------

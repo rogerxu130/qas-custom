@@ -17,6 +17,10 @@ from qas_custom.services.teacher_portal import (
     publish_teacher_video_post_data,
     update_teacher_attendance_data,
 )
+from qas_custom.services.teacher_training import (
+    get_teacher_training_article_data,
+    get_teacher_training_articles_data,
+)
 
 
 @frappe.whitelist(allow_guest=True)
@@ -52,6 +56,16 @@ def teacher_portal_get_sessions(from_date=None, to_date=None):
 @frappe.whitelist()
 def teacher_portal_get_session_detail(course_session=None):
     return get_teacher_session_detail_data(course_session=course_session)
+
+
+@frappe.whitelist()
+def teacher_portal_get_training_articles(limit=120):
+    return get_teacher_training_articles_data(limit=limit)
+
+
+@frappe.whitelist()
+def teacher_portal_get_training_article(article=None):
+    return get_teacher_training_article_data(article=article)
 
 
 @frappe.whitelist()

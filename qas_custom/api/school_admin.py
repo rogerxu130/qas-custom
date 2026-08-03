@@ -16,6 +16,15 @@ from qas_custom.services.announcements import (
 	upload_school_admin_announcement_inline_image_data,
 	upload_school_admin_announcement_image_data,
 )
+from qas_custom.services.teacher_training import (
+	delete_school_admin_training_article_data,
+	get_school_admin_training_article_data,
+	get_school_admin_training_articles_data,
+	publish_school_admin_training_article_data,
+	save_school_admin_training_article_data,
+	unpublish_school_admin_training_article_data,
+	upload_school_admin_training_inline_image_data,
+)
 from qas_custom.services.support_view import create_support_view_token, get_support_view_targets
 from qas_custom.services.school_admin_reporting import (
 	get_school_admin_daily_teacher_report_data,
@@ -251,6 +260,41 @@ def school_admin_publish_announcement(announcement=None):
 @frappe.whitelist()
 def school_admin_archive_announcement(announcement=None):
 	return archive_school_admin_announcement_data(announcement=announcement)
+
+
+@frappe.whitelist()
+def school_admin_get_training_articles(status=None, limit=120):
+	return get_school_admin_training_articles_data(status=status, limit=limit)
+
+
+@frappe.whitelist()
+def school_admin_get_training_article(article=None):
+	return get_school_admin_training_article_data(article=article)
+
+
+@frappe.whitelist()
+def school_admin_save_training_article(article=None, payload=None):
+	return save_school_admin_training_article_data(article=article, payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_publish_training_article(article=None):
+	return publish_school_admin_training_article_data(article=article)
+
+
+@frappe.whitelist()
+def school_admin_unpublish_training_article(article=None):
+	return unpublish_school_admin_training_article_data(article=article)
+
+
+@frappe.whitelist()
+def school_admin_delete_training_article(article=None):
+	return delete_school_admin_training_article_data(article=article)
+
+
+@frappe.whitelist()
+def school_admin_upload_training_inline_image(article=None):
+	return upload_school_admin_training_inline_image_data(article=article)
 
 
 @frappe.whitelist()

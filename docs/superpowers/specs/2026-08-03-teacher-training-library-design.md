@@ -23,14 +23,13 @@ Create a new `Teacher Training Article` DocType with these fields:
 | --- | --- |
 | `title` | Required article title. |
 | `summary` | Short list-preview text. |
-| `content` | Rich text body. |
-| `images` | Child table of uploaded image files with optional captions and display order. |
+| `content` | Rich text body, including images placed within the article. |
 | `links` | Child table with link label, URL, and display order. |
 | `status` | `Draft` or `Published`. |
 | `sort_order` | Ascending order for teachers. |
 | `published_at` | Set when first published, used in the teacher-facing list. |
 
-Child DocTypes keep images and links individually editable and sortable. Files use normal Frappe file storage and are shown through their public URL only when the article is published.
+The link Child DocType keeps external resources individually editable and sortable. Images are uploaded from the rich-text editor, use normal Frappe file storage, and remain part of the article content.
 
 ## APIs and authorization
 

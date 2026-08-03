@@ -1,0 +1,16 @@
+{
+ "actions": [],
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": ["label", "url", "sort_order"],
+ "fields": [
+  {"fieldname": "label", "fieldtype": "Data", "in_list_view": 1, "label": "Link Label", "reqd": 1},
+  {"fieldname": "url", "fieldtype": "Data", "in_list_view": 1, "label": "URL", "reqd": 1},
+  {"default": "0", "fieldname": "sort_order", "fieldtype": "Int", "label": "Sort Order"}
+ ],
+ "istable": 1,
+ "module": "QAS Custom",
+ "sort_field": "idx",
+ "sort_order": "ASC"
+}
