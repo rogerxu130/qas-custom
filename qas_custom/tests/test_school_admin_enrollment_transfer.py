@@ -145,6 +145,38 @@ class TestSchoolAdminEnrollmentTransfer(TestCase):
 		self.assertEqual(create_entry.call_count, 1)
 		self.assertEqual(create_entry.call_args.kwargs["course_session"], "CS-NEW-2")
 
+	@patch("qas_custom.services.school_admin.create_attendance_entry")
+	@patch("qas_custom.services.school_admin.frappe.db.get_value", return_value=None)
+	def test_destination_marks_only_first_new_class_after_transfer(self, _get_value, create_entry):
+		result = _ensure_transfer_destination_attendance(
+			self._enrollment(),
+			["CS-NEW-1", "CS-NEW-2"],
+			first_class_session_id="CS-NEW-1",
+		)
+
+		self.assertEqual(result, {"created": 2, "reactivated": 0, "retained": 0, "total": 2})
+		self.assertTrue(create_entry.call_args_list[0].kwargs["first_class_after_transfer"])
+		self.assertFalse(create_entry.call_args_list[1].kwargs["first_class_after_transfer"])
+
+	@patch("qas_custom.services.school_admin._has_field", return_value=True)
+	@patch("qas_custom.services.school_admin.frappe.db.set_value")
+	@patch("qas_custom.services.school_admin.frappe.db.get_value")
+	def test_destination_marks_first_reactivated_class_after_transfer(self, get_value, set_value, _has_field):
+		get_value.return_value = {"name": "ATT-CANCELLED", "status": "Cancelled"}
+
+		_ensure_transfer_destination_attendance(
+			self._enrollment(),
+			["CS-NEW-1"],
+			first_class_session_id="CS-NEW-1",
+		)
+
+		self.assertEqual(set_value.call_count, 2)
+		self.assertEqual(set_value.call_args_list[0].args[2:], ("status", "To be started"))
+		self.assertEqual(
+			set_value.call_args_list[1].args[2:],
+			("qas_first_class_after_transfer", 1),
+		)
+
 	@patch("qas_custom.services.school_admin.reactivate_cancelled_attendance_entry")
 	def test_create_attendance_reactivates_cancelled_row_for_same_enrollment(self, reactivate):
 		fake_frappe = SimpleNamespace(

@@ -13,6 +13,7 @@ from qas_custom.services.school_admin import (
 	_normalize_student_teaching_notes,
 )
 from qas_custom.services.teacher_portal import (
+	_count_special_students,
 	_count_students_with_teaching_notes,
 	get_teacher_session_detail_data,
 )
@@ -34,6 +35,18 @@ class TestStudentTeachingNotes(TestCase):
 		)
 
 		self.assertEqual(count, 1)
+
+	def test_teacher_session_summary_counts_first_class_after_transfer(self):
+		counts = _count_special_students(
+			[
+				{"enrollment_type": "Full-Term", "qas_first_class_after_transfer": 1},
+				{"enrollment_type": "Full-Term", "qas_first_class_after_transfer": 0},
+				{"enrollment_type": "Trial", "qas_first_class_after_transfer": 0},
+			]
+		)
+
+		self.assertEqual(counts["first_class_after_transfer"], 1)
+		self.assertEqual(counts["trial"], 1)
 
 	def test_school_admin_payload_trims_teaching_notes(self):
 		payload = {"student_name": "Student", "teaching_notes": "  No Christmas activities.  "}
@@ -200,3 +213,4 @@ class TestStudentTeachingNotes(TestCase):
 		payload = get_teacher_session_detail_data("SESSION-1")
 
 		self.assertEqual(payload["students"][0]["teaching_notes"], "No Christmas activities.")
+		self.assertFalse(payload["students"][0]["first_class_after_transfer"])

@@ -3092,13 +3092,20 @@ def transfer_school_admin_enrollment_data(enrollment=None, payload=None):
 		doc.status = "Active"
 	_validate_unique_open_enrollment(doc)
 	doc.save(ignore_permissions=True)
-	destination = _ensure_transfer_destination_attendance(doc, preview.get("target_session_ids") or [])
+	destination_session_ids = preview.get("target_session_ids") or []
+	first_destination_session_id = destination_session_ids[0] if destination_session_ids else None
+	destination = _ensure_transfer_destination_attendance(
+		doc,
+		destination_session_ids,
+		first_class_session_id=first_destination_session_id,
+	)
 	result = {
 		**preview,
 		"cancelled_count": cancelled_count,
 		"destination_created_count": destination.get("created") or 0,
 		"destination_reactivated_count": destination.get("reactivated") or 0,
 		"destination_retained_count": destination.get("retained") or 0,
+		"first_class_after_transfer_session": first_destination_session_id,
 	}
 	_add_comment(
 		"Enrollment",
@@ -7231,7 +7238,7 @@ def _cancel_enrollment_attendance_for_sessions(enrollment, session_ids, statuses
 	return len(rows)
 
 
-def _ensure_transfer_destination_attendance(doc, session_ids):
+def _ensure_transfer_destination_attendance(doc, session_ids, first_class_session_id=None):
 	result = {"created": 0, "reactivated": 0, "retained": 0, "total": 0}
 	for session_id in session_ids or []:
 		existing = frappe.db.get_value(
@@ -7256,6 +7263,8 @@ def _ensure_transfer_destination_attendance(doc, session_ids):
 				result["reactivated"] += 1
 			else:
 				result["retained"] += 1
+			if session_id == first_class_session_id:
+				_set_first_class_after_transfer_marker(existing.get("name"))
 			result["total"] += 1
 			continue
 		create_attendance_entry(
@@ -7266,10 +7275,23 @@ def _ensure_transfer_destination_attendance(doc, session_ids):
 			source_document=doc.name,
 			status="To be started",
 			comments=f"Added from Enrollment {doc.name} after class transfer",
+			first_class_after_transfer=session_id == first_class_session_id,
 		)
 		result["created"] += 1
 		result["total"] += 1
 	return result
+
+
+def _set_first_class_after_transfer_marker(attendance_entry):
+	if not attendance_entry or not _has_field(ATTENDANCE_DOCTYPE, "qas_first_class_after_transfer"):
+		return
+	frappe.db.set_value(
+		ATTENDANCE_DOCTYPE,
+		attendance_entry,
+		"qas_first_class_after_transfer",
+		1,
+		update_modified=True,
+	)
 
 
 def _cancel_future_enrollment_attendance(enrollment, effective_date=None):

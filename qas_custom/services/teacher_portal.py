@@ -154,6 +154,7 @@ def get_teacher_session_detail_data(course_session=None):
                 "makeup_voucher_label": get_makeup_voucher_label(row.get("makeup_voucher")),
                 "source_doctype": row.get("source_doctype"),
                 "source_document": row.get("source_document"),
+                "first_class_after_transfer": bool(cint(row.get("qas_first_class_after_transfer"))),
             }
         )
 
@@ -580,21 +581,25 @@ def _get_attendance_rows(session_ids: list[str]):
     if not session_ids:
         return []
 
-    fields = [
-        "name",
-        "course_session",
-        "student",
-        "enrollment_type",
-        "status",
-        "comments",
-        "makeup_voucher",
-        "source_doctype",
-        "source_document",
-        "marked_by",
-        "marked_at",
-        "previous_status",
-        "creation",
-    ]
+    fields = _safe_fields(
+        ATTENDANCE_DOCTYPE,
+        [
+            "name",
+            "course_session",
+            "student",
+            "enrollment_type",
+            "status",
+            "comments",
+            "makeup_voucher",
+            "source_doctype",
+            "source_document",
+            "qas_first_class_after_transfer",
+            "marked_by",
+            "marked_at",
+            "previous_status",
+            "creation",
+        ],
+    )
     return get_attendance_entries(session_ids, fields=fields)
 
 
@@ -833,6 +838,9 @@ def _count_special_students(attendance_rows: list[dict]):
         "trial": counter.get("Trial", 0),
         "makeup": counter.get("Makeup", 0),
         "pay_as_you_go": counter.get("Pay-as-you-go", 0),
+        "first_class_after_transfer": sum(
+            bool(cint(row.get("qas_first_class_after_transfer"))) for row in attendance_rows
+        ),
     }
 
 

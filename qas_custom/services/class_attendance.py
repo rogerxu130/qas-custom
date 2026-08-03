@@ -23,6 +23,7 @@ def create_attendance_entry(
 	status: str = DEFAULT_ATTENDANCE_STATUS,
 	comments: str | None = None,
 	makeup_voucher: str | None = None,
+	first_class_after_transfer: bool = False,
 	prevent_student_duplicate: bool = False,
 	reactivate_cancelled_duplicate: bool = False,
 ):
@@ -80,6 +81,8 @@ def create_attendance_entry(
 	doc.comments = comments
 	if doc.meta.has_field("makeup_voucher"):
 		doc.makeup_voucher = makeup_voucher
+	if first_class_after_transfer and doc.meta.has_field("qas_first_class_after_transfer"):
+		doc.qas_first_class_after_transfer = 1
 	if source_doctype:
 		doc.source_doctype = source_doctype
 	if source_doctype and source_document:
