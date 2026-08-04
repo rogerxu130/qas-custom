@@ -139,11 +139,12 @@ def parent_portal_leave_request(student=None, course_session=None):
 
 
 @frappe.whitelist()
-def parent_portal_get_leave_makeup_options(student=None, course_session=None, redeem_student=None):
+def parent_portal_get_leave_makeup_options(student=None, course_session=None, redeem_student=None, campus=None):
     return get_parent_leave_makeup_options_data(
         student=student,
         course_session=course_session,
         redeem_student=redeem_student,
+        campus=campus,
     )
 
 

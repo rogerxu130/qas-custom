@@ -4773,6 +4773,9 @@ def _get_family_voucher_rows(students=None, status=None, limit=80):
         item["used_day_of_week"] = used_session.get("day_of_week")
         item["used_start_time"] = used_session.get("start_time")
         item["used_course"] = used_session.get("course")
+        item["used_campus"] = used_session.get("campus")
+        item["used_classroom"] = used_session.get("classroom")
+        item["used_teacher"] = used_session.get("teacher")
         attendance = attendance_map.get(item.get("name")) or {}
         item["makeup_attendance_entry"] = attendance.get("name")
         item["makeup_attendance_status"] = attendance.get("status")

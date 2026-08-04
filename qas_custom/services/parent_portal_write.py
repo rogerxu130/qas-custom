@@ -53,11 +53,12 @@ def submit_parent_leave_request_data(student=None, course_session=None):
     )
 
 
-def get_parent_leave_makeup_options_data(student=None, course_session=None, redeem_student=None):
+def get_parent_leave_makeup_options_data(student=None, course_session=None, redeem_student=None, campus=None):
     payload = _get_request_payload()
     student = student or payload.get("student")
     course_session = course_session or payload.get("course_session")
     redeem_student = redeem_student or payload.get("redeem_student") or payload.get("use_for_student")
+    campus = campus or payload.get("campus")
 
     parent = _require_parent()
     students = _get_parent_students(parent.name)
@@ -67,6 +68,7 @@ def get_parent_leave_makeup_options_data(student=None, course_session=None, rede
         student=student,
         course_session=course_session,
         redeem_student=redeem_student,
+        campus=campus,
     )
 
 

@@ -77,7 +77,10 @@ class TestParentLeaveMakeupChoice(TestCase):
 			"qas_custom.modules.makeup.commands._validate_no_active_leave"
 		) as validate_leave, patch(
 			"qas_custom.modules.makeup.commands._get_redeemable_makeup_sessions",
-			return_value=[{"session_id": "CS-MAKEUP"}],
+			return_value=[
+				{"session_id": "CS-MAKEUP-LOCAL", "campus": "Indooroopilly"},
+				{"session_id": "CS-MAKEUP-OTHER", "campus": "Upper Mount Gravatt"},
+			],
 		) as get_sessions, patch(
 			"qas_custom.modules.makeup.commands.frappe.new_doc"
 		) as new_doc:
@@ -90,10 +93,46 @@ class TestParentLeaveMakeupChoice(TestCase):
 
 		self.assertEqual(result["source_session"]["session_id"], "CS-LEAVE")
 		self.assertEqual(result["selected_redeem_student"], "STU-LEAVE")
-		self.assertEqual(result["available_sessions"], [{"session_id": "CS-MAKEUP"}])
+		self.assertEqual(result["source_campus"], "Indooroopilly")
+		self.assertEqual(result["campuses"], ["Indooroopilly", "Upper Mount Gravatt"])
+		self.assertEqual(result["selected_campus"], "Indooroopilly")
+		self.assertEqual(result["available_sessions"], [{"session_id": "CS-MAKEUP-LOCAL", "campus": "Indooroopilly"}])
 		self.assertEqual(get_sessions.call_args.kwargs["excluded_session_ids"], {"CS-LEAVE"})
 		validate_leave.assert_called_once_with(student="STU-LEAVE", course_session="CS-LEAVE")
 		new_doc.assert_not_called()
+
+	def test_preview_allows_parent_to_switch_to_another_campus(self):
+		session = SimpleNamespace(name="CS-LEAVE", session_date="2026-08-01")
+		timeslot = SimpleNamespace(
+			course="Anime",
+			day_of_week="Saturday",
+			start_time="10:00:00",
+			end_time="11:30:00",
+			campus="Indooroopilly",
+			classroom="Room 1",
+		)
+		with patch(
+			"qas_custom.modules.makeup.commands._get_leave_session",
+			return_value=(session, SimpleNamespace(name="ATT-LEAVE"), timeslot),
+		), patch(
+			"qas_custom.modules.makeup.commands._validate_no_active_leave"
+		), patch(
+			"qas_custom.modules.makeup.commands._get_redeemable_makeup_sessions",
+			return_value=[
+				{"session_id": "CS-MAKEUP-LOCAL", "campus": "Indooroopilly"},
+				{"session_id": "CS-MAKEUP-OTHER", "campus": "Upper Mount Gravatt"},
+			],
+		):
+			result = get_parent_leave_makeup_options_core(
+				parent=SimpleNamespace(name="PAR-001"),
+				students=[{"name": "STU-LEAVE", "student_name": "Ava"}],
+				student="STU-LEAVE",
+				course_session="CS-LEAVE",
+				campus="Upper Mount Gravatt",
+			)
+
+		self.assertEqual(result["selected_campus"], "Upper Mount Gravatt")
+		self.assertEqual(result["available_sessions"], [{"session_id": "CS-MAKEUP-OTHER", "campus": "Upper Mount Gravatt"}])
 
 	def test_book_now_creates_leave_only_after_target_is_previewed(self):
 		options = {

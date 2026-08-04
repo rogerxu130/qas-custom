@@ -133,6 +133,7 @@ def get_parent_leave_makeup_options_core(
 	student: str,
 	course_session: str,
 	redeem_student: str | None = None,
+	campus: str | None = None,
 ):
 	"""Preview parent-eligible makeup sessions without creating leave or voucher data."""
 	selected_student = _validate_student_for_parent(student, students)
@@ -148,6 +149,23 @@ def get_parent_leave_makeup_options_core(
 		"original_session": session_doc.name,
 	})
 	selected_redeem_student = _get_redeem_student(redeem_student, preview_voucher, students)
+	all_available_sessions = _get_redeemable_makeup_sessions(
+		preview_voucher,
+		selected_redeem_student,
+		excluded_session_ids={session_doc.name},
+	)
+	source_campus = str(getattr(timeslot, "campus", None) or "").strip()
+	available_campuses = {str(row.get("campus") or "").strip() for row in all_available_sessions if row.get("campus")}
+	campuses = ([source_campus] if source_campus else []) + sorted(
+		campus_name for campus_name in available_campuses if campus_name != source_campus
+	)
+	selected_campus = str(campus or "").strip()
+	if selected_campus not in campuses:
+		selected_campus = source_campus or (campuses[0] if campuses else "")
+	available_sessions = [
+		row for row in all_available_sessions
+		if not selected_campus or str(row.get("campus") or "").strip() == selected_campus
+	]
 	return {
 		"source_session": _build_leave_session_payload(
 			session_doc,
@@ -157,11 +175,10 @@ def get_parent_leave_makeup_options_core(
 		),
 		"students": [_build_redeem_student_payload(row) for row in students],
 		"selected_redeem_student": selected_redeem_student,
-		"available_sessions": _get_redeemable_makeup_sessions(
-			preview_voucher,
-			selected_redeem_student,
-			excluded_session_ids={session_doc.name},
-		),
+		"source_campus": source_campus,
+		"campuses": campuses,
+		"selected_campus": selected_campus,
+		"available_sessions": available_sessions,
 	}
 
 
