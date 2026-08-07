@@ -17,6 +17,8 @@ Make the Special Needs information submitted with a trial-class request availabl
 ## Ingestion and synchronisation
 
 1. Normalise the trial-form Special Needs value from supported webhook/form aliases.
+   The existing Trial Inquiry webhook accepts the canonical `special_needs` key, as
+   well as `special_need` and `teaching_notes` for Make mappings.
 2. Enforce a 500-character maximum on the server before any record is changed.
 3. Store the normalised value on the newly created Inquiry.
 4. After resolving the linked Student, set `Student.teaching_notes` to exactly that value.

@@ -264,6 +264,7 @@ def create_inquiry_core(payload: dict, source="Manual", actor=None, commit=True)
 	inquiry_doc.submitted_student_dob = payload.get("submitted_student_dob") or payload.get("date_of_birth")
 	inquiry_doc.submitted_class_session = payload.get("submitted_class_session")
 	inquiry_doc.submitted_trial_date = payload.get("submitted_trial_date")
+	_set_special_needs_on_inquiry(inquiry_doc, payload)
 	inquiry_doc.referral_source = payload.get("referral_source")
 	inquiry_doc.referral_detail = payload.get("referral_detail")
 	if session_context:
@@ -287,6 +288,7 @@ def create_inquiry_core(payload: dict, source="Manual", actor=None, commit=True)
 	inquiry_doc.reminder_status = "Not Required"
 	inquiry_doc.flags.ignore_permissions = True
 	inquiry_doc.insert()
+	_sync_student_special_needs(student, payload)
 	enqueue_trial_invoice_for_inquiry(inquiry_doc)
 
 	if review_reason:
@@ -574,6 +576,7 @@ def _normalize_inquiry_payload(payload: dict):
 	for source, target in aliases.items():
 		if not normalized.get(target) and normalized.get(source):
 			normalized[target] = normalized.get(source)
+	_normalize_special_needs(normalized)
 
 	normalized["parent_name"] = _normalize_name_value(normalized.get("parent_name"))
 	normalized["student_name"] = _normalize_name_value(normalized.get("student_name"))
@@ -627,6 +630,38 @@ def _normalize_inquiry_payload(payload: dict):
 		if form_id and submission_id:
 			normalized["external_submission_id"] = f"fluent_form:{form_id}:{submission_id}"
 	return normalized
+
+
+def _normalize_special_needs(normalized: dict):
+	fieldnames = ("special_needs", "special_need", "teaching_notes")
+	source_field = next((fieldname for fieldname in fieldnames if fieldname in normalized), None)
+	normalized["_special_needs_provided"] = source_field is not None
+	if source_field and source_field != "special_needs":
+		normalized["special_needs"] = normalized.get(source_field)
+
+	if source_field is None:
+		return
+	normalized["special_needs"] = _normalize_scalar(normalized.get("special_needs")) or ""
+	if len(normalized["special_needs"]) > 500:
+		frappe.throw(_("Special Needs must be 500 characters or fewer."))
+
+
+def _set_special_needs_on_inquiry(inquiry_doc, payload: dict):
+	if not payload.get("_special_needs_provided"):
+		return
+	if not frappe.db.has_column("Inquiry", "special_needs"):
+		frappe.throw(_("Inquiry Special Needs is not available on this site. Please run migrate."))
+	inquiry_doc.special_needs = payload.get("special_needs") or ""
+
+
+def _sync_student_special_needs(student: str | None, payload: dict):
+	if not student or not payload.get("_special_needs_provided"):
+		return
+	if not frappe.db.has_column("Student", "teaching_notes"):
+		frappe.throw(_("Student Special Needs is not available on this site. Please run migrate."))
+	student_doc = frappe.get_doc("Student", student)
+	student_doc.teaching_notes = payload.get("special_needs") or ""
+	student_doc.save(ignore_permissions=True)
 
 
 def _normalize_webhook_payload(payload: dict):
@@ -1424,6 +1459,7 @@ def _build_inquiry_payload(doc, include_campus_address=False):
 		"submitted_student_dob": _as_string(doc.submitted_student_dob),
 		"submitted_class_session": doc.submitted_class_session,
 		"submitted_trial_date": _as_string(doc.submitted_trial_date),
+		"special_needs": doc.get("special_needs") or "",
 		"referral_source": doc.referral_source,
 		"referral_detail": doc.referral_detail,
 		"preferred_course": doc.preferred_course,

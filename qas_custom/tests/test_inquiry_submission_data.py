@@ -1,9 +1,21 @@
 from unittest import TestCase
 
-from qas_custom.services.inquiry import _submission_data_rows
+from qas_custom.services.inquiry import _normalize_inquiry_payload, _submission_data_rows
 
 
 class TestInquirySubmissionData(TestCase):
+	def test_normalizes_special_needs_for_webhook_and_clear_requests(self):
+		from_alias = _normalize_inquiry_payload({"special_need": "  NDIS support  "})
+		self.assertEqual(from_alias["special_needs"], "NDIS support")
+		self.assertTrue(from_alias["_special_needs_provided"])
+
+		clear_request = _normalize_inquiry_payload({"special_needs": ""})
+		self.assertEqual(clear_request["special_needs"], "")
+		self.assertTrue(clear_request["_special_needs_provided"])
+
+		unrelated_inquiry = _normalize_inquiry_payload({"student_name": "Ava"})
+		self.assertFalse(unrelated_inquiry["_special_needs_provided"])
+
 	def test_formats_form_values_and_hides_technical_data(self):
 		rows = _submission_data_rows(
 			{

@@ -29,6 +29,7 @@
   "submitted_student_dob",
   "submitted_class_session",
   "submitted_trial_date",
+  "special_needs",
   "referral_source",
   "referral_detail",
   "preferred_course",
@@ -187,6 +188,12 @@
    "fieldname": "submitted_trial_date",
    "fieldtype": "Date",
    "label": "Submitted Trial Date"
+  },
+  {
+   "fieldname": "special_needs",
+   "fieldtype": "Small Text",
+   "label": "Special Needs",
+   "read_only": 1
   },
   {
    "fieldname": "referral_source",

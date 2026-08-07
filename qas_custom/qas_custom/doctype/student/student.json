@@ -57,7 +57,7 @@
    "description": "Current classroom-specific considerations for authorised administrators and assigned teachers.",
    "fieldname": "teaching_notes",
    "fieldtype": "Small Text",
-   "label": "Teaching Notes"
+   "label": "Special Needs"
   }
  ],
  "index_web_pages_for_search": 1,

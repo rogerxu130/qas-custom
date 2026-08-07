@@ -5197,6 +5197,8 @@ def _apply_master_payload(doc, payload, candidate_fields):
 def _normalize_student_teaching_notes(payload):
 	if payload is not None and "teaching_notes" in payload:
 		payload["teaching_notes"] = str(payload.get("teaching_notes") or "").strip()
+		if len(payload["teaching_notes"]) > 500:
+			frappe.throw(_("Special Needs must be 500 characters or fewer."))
 
 
 def _validate_required(doc, required_fields):
