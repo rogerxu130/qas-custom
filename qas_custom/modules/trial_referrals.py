@@ -9,7 +9,6 @@ from qas_custom.modules.billing.invoice_settings import get_invoice_settings
 from qas_custom.modules.billing.store_credit import LEDGER_DOCTYPE, create_store_credit_entry
 
 
-REFERRAL_SOURCE_VALUES = {"referral", "referal", "referred"}
 REFERRAL_PENDING = "Pending Verification"
 REFERRAL_VERIFIED = "Verified"
 REFERRAL_NOT_VERIFIED = "Not Verified"
@@ -18,8 +17,20 @@ REFERRAL_REWARD_TYPE = "Referral Reward"
 
 
 def is_referral_claim(inquiry_doc) -> bool:
-	"""Return whether the submitted inquiry selected the referral source."""
-	return str(inquiry_doc.get("referral_source") or "").strip().casefold() in REFERRAL_SOURCE_VALUES
+	"""Return whether a referral needs review or has already been formally reviewed.
+
+	For a new trial, the referring family's entered name is the only reliable claim:
+	a checkbox or marketing-source answer on its own must not hold the invoice.
+	The status check preserves the audited referral state for verified/rejected and
+	historical records after the original free-text value is no longer available.
+	"""
+	if str(inquiry_doc.get("referral_detail") or "").strip():
+		return True
+	return str(inquiry_doc.get("referral_status") or "").strip() in {
+		REFERRAL_PENDING,
+		REFERRAL_VERIFIED,
+		REFERRAL_NOT_VERIFIED,
+	}
 
 
 def referral_status(inquiry_doc) -> str:

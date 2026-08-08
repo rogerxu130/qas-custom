@@ -273,7 +273,9 @@ def create_inquiry_core(payload: dict, source="Manual", actor=None, commit=True)
 	inquiry_doc.submitted_class_session = payload.get("submitted_class_session")
 	inquiry_doc.submitted_trial_date = payload.get("submitted_trial_date")
 	_set_special_needs_on_inquiry(inquiry_doc, payload)
-	inquiry_doc.referral_source = payload.get("referral_source")
+	# A referring-family name is the authoritative claim. Keep the source value
+	# consistent for reporting instead of relying on a checkbox or marketing field.
+	inquiry_doc.referral_source = "Referral" if is_referral else payload.get("referral_source")
 	inquiry_doc.referral_detail = payload.get("referral_detail")
 	if is_referral:
 		prepare_referral_review(inquiry_doc, resume_status=initial_status)

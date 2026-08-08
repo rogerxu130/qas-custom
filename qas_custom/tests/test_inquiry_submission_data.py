@@ -1,9 +1,17 @@
 from unittest import TestCase
 
+from qas_custom.modules.trial_referrals import is_referral_claim
 from qas_custom.services.inquiry import _normalize_inquiry_payload, _submission_data_rows
 
 
 class TestInquirySubmissionData(TestCase):
+	def test_referral_claim_requires_referring_family_name_for_new_trials(self):
+		self.assertTrue(is_referral_claim({"referral_source": "Google", "referral_detail": "Lindsey's mum"}))
+		self.assertFalse(is_referral_claim({"referral_source": "Referral", "referral_detail": ""}))
+
+	def test_referral_claim_preserves_formally_reviewed_historical_records(self):
+		self.assertTrue(is_referral_claim({"referral_detail": "", "referral_status": "Verified"}))
+
 	def test_normalizes_special_needs_for_webhook_and_clear_requests(self):
 		from_alias = _normalize_inquiry_payload({"special_need": "  NDIS support  "})
 		self.assertEqual(from_alias["special_needs"], "NDIS support")
