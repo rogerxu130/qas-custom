@@ -27,6 +27,8 @@ DEFAULT_INVOICE_SETTINGS = {
 	"bank_reference_note": "For bank transfers, please use the invoice number as the reference.",
 	"store_credit_liability_account": "",
 	"store_credit_bonus_enabled": 1,
+	"referral_trial_discount": 30,
+	"referral_conversion_reward": 30,
 	"store_credit_bonus_rules": [
 		{
 			"enabled": 1,
@@ -72,6 +74,8 @@ def get_invoice_settings():
 			settings[fieldname] = 1 if cint(value) else 0
 		elif fieldname == "store_credit_bonus_rules":
 			settings[fieldname] = _normalize_store_credit_bonus_rules(value)
+		elif fieldname in {"referral_trial_discount", "referral_conversion_reward"}:
+			settings[fieldname] = max(0, flt(value if value is not None else settings[fieldname]))
 		elif value:
 			settings[fieldname] = value
 	return settings
@@ -90,6 +94,8 @@ def update_invoice_settings(payload):
 				doc.set(fieldname, 1 if cint(payload.get(fieldname)) else 0)
 			elif fieldname == "store_credit_bonus_rules":
 				doc.set(fieldname, json.dumps(_normalize_store_credit_bonus_rules(payload.get(fieldname)), separators=(",", ":")))
+			elif fieldname in {"referral_trial_discount", "referral_conversion_reward"}:
+				doc.set(fieldname, max(0, flt(payload.get(fieldname))))
 			else:
 				doc.set(fieldname, (payload.get(fieldname) or "").strip())
 	doc.save(ignore_permissions=True)

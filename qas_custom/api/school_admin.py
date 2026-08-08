@@ -139,6 +139,9 @@ from qas_custom.services.school_admin import (
 	get_school_admin_weekly_timeslot_data,
 	get_school_admin_weekly_timeslots_data,
 	link_school_admin_inquiry_enrollment_data,
+	verify_school_admin_trial_referral_data,
+	release_school_admin_trial_referral_data,
+	recognise_school_admin_converted_referral_data,
 	mark_school_admin_invoice_paid_data,
 	start_school_admin_bulk_invoice_submit_job_data,
 	mark_school_admin_inquiry_completed_data,
@@ -686,6 +689,27 @@ def school_admin_convert_inquiry(inquiry=None, course_session=None):
 @frappe.whitelist()
 def school_admin_link_inquiry_enrollment(inquiry=None, enrollment=None):
 	return link_school_admin_inquiry_enrollment_data(inquiry=inquiry, enrollment=enrollment)
+
+
+@frappe.whitelist()
+def school_admin_verify_trial_referral(inquiry=None, referring_parent=None):
+	return verify_school_admin_trial_referral_data(
+		inquiry=inquiry,
+		referring_parent=referring_parent,
+	)
+
+
+@frappe.whitelist()
+def school_admin_release_trial_referral(inquiry=None):
+	return release_school_admin_trial_referral_data(inquiry=inquiry)
+
+
+@frappe.whitelist()
+def school_admin_recognise_converted_referral(inquiry=None, referring_parent=None):
+	return recognise_school_admin_converted_referral_data(
+		inquiry=inquiry,
+		referring_parent=referring_parent,
+	)
 
 
 @frappe.whitelist()

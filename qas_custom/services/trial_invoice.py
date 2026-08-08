@@ -7,6 +7,12 @@ from frappe.utils import cint, flt, format_time, formatdate
 from qas_custom.modules.billing.commands import get_invoice_customer, get_invoice_item, get_trial_class_fee
 from qas_custom.services.display_labels import get_course_session_snapshot_label, get_student_display_code, get_student_parent_name
 from qas_custom.services.maintenance import _issue, _make_issue_key, record_data_issue, resolve_data_issue
+from qas_custom.modules.trial_referrals import (
+	referral_invoice_message,
+	referral_requires_review,
+	trial_referral_discount_amount,
+	verified_trial_referral,
+)
 
 
 ELIGIBLE_INQUIRY_STATUSES = {"Booked", "Rescheduled"}
@@ -84,6 +90,12 @@ def _create_trial_invoice(inquiry: str):
 		enqueue_notification=True,
 		send_notifications=True,
 	)
+	if verified_trial_referral(doc):
+		from qas_custom.modules.notifications.trial_referral_notifications import (
+			queue_referral_trial_discount_notification,
+		)
+
+		queue_referral_trial_discount_notification(doc.name)
 	resolve_data_issue(_trial_invoice_issue_key(doc.name))
 	frappe.db.commit()
 	notification = result.get("notification") or {}
@@ -112,6 +124,12 @@ def get_trial_invoice_status(inquiry_doc):
 		return _status_payload(doc, "queued", _("Trial Invoice {0} is waiting to be submitted.").format(invoice_name), invoice=invoice_name)
 	if issue:
 		return _status_payload(doc, "failed", issue.get("description") or _("Trial Invoice automation requires review."))
+	if referral_requires_review(doc):
+		return _status_payload(
+			doc,
+			"pending_referral",
+			_("Referral identity must be verified by School Admin before a Trial Invoice is created."),
+		)
 	if _is_eligible(doc):
 		return _status_payload(doc, "queued", _("Trial Invoice creation is queued."))
 	return _status_payload(doc, "skipped", _("Trial Invoice is not required until a Trial Lesson is booked."))
@@ -285,6 +303,7 @@ def _trial_invoice_draft_payload(inquiry_doc, context, replacement=False):
 			if replacement
 			else _("Automatically generated Trial Invoice for Inquiry {0}.").format(inquiry_doc.name)
 		),
+		"qas_invoice_message": referral_invoice_message(inquiry_doc),
 		"items": [{
 			"item_code": context["item_code"],
 			"item_name": _("Trial Lesson - {0}").format(context["course"]),
@@ -299,6 +318,16 @@ def _trial_invoice_draft_payload(inquiry_doc, context, replacement=False):
 			"course_session": get_course_session_snapshot_label(inquiry_doc.course_session),
 			"session_count": 1,
 		}],
+		"adjustments": (
+			[
+				{
+					"description": _("Referral discount"),
+					"amount": -flt(trial_referral_discount_amount()),
+				}
+			]
+			if verified_trial_referral(inquiry_doc) and flt(trial_referral_discount_amount()) > 0
+			else []
+		),
 	}
 
 
@@ -542,6 +571,7 @@ def _is_eligible(inquiry_doc):
 		and inquiry_doc.get("inquiry_type") == "Trial Lesson"
 		and inquiry_doc.get("status") in ELIGIBLE_INQUIRY_STATUSES
 		and inquiry_doc.get("course_session")
+		and not referral_requires_review(inquiry_doc)
 	)
 
 

@@ -20,6 +20,12 @@ from qas_custom.modules.attendance.commands import (
 )
 from qas_custom.modules.notifications.commands import get_trial_class_reminder_summary, send_trial_class_reminder
 from qas_custom.services.trial_invoice import enqueue_trial_invoice_for_inquiry, get_trial_invoice_status
+from qas_custom.modules.trial_referrals import (
+	is_referral_claim,
+	prepare_referral_review,
+	referral_requires_review,
+	referral_summary,
+)
 from qas_custom.utils.environment import sendmail_or_skip
 
 
@@ -222,6 +228,8 @@ def create_inquiry_core(payload: dict, source="Manual", actor=None, commit=True)
 		_assert_no_duplicate_trial_inquiry(student, session_context["session"].get("name"))
 
 	current_date, current_time = _get_requested_trial_datetime(payload)
+	is_referral = inquiry_type == "Trial Lesson" and is_referral_claim(payload)
+	initial_status = _get_initial_inquiry_status(session_context or appointment_context, review_reason)
 	inquiry_doc = frappe.new_doc("Inquiry")
 	inquiry_doc.inquiry_type = inquiry_type
 	inquiry_doc.source = source or payload.get("source") or "Manual"
@@ -232,7 +240,7 @@ def create_inquiry_core(payload: dict, source="Manual", actor=None, commit=True)
 	_set_if_field(inquiry_doc, "external_submitted_at", _parse_datetime_value(payload.get("submitted_at")))
 	_set_if_field(inquiry_doc, "source_url", payload.get("source_url"))
 	_set_if_field(inquiry_doc, "raw_webhook_payload", _safe_json_dumps(payload.get("raw_webhook_payload")))
-	inquiry_doc.status = _get_initial_inquiry_status(session_context or appointment_context, review_reason)
+	inquiry_doc.status = NEEDS_REVIEW_STATUS if is_referral else initial_status
 	inquiry_doc.campus = (
 		session_context.get("campus")
 		if session_context
@@ -267,6 +275,8 @@ def create_inquiry_core(payload: dict, source="Manual", actor=None, commit=True)
 	_set_special_needs_on_inquiry(inquiry_doc, payload)
 	inquiry_doc.referral_source = payload.get("referral_source")
 	inquiry_doc.referral_detail = payload.get("referral_detail")
+	if is_referral:
+		prepare_referral_review(inquiry_doc, resume_status=initial_status)
 	if session_context:
 		_apply_session_to_inquiry(inquiry_doc, session_context)
 	elif appointment_context:
@@ -339,7 +349,11 @@ def assign_inquiry_course_session_core(inquiry: str | None, course_session: str 
 	if inquiry_doc.status in {"Cancelled", "Completed", "Converted", "Inactive"}:
 		frappe.throw(_("This inquiry cannot be assigned from its current status."))
 	inquiry_doc.course_session = course_session
-	inquiry_doc.status = status or "Booked"
+	if referral_requires_review(inquiry_doc):
+		prepare_referral_review(inquiry_doc, resume_status=status or "Booked")
+		inquiry_doc.status = NEEDS_REVIEW_STATUS
+	else:
+		inquiry_doc.status = status or "Booked"
 	inquiry_doc.save(ignore_permissions=True)
 	enqueue_trial_invoice_for_inquiry(inquiry_doc)
 	frappe.db.commit()
@@ -1260,6 +1274,9 @@ def sync_inquiry_course_session(inquiry_doc):
 
 	session_context = _get_session_context(inquiry_doc.course_session)
 	_apply_session_to_inquiry(inquiry_doc, session_context)
+	if referral_requires_review(inquiry_doc):
+		inquiry_doc.status = NEEDS_REVIEW_STATUS
+		return
 	inquiry_doc.review_reason = None
 	if not inquiry_doc.status or inquiry_doc.status in {"New", NEEDS_REVIEW_STATUS, "Follow-up"}:
 		inquiry_doc.status = "Booked"
@@ -1467,6 +1484,7 @@ def _build_inquiry_payload(doc, include_campus_address=False):
 		"special_needs": doc.get("special_needs") or "",
 		"referral_source": doc.referral_source,
 		"referral_detail": doc.referral_detail,
+		"referral": referral_summary(doc),
 		"preferred_course": doc.preferred_course,
 		"course_session": doc.course_session,
 		"current_appointment_date": _as_string(doc.current_appointment_date),

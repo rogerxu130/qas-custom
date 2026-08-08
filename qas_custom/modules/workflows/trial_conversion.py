@@ -114,6 +114,9 @@ def convert_inquiry_to_full_term_core(
 	link_invoice_to_enrollment(enrollment, invoice)
 	create_full_term_attendance_entries(remaining_sessions, inquiry_doc.student, enrollment.name)
 	inquiry_doc = mark_converted(inquiry_doc, enrollment, invoice)
+	from qas_custom.modules.trial_referrals import award_referral_conversion_reward
+
+	referral_reward = award_referral_conversion_reward(inquiry_doc, enrollment=enrollment.name, actor=actor)
 	add_conversion_internal_note(inquiry_doc, invoice, internal_note, actor=actor)
 	add_conversion_note(
 		inquiry_doc=inquiry_doc,
@@ -136,6 +139,7 @@ def convert_inquiry_to_full_term_core(
 			"invoice": invoice.name,
 			"remaining_sessions": len(remaining_sessions),
 			"invoice_amount": flt(invoice.grand_total),
+			"referral_reward": referral_reward,
 		},
 	}
 
@@ -214,6 +218,13 @@ def link_existing_enrollment_core(
 	if inquiry_doc.meta.has_field("converted_invoice"):
 		inquiry_doc.converted_invoice = enrollment_doc.get("invoice") or ""
 	inquiry_doc.save(ignore_permissions=True)
+	from qas_custom.modules.trial_referrals import award_referral_conversion_reward
+
+	referral_reward = award_referral_conversion_reward(
+		inquiry_doc,
+		enrollment=enrollment_doc.name,
+		actor=actor,
+	)
 	add_system_note(
 		inquiry_doc=inquiry_doc,
 		note=_(
@@ -227,7 +238,9 @@ def link_existing_enrollment_core(
 
 	from qas_custom.services.inquiry import build_inquiry_detail
 
-	return build_inquiry_detail(inquiry_doc.name)
+	result = build_inquiry_detail(inquiry_doc.name)
+	result["referral_reward"] = referral_reward
+	return result
 
 
 def normalize_conversion_internal_note(internal_note):

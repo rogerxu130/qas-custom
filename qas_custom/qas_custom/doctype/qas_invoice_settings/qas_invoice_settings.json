@@ -25,7 +25,10 @@
   "store_credit_section",
   "store_credit_liability_account",
   "store_credit_bonus_enabled",
-  "store_credit_bonus_rules"
+  "store_credit_bonus_rules",
+  "referral_section",
+  "referral_trial_discount",
+  "referral_conversion_reward"
  ],
  "fields": [
   {
@@ -139,6 +142,25 @@
    "fieldtype": "Code",
    "label": "Store Credit Bonus Rules",
    "options": "JSON"
+  },
+  {
+   "fieldname": "referral_section",
+   "fieldtype": "Section Break",
+   "label": "Trial Referral Program"
+  },
+  {
+   "default": "30",
+   "description": "Discount applied to a Trial Lesson Invoice after a School Admin verifies an existing family referral.",
+   "fieldname": "referral_trial_discount",
+   "fieldtype": "Currency",
+   "label": "Referral Trial Discount"
+  },
+  {
+   "default": "30",
+   "description": "Store Credit awarded to the referring family once a verified referred Trial Lesson converts.",
+   "fieldname": "referral_conversion_reward",
+   "fieldtype": "Currency",
+   "label": "Referral Conversion Reward"
   }
  ],
  "index_web_pages_for_search": 0,

@@ -32,6 +32,13 @@
   "special_needs",
   "referral_source",
   "referral_detail",
+  "referral_status",
+  "referring_parent",
+  "referring_customer",
+  "referral_resume_status",
+  "referral_verified_by",
+  "referral_verified_at",
+  "referral_reward_ledger",
   "preferred_course",
   "appointment_section",
   "course_session",
@@ -204,6 +211,54 @@
    "fieldname": "referral_detail",
    "fieldtype": "Small Text",
    "label": "Referral Detail"
+  },
+  {
+   "default": "Not Applicable",
+   "fieldname": "referral_status",
+   "fieldtype": "Select",
+   "label": "Referral Status",
+   "options": "Not Applicable\nPending Verification\nVerified\nNot Verified",
+   "read_only": 1
+  },
+  {
+   "fieldname": "referring_parent",
+   "fieldtype": "Link",
+   "label": "Referring Parent",
+   "options": "Parent",
+   "read_only": 1
+  },
+  {
+   "fieldname": "referring_customer",
+   "fieldtype": "Link",
+   "label": "Referring Customer",
+   "options": "Customer",
+   "read_only": 1
+  },
+  {
+   "fieldname": "referral_resume_status",
+   "fieldtype": "Data",
+   "label": "Referral Resume Status",
+   "read_only": 1
+  },
+  {
+   "fieldname": "referral_verified_by",
+   "fieldtype": "Link",
+   "label": "Referral Verified By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "referral_verified_at",
+   "fieldtype": "Datetime",
+   "label": "Referral Verified At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "referral_reward_ledger",
+   "fieldtype": "Link",
+   "label": "Referral Reward Store Credit Entry",
+   "options": "QAS Store Credit Ledger",
+   "read_only": 1
   },
   {
    "fieldname": "preferred_course",

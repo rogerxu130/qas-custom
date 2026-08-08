@@ -418,7 +418,10 @@ def get_school_admin_parents_data(query=None, status=None, invite_status=None, l
 	if status and _has_field("Parent", "status"):
 		filters["status"] = status
 	fields = _safe_fields("Parent", ["name", *PARENT_EDIT_FIELDS, "linked_user", "modified"])
-	or_filters = _text_search_filters("Parent", query, ["name", "parent_name", "mobile_number", "phone", "email", "email_id"])
+	# Referral verification needs an exact, auditable match.  Include the ERPNext
+	# Customer ID here as well as the usual family contact fields so School Admin
+	# can find the right family without guessing from a free-text referral note.
+	or_filters = _text_search_filters("Parent", query, ["name", "parent_name", "mobile_number", "phone", "email", "email_id", "customer"])
 	student_parent_ids = _matching_student_parent_ids(query)
 	if student_parent_ids:
 		or_filters = or_filters or []
@@ -1414,6 +1417,49 @@ def link_school_admin_inquiry_enrollment_data(inquiry=None, enrollment=None):
 	return link_existing_enrollment_core(inquiry, enrollment, actor=frappe.session.user)
 
 
+def verify_school_admin_trial_referral_data(inquiry=None, referring_parent=None):
+	"""Verify a submitted referral, then create and send the discounted Trial Invoice."""
+	_require_school_admin()
+	from qas_custom.modules.trial_referrals import verify_trial_referral
+	from qas_custom.services.trial_invoice import create_trial_invoice_job
+
+	doc = verify_trial_referral(inquiry, referring_parent, actor=frappe.session.user)
+	invoice_result = create_trial_invoice_job(doc.name)
+	frappe.db.commit()
+	return {
+		"detail": get_school_admin_inquiry_data(doc.name),
+		"trial_invoice": invoice_result,
+	}
+
+
+def release_school_admin_trial_referral_data(inquiry=None):
+	"""Record an unverified referral and continue with the standard Trial Invoice."""
+	_require_school_admin()
+	from qas_custom.modules.trial_referrals import reject_trial_referral
+	from qas_custom.services.trial_invoice import create_trial_invoice_job
+
+	doc = reject_trial_referral(inquiry, actor=frappe.session.user)
+	invoice_result = create_trial_invoice_job(doc.name)
+	frappe.db.commit()
+	return {
+		"detail": get_school_admin_inquiry_data(doc.name),
+		"trial_invoice": invoice_result,
+	}
+
+
+def recognise_school_admin_converted_referral_data(inquiry=None, referring_parent=None):
+	"""Grant a referral reward for an already converted Inquiry without touching historical invoices."""
+	_require_school_admin()
+	from qas_custom.modules.trial_referrals import recognise_converted_referral
+
+	reward = recognise_converted_referral(inquiry, referring_parent, actor=frappe.session.user)
+	frappe.db.commit()
+	return {
+		"detail": get_school_admin_inquiry_data(inquiry),
+		"referral_reward": reward,
+	}
+
+
 def get_school_admin_invoices_data(status=None, customer=None, parent=None, student=None, source=None, limit=80):
 	_require_school_admin()
 	return {
@@ -1510,6 +1556,7 @@ def _create_school_admin_manual_invoice_doc(payload):
 	_apply_invoice_payment_payload(invoice, payload)
 	apply_invoice_payment_snapshot(invoice)
 	_apply_invoice_items(invoice, items)
+	_apply_invoice_adjustments(invoice, payload.get("adjustments") or [])
 	_sync_invoice_student_summary(invoice)
 	_run_school_admin_invoice_mutation(lambda: invoice.insert(ignore_permissions=True))
 	return invoice
