@@ -18,6 +18,7 @@ class TestSchoolAdminTeacherTrialConversionReport(TestCase):
 				{"name": "ATT-6", "course_session": "CS-5", "source_document": "INQ-UNMARKED-FUTURE", "status": "To be started"},
 				{"name": "ATT-7", "course_session": "CS-1", "source_document": "INQ-NO-SHOW", "status": "To be started"},
 				{"name": "ATT-8", "course_session": "CS-2", "source_document": "INQ-CONVERTED", "status": "Present"},
+				{"name": "ATT-9", "course_session": "CS-1", "source_document": "INQ-FURTHER-TRIAL", "status": "Present"},
 			],
 			session_map={
 				"CS-1": {"weekly_timeslot": "WT-1", "teacher_override": "", "session_date": "2026-07-20"},
@@ -39,6 +40,7 @@ class TestSchoolAdminTeacherTrialConversionReport(TestCase):
 				"INQ-UNMARKED-PAST": {"status": "Completed"},
 				"INQ-UNMARKED-FUTURE": {"status": "Completed"},
 				"INQ-NO-SHOW": {"status": "No-show"},
+				"INQ-FURTHER-TRIAL": {"status": "Further Trial Booked"},
 			},
 			teacher_names={"TEA-WEEKLY": "Weekly Teacher", "TEA-OVERRIDE": "Override Teacher"},
 		)
@@ -49,10 +51,11 @@ class TestSchoolAdminTeacherTrialConversionReport(TestCase):
 				{
 					"teacher": "TEA-WEEKLY",
 					"teacher_name": "Weekly Teacher",
-					"trial_attended_count": 3,
+					"trial_attended_count": 4,
 					"converted_count": 1,
 					"inactive_count": 0,
 					"following_up_count": 2,
+					"further_trial_booked_count": 1,
 				},
 				{
 					"teacher": "",
@@ -61,6 +64,7 @@ class TestSchoolAdminTeacherTrialConversionReport(TestCase):
 					"converted_count": 0,
 					"inactive_count": 1,
 					"following_up_count": 0,
+					"further_trial_booked_count": 0,
 				},
 				{
 					"teacher": "TEA-OVERRIDE",
@@ -69,6 +73,7 @@ class TestSchoolAdminTeacherTrialConversionReport(TestCase):
 					"converted_count": 0,
 					"inactive_count": 0,
 					"following_up_count": 1,
+					"further_trial_booked_count": 0,
 				},
 			],
 		)

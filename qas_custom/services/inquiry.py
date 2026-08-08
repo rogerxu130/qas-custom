@@ -349,7 +349,7 @@ def assign_inquiry_course_session_core(inquiry: str | None, course_session: str 
 def mark_inquiry_status_core(inquiry: str | None, status: str, actor=None):
 	if not inquiry:
 		frappe.throw(_("Inquiry is required."))
-	if status not in {"Cancelled", "Completed", "No-show", "Follow-up"}:
+	if status not in {"Cancelled", "Completed", "No-show", "Follow-up", "Further Trial Booked"}:
 		frappe.throw(_("Unsupported inquiry status."))
 
 	inquiry_doc = frappe.get_doc("Inquiry", inquiry)
@@ -359,6 +359,11 @@ def mark_inquiry_status_core(inquiry: str | None, status: str, actor=None):
 		frappe.throw(_("A completed inquiry cannot be cancelled."))
 	if status == "Follow-up" and inquiry_doc.status != "Completed":
 		frappe.throw(_("Follow-up can only be started after the trial lesson is completed."))
+	if status == "Further Trial Booked":
+		if inquiry_doc.inquiry_type != "Trial Lesson":
+			frappe.throw(_("Only Trial Lesson inquiries can be marked as Further Trial Booked."))
+		if inquiry_doc.status not in {"Completed", "Follow-up"}:
+			frappe.throw(_("Further Trial Booked can only be set after the trial lesson is completed or under follow-up."))
 	if status in {"Completed", "No-show"} and inquiry_doc.status == "Cancelled":
 		frappe.throw(_("A cancelled inquiry cannot be marked as attended or no-show."))
 	if status == "Cancelled":

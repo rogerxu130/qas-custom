@@ -25,6 +25,7 @@ PAGE_LENGTH_MAX = 200
 TRIAL_ATTENDED_STATUSES = {"Present", "Late"}
 TRIAL_COUNTABLE_ATTENDANCE_STATUSES = TRIAL_ATTENDED_STATUSES | {"To be started"}
 TRIAL_FOLLOWING_UP_STATUSES = {"Completed", "Follow-up"}
+TRIAL_FURTHER_TRIAL_BOOKED_STATUS = "Further Trial Booked"
 TRIAL_EXCLUDED_INQUIRY_STATUSES = {"No-show"}
 TRIAL_TEACHER_UNASSIGNED_LABEL = "No teacher assigned"
 BRISBANE_TIMEZONE = "Australia/Brisbane"
@@ -434,6 +435,7 @@ def get_school_admin_teacher_trial_conversion_report_data(term=None):
 			"converted_count": sum(row["converted_count"] for row in items),
 			"inactive_count": sum(row["inactive_count"] for row in items),
 			"following_up_count": sum(row["following_up_count"] for row in items),
+			"further_trial_booked_count": sum(row["further_trial_booked_count"] for row in items),
 		},
 		"items": items,
 	}
@@ -789,6 +791,7 @@ def _empty_teacher_trial_conversion_report(term):
 			"converted_count": 0,
 			"inactive_count": 0,
 			"following_up_count": 0,
+			"further_trial_booked_count": 0,
 		},
 		"items": [],
 	}
@@ -817,6 +820,7 @@ def _build_teacher_trial_conversion_items(*, attendance_rows, session_map, times
 			"converted_count": 0,
 			"inactive_count": 0,
 			"following_up_count": 0,
+			"further_trial_booked_count": 0,
 		}
 	)
 	seen_inquiries = set()
@@ -844,6 +848,8 @@ def _build_teacher_trial_conversion_items(*, attendance_rows, session_map, times
 			row["converted_count"] += 1
 		elif inquiry.get("status") == "Inactive":
 			row["inactive_count"] += 1
+		elif inquiry.get("status") == TRIAL_FURTHER_TRIAL_BOOKED_STATUS:
+			row["further_trial_booked_count"] += 1
 		elif inquiry.get("status") in TRIAL_FOLLOWING_UP_STATUSES:
 			row["following_up_count"] += 1
 

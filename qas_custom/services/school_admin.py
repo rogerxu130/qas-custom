@@ -116,7 +116,7 @@ from qas_custom.services.teacher_directory import get_active_teacher_directory_d
 
 ADMIN_ROLES = {"School Admin", "System Manager"}
 INQUIRY_OPEN_STATUSES = ["New", "Needs Review", "Booked", "Rescheduled", "No-show"]
-INQUIRY_POST_VISIT_STATUSES = ["Completed", "Follow-up"]
+INQUIRY_POST_VISIT_STATUSES = ["Completed", "Follow-up", "Further Trial Booked"]
 INQUIRY_STATUSES = {
 	"New",
 	"Needs Review",
@@ -126,6 +126,7 @@ INQUIRY_STATUSES = {
 	"Completed",
 	"No-show",
 	"Follow-up",
+	"Further Trial Booked",
 	"Converted",
 	"Inactive",
 }
@@ -1364,7 +1365,7 @@ def update_school_admin_inquiry_confirmation_data(
 def update_school_admin_inquiry_status_data(inquiry=None, status=None):
 	_require_school_admin()
 	status = (status or "").strip()
-	if status not in {"Cancelled", "Completed", "No-show", "Follow-up"}:
+	if status not in {"Cancelled", "Completed", "No-show", "Follow-up", "Further Trial Booked"}:
 		frappe.throw(_("Unsupported inquiry status."))
 	return mark_inquiry_status_core(inquiry, status, actor=frappe.session.user)
 

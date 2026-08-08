@@ -116,7 +116,7 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Status",
-   "options": "New\nBooked\nNeeds Review\nRescheduled\nCancelled\nCompleted\nNo-show\nFollow-up\nConverted\nInactive",
+   "options": "New\nBooked\nNeeds Review\nRescheduled\nCancelled\nCompleted\nNo-show\nFollow-up\nFurther Trial Booked\nConverted\nInactive",
    "reqd": 1
   },
   {

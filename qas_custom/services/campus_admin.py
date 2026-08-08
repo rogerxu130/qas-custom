@@ -44,7 +44,14 @@ from qas_custom.services.teacher_directory import get_active_teacher_directory_d
 from qas_custom.services.support_view import get_support_view_campus_admin_profile, reject_support_view_write
 
 
-POST_VISIT_INQUIRY_STATUSES = ("Completed", "Follow-up", "No-show", "Converted", "Inactive")
+POST_VISIT_INQUIRY_STATUSES = (
+	"Completed",
+	"Follow-up",
+	"Further Trial Booked",
+	"No-show",
+	"Converted",
+	"Inactive",
+)
 CAMPUS_ADMIN_INQUIRY_RESULT_LIMIT = 200
 CAMPUS_ADMIN_CURRENT_TERM_ENROLLMENT_RESULT_LIMIT = 50
 CAMPUS_ADMIN_INQUIRY_SEARCH_FIELDS = (
@@ -1071,6 +1078,12 @@ def mark_campus_admin_inquiry_follow_up_data(inquiry=None):
 	reject_support_view_write()
 	_require_inquiry_access(inquiry)
 	return mark_inquiry_status_core(inquiry, "Follow-up", actor=frappe.session.user)
+
+
+def mark_campus_admin_inquiry_further_trial_booked_data(inquiry=None):
+	reject_support_view_write()
+	_require_inquiry_access(inquiry)
+	return mark_inquiry_status_core(inquiry, "Further Trial Booked", actor=frappe.session.user)
 
 
 def get_campus_admin_conversion_sessions_data(inquiry=None, start_date=None, course=None):
