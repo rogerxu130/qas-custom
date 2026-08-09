@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from contextlib import contextmanager
 from datetime import datetime, timedelta
+from decimal import Decimal, InvalidOperation
 import hashlib
 from io import BytesIO
 import json
@@ -1460,7 +1461,16 @@ def recognise_school_admin_converted_referral_data(inquiry=None, referring_paren
 	}
 
 
-def get_school_admin_invoices_data(status=None, customer=None, parent=None, student=None, source=None, limit=80):
+def get_school_admin_invoices_data(
+	status=None,
+	customer=None,
+	parent=None,
+	student=None,
+	source=None,
+	outstanding_min=None,
+	outstanding_max=None,
+	limit=80,
+):
 	_require_school_admin()
 	return {
 		"items": _get_invoice_rows(
@@ -1469,6 +1479,8 @@ def get_school_admin_invoices_data(status=None, customer=None, parent=None, stud
 			parent=parent,
 			students=[student] if student else None,
 			source=source,
+			outstanding_min=outstanding_min,
+			outstanding_max=outstanding_max,
 			limit=_limit(limit, default=80, max_value=200),
 		)
 	}
@@ -6088,7 +6100,17 @@ def _inquiry_order_by(queue):
 	return "current_appointment_date asc, current_appointment_time asc, modified desc, name asc"
 
 
-def _get_invoice_rows(status=None, customer=None, parent=None, students=None, source=None, names=None, limit=80):
+def _get_invoice_rows(
+	status=None,
+	customer=None,
+	parent=None,
+	students=None,
+	source=None,
+	names=None,
+	outstanding_min=None,
+	outstanding_max=None,
+	limit=80,
+):
 	if not _doctype_available("Sales Invoice"):
 		return []
 	filters = {}
@@ -6114,6 +6136,11 @@ def _get_invoice_rows(status=None, customer=None, parent=None, students=None, so
 		filters["name"] = ["in", sorted(invoice_names)]
 	if source:
 		_apply_invoice_source_filter(filters, source)
+	_apply_invoice_outstanding_amount_filter(
+		filters,
+		outstanding_min=outstanding_min,
+		outstanding_max=outstanding_max,
+	)
 	fields = _safe_fields(
 		"Sales Invoice",
 		[
@@ -6151,6 +6178,36 @@ def _get_invoice_rows(status=None, customer=None, parent=None, students=None, so
 
 	payment_request_summaries = get_invoice_payment_request_summaries(row.get("name") for row in rows)
 	return [_invoice_row_payload(row, payment_request_summaries.get(row.get("name"))) for row in rows]
+
+
+def _apply_invoice_outstanding_amount_filter(filters, outstanding_min=None, outstanding_max=None):
+	minimum = _parse_invoice_amount_filter(outstanding_min, _("Outstanding minimum"))
+	maximum = _parse_invoice_amount_filter(outstanding_max, _("Outstanding maximum"))
+	if minimum is not None and maximum is not None and minimum > maximum:
+		frappe.throw(_("Outstanding minimum cannot be greater than outstanding maximum."))
+	if minimum is None and maximum is None:
+		return
+	if not _has_field("Sales Invoice", "outstanding_amount"):
+		frappe.throw(_("Outstanding amount filtering is not available."))
+	if minimum is not None and maximum is not None:
+		filters["outstanding_amount"] = ["between", [minimum, maximum]]
+	elif minimum is not None:
+		filters["outstanding_amount"] = [">=", minimum]
+	else:
+		filters["outstanding_amount"] = ["<=", maximum]
+
+
+def _parse_invoice_amount_filter(value, label):
+	raw_value = "" if value is None else str(value).strip()
+	if not raw_value:
+		return None
+	try:
+		amount = Decimal(raw_value)
+	except (InvalidOperation, ValueError):
+		frappe.throw(_("{0} must be a valid non-negative amount.").format(label))
+	if not amount.is_finite() or amount < 0:
+		frappe.throw(_("{0} must be a valid non-negative amount.").format(label))
+	return float(amount)
 
 
 def _invoice_row_payload(row, payment_request_summary=None):

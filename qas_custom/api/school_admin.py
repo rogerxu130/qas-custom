@@ -713,13 +713,24 @@ def school_admin_recognise_converted_referral(inquiry=None, referring_parent=Non
 
 
 @frappe.whitelist()
-def school_admin_get_invoices(status=None, customer=None, parent=None, student=None, source=None, limit=80):
+def school_admin_get_invoices(
+	status=None,
+	customer=None,
+	parent=None,
+	student=None,
+	source=None,
+	outstanding_min=None,
+	outstanding_max=None,
+	limit=80,
+):
 	return get_school_admin_invoices_data(
 		status=status,
 		customer=customer,
 		parent=parent,
 		student=student,
 		source=source,
+		outstanding_min=outstanding_min,
+		outstanding_max=outstanding_max,
 		limit=limit,
 	)
 
