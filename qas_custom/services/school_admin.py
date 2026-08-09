@@ -3167,11 +3167,20 @@ def transfer_school_admin_enrollment_data(enrollment=None, payload=None):
 		"destination_retained_count": destination.get("retained") or 0,
 		"first_class_after_transfer_session": first_destination_session_id,
 	}
+	transfer_invoice = None
+	if flt(preview.get("transfer_difference")) > 0:
+		transfer_invoice = _create_enrollment_transfer_difference_invoice(
+			doc,
+			preview=preview,
+			source_timeslot=source_timeslot,
+		)
+		result["transfer_invoice"] = transfer_invoice.name
+		result["transfer_invoice_amount"] = flt(preview.get("transfer_difference"), 2)
 	_add_comment(
 		"Enrollment",
 		doc.name,
 		_(
-			"Enrollment transferred from {0} to {1} from {2} by {3}. Cancelled {4} unmarked attendance row(s), prepared {5} destination row(s), and retained {6} marked row(s) in the original class."
+			"Enrollment transferred from {0} to {1} from {2} by {3}. Cancelled {4} unmarked attendance row(s), prepared {5} destination row(s), and retained {6} marked row(s) in the original class. Source value: {7}; destination value: {8}; transfer difference: {9}.{10}"
 		).format(
 			source_timeslot,
 			target_timeslot,
@@ -3180,6 +3189,10 @@ def transfer_school_admin_enrollment_data(enrollment=None, payload=None):
 			cancelled_count,
 			destination.get("total") or 0,
 			preview.get("retained_marked_count") or 0,
+			flt(preview.get("source_value"), 2),
+			flt(preview.get("destination_value"), 2),
+			flt(preview.get("transfer_difference"), 2),
+			_(" Draft transfer invoice: {0}.").format(transfer_invoice.name) if transfer_invoice else "",
 		),
 	)
 	frappe.db.commit()
@@ -7204,6 +7217,95 @@ def _enrollment_has_attendance(enrollment):
 	))
 
 
+def _transfer_course_unit_rate(course):
+	full_term_fee = get_course_money(course, ("full_term_fee", "full_term_price", "term_fee"))
+	total_sessions = get_course_number(course, ("total_session_per_term", "total_sessions_per_term", "sessions_per_term"))
+	if full_term_fee <= 0:
+		frappe.throw(_("Course full term fee is required before calculating a transfer."))
+	if total_sessions <= 0:
+		frappe.throw(_("Course total sessions per term is required before calculating a transfer."))
+	return {
+		"full_term_fee": flt(full_term_fee, 2),
+		"total_sessions": cint(total_sessions),
+		"unit_rate": flt(flt(full_term_fee) / flt(total_sessions), 6),
+	}
+
+
+def _transfer_financial_summary(source_value, destination_value):
+	transfer_difference = flt(flt(destination_value) - flt(source_value), 2)
+	return {
+		"source_value": flt(source_value, 2),
+		"destination_value": flt(destination_value, 2),
+		"transfer_difference": transfer_difference,
+		"recommended_store_credit_amount": abs(transfer_difference) if transfer_difference < 0 else 0,
+		"financial_action": "draft_transfer_invoice" if transfer_difference > 0 else (
+			"recommended_store_credit" if transfer_difference < 0 else "none"
+		),
+	}
+
+
+def _create_enrollment_transfer_difference_invoice(doc, *, preview, source_timeslot):
+	"""Create a standalone draft for a positive class-transfer price difference."""
+	amount = flt(preview.get("transfer_difference"), 2)
+	if amount <= 0:
+		return None
+	target_course = preview.get("target_course")
+	student_name = get_student_parent_name(doc.student) or doc.student
+	description = _(
+		"{0} - Transfer fee: {1} to {2} from {3}; {4} destination session(s) less {5} source session(s)."
+	).format(
+		student_name,
+		preview.get("source_course"),
+		target_course,
+		preview.get("effective_date"),
+		preview.get("destination_session_count") or 0,
+		preview.get("cancellable_count") or 0,
+	)
+	invoice = _create_school_admin_manual_invoice_doc(
+		{
+			"customer": get_invoice_customer(doc.get("parent")),
+			"parent": doc.get("parent"),
+			"student": doc.get("student"),
+			"enrollment": doc.name,
+			"course": target_course,
+			"qas_invoice_type": "Course",
+			"source_doctype": "Enrollment",
+			"source_document": doc.name,
+			"source_type": "Transfer Fee",
+			"qas_is_manual_invoice": 0,
+			"apply_store_credit_on_submit": 1,
+			"billing_note": _("Draft transfer fee invoice. No parent email has been sent."),
+			"remarks": _("Transfer from {0} to {1} from {2}.").format(
+				source_timeslot,
+				preview.get("target_timeslot"),
+				preview.get("effective_date"),
+			),
+			"items": [
+				{
+					"item_code": get_invoice_item(target_course),
+					"item_name": _("Transfer fee"),
+					"description": description,
+					"qty": 1,
+					"rate": amount,
+					"qas_line_type": "Course Fee",
+					"student": doc.get("student"),
+					"enrollment": doc.name,
+					"course": target_course,
+					"term": doc.get("term"),
+					"course_session": get_course_session_snapshot_label(preview.get("target_start_course_session")),
+					"session_count": preview.get("destination_session_count") or 0,
+				}
+			],
+		}
+	)
+	_add_comment(
+		"Sales Invoice",
+		invoice.name,
+		_("Draft transfer fee invoice created automatically for Enrollment {0}. No parent email was sent.").format(doc.name),
+	)
+	return invoice
+
+
 def _build_enrollment_transfer_preview(doc, target_timeslot, effective_date):
 	if doc.get("status") != "Active":
 		frappe.throw(_("Only active enrollments can be transferred."))
@@ -7297,6 +7399,11 @@ def _build_enrollment_transfer_preview(doc, target_timeslot, effective_date):
 		row for row in target_sessions
 		if getdate(row.get("session_date")).isocalendar()[:2] not in retained_week_keys
 	]
+	source_pricing = _transfer_course_unit_rate(doc.get("course"))
+	target_pricing = _transfer_course_unit_rate(target.get("course"))
+	source_value = flt(source_pricing["unit_rate"] * len(cancellable_rows), 2)
+	destination_value = flt(target_pricing["unit_rate"] * len(eligible_target_sessions), 2)
+	financial_summary = _transfer_financial_summary(source_value, destination_value)
 	preview_fingerprint = hashlib.sha256(json.dumps({
 		"enrollment": doc.name,
 		"source_timeslot": doc.get("weekly_timeslot"),
@@ -7307,9 +7414,12 @@ def _build_enrollment_transfer_preview(doc, target_timeslot, effective_date):
 			for row in attendance_rows
 		),
 		"target_sessions": [row.get("name") for row in eligible_target_sessions if row.get("name")],
+		"source_pricing": source_pricing,
+		"target_pricing": target_pricing,
 	}, sort_keys=True).encode("utf-8")).hexdigest()
 	return {
 		"source_timeslot": doc.get("weekly_timeslot"),
+		"source_course": doc.get("course"),
 		"target_timeslot": target_timeslot,
 		"target_course": target.get("course"),
 		"target_term": target.get("term"),
@@ -7324,7 +7434,10 @@ def _build_enrollment_transfer_preview(doc, target_timeslot, effective_date):
 		"destination_sessions_skipped_for_marked_count": len(target_sessions) - len(eligible_target_sessions),
 		"retained_marked_count": len(retained_marked_rows),
 		"retained_marked_rows": retained_marked_rows,
-		"financial_records_changed": False,
+		"source_unit_rate": source_pricing["unit_rate"],
+		"destination_unit_rate": target_pricing["unit_rate"],
+		**financial_summary,
+		"financial_records_changed": financial_summary["transfer_difference"] > 0,
 		"preview_fingerprint": preview_fingerprint,
 	}
 

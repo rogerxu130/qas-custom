@@ -10,11 +10,28 @@ from qas_custom.services.school_admin import (
 	_cancel_future_enrollment_attendance,
 	_ensure_enrollment_attendance_entries,
 	_ensure_transfer_destination_attendance,
+	_transfer_financial_summary,
 	transfer_school_admin_enrollment_data,
 )
 
 
 class TestSchoolAdminEnrollmentTransfer(TestCase):
+	def test_transfer_financial_summary_handles_positive_zero_and_negative_difference(self):
+		self.assertEqual(
+			_transfer_financial_summary(100, 150),
+			{
+				"source_value": 100,
+				"destination_value": 150,
+				"transfer_difference": 50,
+				"recommended_store_credit_amount": 0,
+				"financial_action": "draft_transfer_invoice",
+			},
+		)
+		self.assertEqual(_transfer_financial_summary(100, 100)["financial_action"], "none")
+		negative = _transfer_financial_summary(150, 100)
+		self.assertEqual(negative["financial_action"], "recommended_store_credit")
+		self.assertEqual(negative["recommended_store_credit_amount"], 50)
+
 	def _enrollment(self):
 		return SimpleNamespace(
 			name="ENR-001",
@@ -36,7 +53,9 @@ class TestSchoolAdminEnrollmentTransfer(TestCase):
 	@patch("qas_custom.services.school_admin.frappe.get_all")
 	@patch("qas_custom.services.school_admin.frappe.db.get_value")
 	@patch("qas_custom.services.school_admin.frappe.db.exists", return_value=True)
-	def test_preview_separates_unmarked_and_marked_attendance(self, _exists, get_value, get_all, _duplicate):
+	@patch("qas_custom.services.school_admin.get_course_number", return_value=3)
+	@patch("qas_custom.services.school_admin.get_course_money", side_effect=[300, 450])
+	def test_preview_separates_unmarked_and_marked_attendance(self, _money, _sessions, _exists, get_value, get_all, _duplicate):
 		get_value.return_value = {"name": "WT-NEW", "term": "TERM-3", "course": "COURSE-NEW", "status": "Active"}
 		get_all.side_effect = [
 			[
@@ -61,6 +80,10 @@ class TestSchoolAdminEnrollmentTransfer(TestCase):
 		self.assertEqual(result["target_session_ids"], ["CS-NEW-1"])
 		self.assertEqual(result["retained_marked_count"], 1)
 		self.assertEqual(result["retained_marked_rows"][0]["status"], "Present")
+		self.assertEqual(result["source_value"], 100)
+		self.assertEqual(result["destination_value"], 150)
+		self.assertEqual(result["transfer_difference"], 50)
+		self.assertEqual(result["financial_action"], "draft_transfer_invoice")
 
 	@patch("qas_custom.services.school_admin._cancel_enrollment_attendance_for_sessions")
 	@patch("qas_custom.services.school_admin._build_enrollment_transfer_preview")
