@@ -15,6 +15,7 @@ import frappe
 from frappe import _
 from frappe.sessions import clear_sessions
 from frappe.utils import add_days, cint, flt, get_time, getdate, now_datetime, nowdate, today, validate_email_address
+from frappe.utils.data import make_filter_tuple
 from PIL import Image, ImageOps
 
 from qas_custom.services.billing_enrollment import (
@@ -6149,11 +6150,17 @@ def _get_invoice_rows(
 		filters["name"] = ["in", sorted(invoice_names)]
 	if source:
 		_apply_invoice_source_filter(filters, source)
-	_apply_invoice_outstanding_amount_filter(
-		filters,
+	outstanding_filters = _get_invoice_outstanding_amount_filters(
 		outstanding_min=outstanding_min,
 		outstanding_max=outstanding_max,
 	)
+	query_filters = filters
+	if outstanding_filters:
+		query_filters = [
+			make_filter_tuple("Sales Invoice", fieldname, value)
+			for fieldname, value in filters.items()
+		]
+		query_filters.extend(outstanding_filters)
 	fields = _safe_fields(
 		"Sales Invoice",
 		[
@@ -6182,7 +6189,7 @@ def _get_invoice_rows(
 	)
 	rows = frappe.get_all(
 		"Sales Invoice",
-		filters=filters,
+		filters=query_filters,
 		fields=fields,
 		order_by="modified desc",
 		limit=limit,
@@ -6193,21 +6200,21 @@ def _get_invoice_rows(
 	return [_invoice_row_payload(row, payment_request_summaries.get(row.get("name"))) for row in rows]
 
 
-def _apply_invoice_outstanding_amount_filter(filters, outstanding_min=None, outstanding_max=None):
+def _get_invoice_outstanding_amount_filters(outstanding_min=None, outstanding_max=None):
 	minimum = _parse_invoice_amount_filter(outstanding_min, _("Outstanding minimum"))
 	maximum = _parse_invoice_amount_filter(outstanding_max, _("Outstanding maximum"))
 	if minimum is not None and maximum is not None and minimum > maximum:
 		frappe.throw(_("Outstanding minimum cannot be greater than outstanding maximum."))
 	if minimum is None and maximum is None:
-		return
+		return []
 	if not _has_field("Sales Invoice", "outstanding_amount"):
 		frappe.throw(_("Outstanding amount filtering is not available."))
-	if minimum is not None and maximum is not None:
-		filters["outstanding_amount"] = ["between", [minimum, maximum]]
-	elif minimum is not None:
-		filters["outstanding_amount"] = [">=", minimum]
-	else:
-		filters["outstanding_amount"] = ["<=", maximum]
+	filters = []
+	if minimum is not None:
+		filters.append(["outstanding_amount", ">=", minimum])
+	if maximum is not None:
+		filters.append(["outstanding_amount", "<=", maximum])
+	return filters
 
 
 def _parse_invoice_amount_filter(value, label):
