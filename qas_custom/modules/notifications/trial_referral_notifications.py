@@ -161,6 +161,8 @@ def _build_referral_context(event_kind: str, inquiry: str) -> dict:
 		"event_kind": event_kind,
 		"inquiry": doc.name,
 		"recipient": recipient,
+		"referred_parent_name": _referred_parent_name(doc),
+		"referred_student_name": _referred_student_name(doc),
 		"amount": amount,
 		"school_name": settings.get("school_name") or "Queensland Art School",
 		"school_email": str(settings.get("school_email") or "").strip().lower(),
@@ -178,18 +180,20 @@ def _referral_subject(context: dict) -> str:
 def _referral_message(context: dict) -> str:
 	school_name = escape_html(context["school_name"])
 	amount = escape_html(frappe.format_value(context["amount"], {"fieldtype": "Currency"}))
+	referred_parent_name = context.get("referred_parent_name") or _("the referred parent")
+	referred_student_name = context.get("referred_student_name") or _("their child")
 	if context["event_kind"] == "trial_discount":
 		headline = _("Thank you for your referral")
 		body = _(
-			"A family you referred has received a {0} discount on their trial class. "
-			"If they enrol in a full-term class, we will add {0} Store Credit to your account."
-		).format(amount)
+			"Your referral, {0}'s child {1}, has received a {2} discount on their trial class. "
+			"If they enrol in a full-term class, we will add {2} Store Credit to your account."
+		).format(referred_parent_name, referred_student_name, amount)
 	else:
 		headline = _("Your referral reward is ready")
 		body = _(
-			"A family you referred has now enrolled in a full-term class. "
-			"We have added {0} Store Credit to your account."
-		).format(amount)
+			"Your referral, {0}'s child {1}, has now enrolled in a full-term class. "
+			"We have added {2} Store Credit to your account."
+		).format(referred_parent_name, referred_student_name, amount)
 	return """
 		<div style=\"margin:0;padding:0;background:#f8fafc;font-family:Arial,sans-serif;color:#172033;\">
 			<div style=\"max-width:640px;margin:0 auto;padding:24px;\">
@@ -207,6 +211,14 @@ def _referral_message(context: dict) -> str:
 		body=escape_html(body),
 		portal=escape_html(context["portal_url"]),
 	)
+
+
+def _referred_parent_name(inquiry_doc) -> str:
+	return str(inquiry_doc.get("contact_name") or inquiry_doc.get("parent") or "").strip()
+
+
+def _referred_student_name(inquiry_doc) -> str:
+	return str(inquiry_doc.get("submitted_student_name") or inquiry_doc.get("student") or "").strip()
 
 
 def _parent_recipient(parent: str) -> dict:
