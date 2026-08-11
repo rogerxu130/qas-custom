@@ -487,7 +487,9 @@ class TestCourseTrialFeeMaintenance(TestCase):
 	@patch.object(maintenance, "reconcile_course_trial_fees", return_value={"checked": 4})
 	@patch.object(maintenance, "reconcile_attendance_links", return_value={"issues_seen": 0})
 	@patch.object(maintenance, "sync_student_activity_status", return_value={"checked": 10})
-	def test_nightly_maintenance_includes_trial_fee_check(self, _mock_students, _mock_attendance, _mock_fees):
+	@patch("qas_custom.services.ndis_friendly.reconcile_ndis_friendly_capacity", return_value={"checked": 2})
+	def test_nightly_maintenance_includes_trial_fee_check(self, _mock_ndis, _mock_students, _mock_attendance, _mock_fees):
 		result = maintenance.run_nightly_maintenance()
 
 		self.assertEqual(result["course_trial_fees"], {"checked": 4})
+		self.assertEqual(result["ndis_capacity"], {"checked": 2})

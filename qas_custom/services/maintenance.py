@@ -22,10 +22,14 @@ def run_nightly_maintenance():
 	student_result = sync_student_activity_status()
 	attendance_result = reconcile_attendance_links()
 	trial_fee_result = reconcile_course_trial_fees()
+	from qas_custom.services.ndis_friendly import reconcile_ndis_friendly_capacity
+
+	ndis_capacity_result = reconcile_ndis_friendly_capacity()
 	return {
 		"student_activity": student_result,
 		"attendance_links": attendance_result,
 		"course_trial_fees": trial_fee_result,
+		"ndis_capacity": ndis_capacity_result,
 	}
 
 
@@ -435,14 +439,16 @@ def _upsert_data_issue(issue):
 	return doc.name, created
 
 
-def record_data_issue(issue, notify=True):
+def record_data_issue(issue, notify=True, notify_on_reopen=False):
 	if not _doctype_available(ISSUE_DOCTYPE):
-		return {"created": False, "skipped": True, "reason": f"{ISSUE_DOCTYPE} is not available."}
+		return {"created": False, "reopened": False, "skipped": True, "reason": f"{ISSUE_DOCTYPE} is not available."}
+	previous_status = frappe.db.get_value(ISSUE_DOCTYPE, {"issue_key": issue["issue_key"]}, "status")
 	issue_name, created = _upsert_data_issue(issue)
+	reopened = bool(previous_status and previous_status != "Open")
 	frappe.db.commit()
-	if created and notify:
+	if notify and (created or (notify_on_reopen and reopened)):
 		_notify_school_admins_of_new_issues([issue_name])
-	return {"issue": issue_name, "created": created}
+	return {"issue": issue_name, "created": created, "reopened": reopened}
 
 
 def resolve_data_issue(issue_key):

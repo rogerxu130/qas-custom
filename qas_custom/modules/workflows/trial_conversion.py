@@ -129,6 +129,13 @@ def convert_inquiry_to_full_term_core(
 	)
 
 	frappe.db.commit()
+	try:
+		from qas_custom.services.ndis_friendly import refresh_ndis_friendly_capacity_alert
+
+		refresh_ndis_friendly_capacity_alert(timeslot.name)
+	except Exception:
+		# A warning email must never turn a completed conversion into an API error.
+		frappe.log_error(frappe.get_traceback(), "QAS NDIS-friendly capacity refresh failed")
 
 	from qas_custom.services.inquiry import build_inquiry_detail
 

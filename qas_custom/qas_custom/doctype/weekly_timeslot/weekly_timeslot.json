@@ -80,6 +80,33 @@
    "read_only": 1
   },
   {
+   "fieldname": "ndis_section",
+   "fieldtype": "Section Break",
+   "label": "NDIS listing"
+  },
+  {
+   "default": "0",
+   "fieldname": "ndis_friendly",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "NDIS Friendly"
+  },
+  {
+   "default": "0",
+   "depends_on": "eval:doc.ndis_friendly",
+   "fieldname": "ndis_public_listing_enabled",
+   "fieldtype": "Check",
+   "label": "Show on public NDIS listing"
+  },
+  {
+   "default": "0",
+   "fieldname": "ndis_capacity_alert_active",
+   "fieldtype": "Check",
+   "hidden": 1,
+   "label": "NDIS Capacity Alert Active",
+   "read_only": 1
+  },
+  {
    "default": "Active",
    "fieldname": "status",
    "fieldtype": "Select",
@@ -124,6 +151,10 @@
   "day_of_week",
   "start_time",
   "end_time",
+  "ndis_section",
+  "ndis_friendly",
+  "ndis_public_listing_enabled",
+  "ndis_capacity_alert_active",
   "status"
  ]
 }

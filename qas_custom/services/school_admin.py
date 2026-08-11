@@ -114,6 +114,11 @@ from qas_custom.services.inquiry import (
 )
 from qas_custom.services.teacher_revenue_share import get_teacher_revenue_share_session_rows
 from qas_custom.services.teacher_directory import get_active_teacher_directory_data
+from qas_custom.services.ndis_friendly import (
+	get_ndis_friendly_capacity_status,
+	get_ndis_friendly_capacity_statuses,
+	refresh_ndis_friendly_capacity_alert,
+)
 
 
 ADMIN_ROLES = {"School Admin", "System Manager"}
@@ -2420,6 +2425,8 @@ def _copy_term_weekly_timeslots(source_term, target_term):
 			"revenue_share_enabled",
 			"revenue_share_teacher",
 			"revenue_share_percent",
+			"ndis_friendly",
+			"ndis_public_listing_enabled",
 		],
 	)
 	rows = frappe.get_all(
@@ -2920,6 +2927,7 @@ def create_school_admin_enrollment_data(payload=None):
 	doc.insert(ignore_permissions=True)
 	_add_comment("Enrollment", doc.name, "Enrollment created by School Admin.")
 	frappe.db.commit()
+	_refresh_ndis_friendly_capacity_alerts(doc.get("weekly_timeslot"))
 	return _build_enrollment_payload(doc)
 
 
@@ -2940,6 +2948,7 @@ def update_school_admin_enrollment_data(enrollment=None, payload=None):
 		_cancel_future_enrollment_attendance(doc.name, effective_date=payload.get("effective_date") or today())
 	_add_comment("Enrollment", doc.name, "Enrollment updated by School Admin.")
 	frappe.db.commit()
+	_refresh_ndis_friendly_capacity_alerts(previous_timeslot, doc.get("weekly_timeslot"))
 	return _build_enrollment_payload(doc)
 
 
@@ -2962,6 +2971,7 @@ def activate_school_admin_enrollment_data(enrollment=None, payload=None):
 	)
 	frappe.db.commit()
 	activated = frappe.get_doc("Enrollment", result["enrollment"])
+	_refresh_ndis_friendly_capacity_alerts(activated.get("weekly_timeslot"))
 	return {
 		"enrollment": _build_enrollment_payload(activated),
 		"attendance_entries": result.get("attendance_entries") or 0,
@@ -2986,6 +2996,7 @@ def create_school_admin_enrollment_attendance_data(enrollment=None, payload=None
 		)
 		frappe.db.commit()
 		activated = frappe.get_doc("Enrollment", result["enrollment"])
+		_refresh_ndis_friendly_capacity_alerts(activated.get("weekly_timeslot"))
 		return {
 			"enrollment": _build_enrollment_payload(activated),
 			"attendance_entries": result.get("attendance_entries") or 0,
@@ -3197,6 +3208,7 @@ def transfer_school_admin_enrollment_data(enrollment=None, payload=None):
 		),
 	)
 	frappe.db.commit()
+	_refresh_ndis_friendly_capacity_alerts(source_timeslot, target_timeslot)
 	return {"enrollment": _build_enrollment_payload(doc), "transfer": result}
 
 
@@ -3216,6 +3228,7 @@ def end_school_admin_enrollment_data(enrollment=None, payload=None):
 	action = _("cancelled") if target_status == "Cancelled" else _("ended")
 	_add_comment("Enrollment", doc.name, _("Enrollment {0} by School Admin from {1}.").format(action, end_date))
 	frappe.db.commit()
+	_refresh_ndis_friendly_capacity_alerts(doc.get("weekly_timeslot"))
 	return _build_enrollment_payload(doc)
 
 
@@ -3226,8 +3239,10 @@ def delete_school_admin_enrollment_data(enrollment=None):
 	doc = frappe.get_doc("Enrollment", enrollment)
 	_assert_safe_delete_enrollment(doc)
 	deleted = doc.name
+	weekly_timeslot = doc.get("weekly_timeslot")
 	frappe.delete_doc("Enrollment", deleted, ignore_permissions=True)
 	frappe.db.commit()
+	_refresh_ndis_friendly_capacity_alerts(weekly_timeslot)
 	return {"deleted": deleted}
 
 
@@ -3274,6 +3289,8 @@ def get_school_admin_weekly_timeslots_data(
 			"start_time",
 			"end_time",
 			"status",
+			"ndis_friendly",
+			"ndis_public_listing_enabled",
 			"modified",
 		],
 	)
@@ -3287,8 +3304,10 @@ def get_school_admin_weekly_timeslots_data(
 	items = [_docdict(row) for row in rows]
 	_attach_course_labels(items)
 	enrollment_counts = _get_active_enrollment_counts_for_timeslots([row.get("name") for row in items])
+	ndis_capacity_statuses = get_ndis_friendly_capacity_statuses([row.get("name") for row in items])
 	for item in items:
 		item["active_enrollment_count"] = enrollment_counts.get(item.get("name"), 0)
+		item.update(ndis_capacity_statuses.get(item.get("name"), {}))
 	return {"items": items}
 
 
@@ -3300,6 +3319,7 @@ def get_school_admin_weekly_timeslot_data(weekly_timeslot=None):
 		frappe.throw(_("Weekly timeslot is required."))
 	doc = frappe.get_doc("Weekly Timeslot", weekly_timeslot)
 	payload = _document_payload(doc)
+	payload.update(get_ndis_friendly_capacity_status(weekly_timeslot))
 	payload["enrollments"] = _get_enrollment_rows(filters={"weekly_timeslot": weekly_timeslot, "status": "Active"}, limit=200)
 	payload["sessions"] = _get_course_session_rows(weekly_timeslot=weekly_timeslot, limit=80)
 	return payload
@@ -3312,6 +3332,7 @@ def create_school_admin_weekly_timeslot_data(payload=None):
 	_apply_weekly_timeslot_payload(doc, payload)
 	doc.insert(ignore_permissions=True)
 	frappe.db.commit()
+	_refresh_ndis_friendly_capacity_alerts(doc.name)
 	return get_school_admin_weekly_timeslot_data(doc.name)
 
 
@@ -3334,6 +3355,7 @@ def update_school_admin_weekly_timeslot_data(weekly_timeslot=None, payload=None)
 			previous_day_of_week=previous_day_of_week,
 		)
 	frappe.db.commit()
+	_refresh_ndis_friendly_capacity_alerts(doc.name)
 	result = get_school_admin_weekly_timeslot_data(doc.name)
 	if session_sync:
 		result["session_sync"] = session_sync
@@ -5085,6 +5107,15 @@ def _get_active_enrollment_counts_for_timeslots(weekly_timeslots):
 		limit_page_length=0,
 	)
 	return {row.get("weekly_timeslot"): cint(row.get("active_count")) for row in rows}
+
+
+def _refresh_ndis_friendly_capacity_alerts(*weekly_timeslots):
+	"""Capacity warnings must never prevent a valid enrolment change from saving."""
+	for weekly_timeslot in sorted({name for name in weekly_timeslots if name}):
+		try:
+			refresh_ndis_friendly_capacity_alert(weekly_timeslot)
+		except Exception:
+			frappe.log_error(frappe.get_traceback(), "QAS NDIS-friendly capacity refresh failed")
 
 
 def _get_weekly_timeslot_reference_options():
@@ -7747,9 +7778,13 @@ def _apply_weekly_timeslot_payload(doc, payload):
 		"revenue_share_enabled",
 		"revenue_share_teacher",
 		"revenue_share_percent",
+		"ndis_friendly",
+		"ndis_public_listing_enabled",
 	]:
 		if fieldname in payload:
 			_set_if_field(doc, fieldname, payload.get(fieldname))
+	if "ndis_friendly" in payload and not cint(payload.get("ndis_friendly")):
+		_set_if_field(doc, "ndis_public_listing_enabled", 0)
 	if "end_time" not in payload and (not doc.get("end_time") or "course" in payload or "start_time" in payload):
 		_apply_course_duration_end_time(doc)
 	_validate_weekly_timeslot_room_conflict(doc)
@@ -8014,10 +8049,15 @@ def _get_timeslot_map(timeslot_ids):
 			"revenue_share_enabled",
 			"revenue_share_teacher",
 			"revenue_share_percent",
+			"ndis_friendly",
+			"ndis_public_listing_enabled",
 		],
 	)
 	rows = frappe.get_all("Weekly Timeslot", filters={"name": ["in", timeslot_ids]}, fields=fields)
 	items = [_normalize_row_payload("Weekly Timeslot", row) for row in rows]
+	ndis_capacity_statuses = get_ndis_friendly_capacity_statuses([row.get("name") for row in items])
+	for item in items:
+		item.update(ndis_capacity_statuses.get(item.get("name"), {}))
 	_attach_course_labels(items)
 	return {row.get("name"): row for row in items}
 
