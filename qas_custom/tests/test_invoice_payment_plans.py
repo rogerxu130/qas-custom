@@ -7,6 +7,7 @@ import frappe
 from qas_custom.modules.billing.payment_plans import payment_plan_payload
 from qas_custom.modules.notifications.invoice_overdue_reminders import overdue_reminder_eligibility
 from qas_custom.modules.notifications.invoice_payment_plan_reminders import _recent_or_max_attempt
+from qas_custom.modules.notifications.commands import _invoice_pdf_payment_plan_block
 
 
 def invoice(**overrides):
@@ -29,6 +30,19 @@ def invoice(**overrides):
 
 
 class TestInvoicePaymentPlans(TestCase):
+	def test_invoice_pdf_includes_active_payment_plan_schedule(self):
+		plan = payment_plan_payload(invoice(), today=date(2026, 7, 12))
+		html = _invoice_pdf_payment_plan_block({"payment_plan": plan})
+
+		self.assertIn("Payment plan", html)
+		self.assertIn("Installment 1", html)
+		self.assertIn("Installment 2", html)
+		self.assertIn("AUD $200.00", html)
+		self.assertIn("AUD $600.00", html)
+
+	def test_invoice_pdf_hides_payment_plan_when_not_active(self):
+		self.assertEqual(_invoice_pdf_payment_plan_block({"payment_plan": {"enabled": False}}), "")
+
 	def test_payload_uses_cumulative_target_and_amount_paid(self):
 		plan = payment_plan_payload(invoice(), today=date(2026, 7, 12))
 

@@ -98,6 +98,7 @@ def _parent_invoice_print_html():
 {% set invoice_total = qas_amounts.total %}
 {% set credit_applied = qas_amounts.store_credit_applied %}
 {% set payable_amount = qas_amounts.payable_amount %}
+{% set payment_plan_enabled = doc.qas_has_payment_plan and doc.qas_payment_plan_status == "Active" and doc.qas_payment_plan_installments %}
 <style>
 	.qas-invoice {
 		color: #172033;
@@ -203,6 +204,22 @@ def _parent_invoice_print_html():
 		padding: 12px;
 		white-space: pre-line;
 	}
+	.qas-payment-plan {
+		background: #f0fdfa;
+		border: 1px solid #99f6e4;
+		border-radius: 10px;
+		margin: 0 0 18px;
+		padding: 12px;
+	}
+	.qas-payment-plan table {
+		border-collapse: collapse;
+		margin-top: 8px;
+		width: 100%;
+	}
+	.qas-payment-plan td {
+		border-top: 1px solid #ccfbf1;
+		padding: 8px 0;
+	}
 	.qas-bank {
 		border-collapse: collapse;
 		margin-top: 8px;
@@ -234,6 +251,22 @@ def _parent_invoice_print_html():
 			<td><span class="qas-muted">Amount payable</span><strong class="qas-payable">AUD ${{ "%.2f"|format(payable_amount) }}</strong></td>
 		</tr>
 	</table>
+
+	{% if payment_plan_enabled %}
+	<div class="qas-payment-plan">
+		<strong>Payment plan</strong>
+		<p style="margin:6px 0;">This invoice total remains unchanged. Please follow the agreed payment schedule below.</p>
+		<table>
+			{% for installment in doc.qas_payment_plan_installments %}
+			<tr>
+				<td>Installment {{ loop.index }}</td>
+				<td>{{ installment.due_date or "-" }}</td>
+				<td style="text-align:right;"><strong>AUD ${{ "%.2f"|format(installment.cumulative_amount_due) }}</strong></td>
+			</tr>
+			{% endfor %}
+		</table>
+	</div>
+	{% endif %}
 
 	{% if doc.qas_invoice_message %}
 	<div class="qas-message">{{ doc.qas_invoice_message }}</div>

@@ -1420,6 +1420,7 @@ def _invoice_pdf_html(context):
 		rows = """<tr><td colspan="3" class="muted">Invoice details are included in this PDF.</td></tr>"""
 
 	payment_block = _invoice_pdf_payment_block(context)
+	payment_plan_block = _invoice_pdf_payment_plan_block(context)
 	invoice_message = _invoice_pdf_message(context.get("invoice_message"))
 	additional_description = _invoice_pdf_additional_description(context.get("additional_description"))
 	return """
@@ -1449,6 +1450,11 @@ def _invoice_pdf_html(context):
 		.totals .final td {{ border-top: 2px solid #172033; font-size: 16px; font-weight: 800; padding-top: 12px; }}
 		.payment {{ background: #fff7ed; border: 1px solid #fed7aa; border-radius: 10px; margin-top: 26px; padding: 14px 16px; }}
 		.payment strong {{ display: block; font-size: 14px; margin-bottom: 4px; }}
+		.payment-plan {{ background: #f0fdfa; border: 1px solid #99f6e4; border-radius: 10px; margin: 0 0 22px; padding: 14px 16px; }}
+		.payment-plan strong {{ display: block; font-size: 15px; margin-bottom: 4px; }}
+		.payment-plan p {{ margin: 7px 0; }}
+		.payment-plan table {{ border-collapse: collapse; margin-top: 10px; width: 100%; }}
+		.payment-plan td {{ border-top: 1px solid #ccfbf1; padding: 8px 0; }}
 		.right {{ text-align: right; }}
 	</style>
 </head>
@@ -1475,6 +1481,8 @@ def _invoice_pdf_html(context):
 			<td><span>Amount payable</span><strong class="payable">AUD ${payable:.2f}</strong></td>
 		</tr>
 	</table>
+
+	{payment_plan_block}
 
 	{invoice_message}
 
@@ -1509,10 +1517,48 @@ def _invoice_pdf_html(context):
 		total=flt(context["total"]),
 		credit=flt(context["store_credit_applied"]),
 		payable=flt(context["payable_amount"]),
+		payment_plan_block=payment_plan_block,
 		invoice_message=invoice_message,
 		additional_description=additional_description,
 		rows=rows,
 		payment_block=payment_block,
+	)
+
+
+def _invoice_pdf_payment_plan_block(context):
+	payment_plan = context.get("payment_plan") or {}
+	if not payment_plan.get("enabled"):
+		return ""
+
+	rows = "".join(
+		"""<tr>
+			<td>Installment {sequence}</td>
+			<td>{due_date}</td>
+			<td class="right"><strong>AUD ${amount:.2f}</strong></td>
+		</tr>""".format(
+			sequence=row.get("sequence"),
+			due_date=escape_html(formatdate(row.get("due_date")) if row.get("due_date") else "-"),
+			amount=flt(row.get("cumulative_amount_due")),
+		)
+		for row in payment_plan.get("installments", [])
+	)
+	current = payment_plan.get("current_installment") or {}
+	shortfall = (
+		"<p><strong>Current installment shortfall: AUD ${0:.2f}</strong></p>".format(flt(current.get("shortfall")))
+		if current and flt(current.get("shortfall")) > 0
+		else ""
+	)
+	return """<div class="payment-plan">
+		<strong>Payment plan</strong>
+		<p>This invoice total remains unchanged. Please follow the agreed payment schedule below.</p>
+		<p>Total paid: AUD ${paid:.2f} &middot; Outstanding: AUD ${outstanding:.2f}</p>
+		{shortfall}
+		<table>{rows}</table>
+	</div>""".format(
+		paid=flt(payment_plan.get("total_paid")),
+		outstanding=flt(payment_plan.get("outstanding")),
+		shortfall=shortfall,
+		rows=rows,
 	)
 
 
