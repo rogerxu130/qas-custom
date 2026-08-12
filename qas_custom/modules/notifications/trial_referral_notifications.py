@@ -173,34 +173,52 @@ def _build_referral_context(event_kind: str, inquiry: str) -> dict:
 
 def _referral_subject(context: dict) -> str:
 	if context["event_kind"] == "trial_discount":
-		return _("Thank you for your Queensland Art School referral")
+		return _("Your referral has received a trial class discount")
 	return _("Your Queensland Art School referral reward")
 
 
 def _referral_message(context: dict) -> str:
 	school_name = escape_html(context["school_name"])
 	amount = escape_html(frappe.format_value(context["amount"], {"fieldtype": "Currency"}))
-	referred_parent_name = context.get("referred_parent_name") or _("the referred parent")
-	referred_student_name = context.get("referred_student_name") or _("their child")
+	referred_parent_name = context.get("referred_parent_name") or ""
+	referred_student_name = context.get("referred_student_name") or ""
+	paragraphs: list[str]
 	if context["event_kind"] == "trial_discount":
 		headline = _("Thank you for your referral")
-		body = _(
-			"Your referral, {0}'s child {1}, has received a {2} discount on their trial class. "
-			"If they enrol in a full-term class, we will add {2} Store Credit to your account."
-		).format(referred_parent_name, referred_student_name, amount)
+		referred_family = _referred_family_reference(referred_parent_name, referred_student_name)
+		student_reference = referred_student_name or _("the student")
+		referrer_first_name = context["recipient"].get("first_name") or ""
+		paragraphs = [
+			_("Hi {0},").format(referrer_first_name) if referrer_first_name else _("Hi,"),
+			_("Thank you for helping another family discover Queensland Art School."),
+			_("Because of your referral, {0} has received a {1} discount on their trial class.").format(
+				referred_family, amount
+			),
+			_(
+				"If {0} enrols in a full-term class, we will add {1} Store Credit to your account as a thank-you."
+			).format(student_reference, amount),
+			_("Kind regards,\nQueensland Art School"),
+		]
 	else:
 		headline = _("Your referral reward is ready")
 		body = _(
 			"Your referral, {0}'s child {1}, has now enrolled in a full-term class. "
 			"We have added {2} Store Credit to your account."
-		).format(referred_parent_name, referred_student_name, amount)
+		).format(referred_parent_name or _("the referred parent"), referred_student_name or _("their child"), amount)
+		paragraphs = [body]
+	message = "".join(
+		'<p style="margin:0 0 16px;font-size:16px;line-height:1.55;white-space:pre-line;">{0}</p>'.format(
+			escape_html(paragraph)
+		)
+		for paragraph in paragraphs
+	)
 	return """
 		<div style=\"margin:0;padding:0;background:#f8fafc;font-family:Arial,sans-serif;color:#172033;\">
 			<div style=\"max-width:640px;margin:0 auto;padding:24px;\">
 				<div style=\"background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;padding:24px;\">
 					<p style=\"margin:0 0 6px;font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:#e85f47;\">{school}</p>
 					<h1 style=\"margin:0 0 16px;font-size:24px;\">{headline}</h1>
-					<p style=\"margin:0 0 20px;font-size:16px;line-height:1.55;\">{body}</p>
+					{message}
 					<a href=\"{portal}\" style=\"display:inline-block;background:#ef654d;color:#ffffff;text-decoration:none;padding:12px 16px;border-radius:8px;font-weight:700;\">View Parent Portal</a>
 				</div>
 			</div>
@@ -208,7 +226,7 @@ def _referral_message(context: dict) -> str:
 	""".format(
 		school=school_name,
 		headline=escape_html(headline),
-		body=escape_html(body),
+		message=message,
 		portal=escape_html(context["portal_url"]),
 	)
 
@@ -221,19 +239,28 @@ def _referred_student_name(inquiry_doc) -> str:
 	return str(inquiry_doc.get("submitted_student_name") or inquiry_doc.get("student") or "").strip()
 
 
+def _referred_family_reference(parent_name: str, student_name: str) -> str:
+	if parent_name and student_name:
+		return _("{0}'s child, {1}").format(parent_name, student_name)
+	return student_name or parent_name or _("the referred student")
+
+
 def _parent_recipient(parent: str) -> dict:
 	if not parent:
-		return {"email": "", "for_user": None}
+		return {"email": "", "for_user": None, "first_name": ""}
 	fields = ["name"]
-	for fieldname in ["linked_user", "email", "email_id", "contact_email"]:
+	for fieldname in ["linked_user", "email", "email_id", "contact_email", "parent_name"]:
 		if frappe.db.has_column("Parent", fieldname):
 			fields.append(fieldname)
 	row = frappe.db.get_value("Parent", parent, fields, as_dict=True) or {}
 	linked_user = row.get("linked_user")
 	email = next((row.get(field) for field in ["email", "email_id", "contact_email"] if row.get(field)), None)
+	first_name = str(row.get("parent_name") or "").strip().split(" ")[0]
 	if not email and linked_user:
 		email = frappe.db.get_value("User", linked_user, "email") or linked_user
-	return {"email": str(email or "").strip().lower(), "for_user": linked_user}
+	if not first_name and linked_user:
+		first_name = str(frappe.db.get_value("User", linked_user, "first_name") or "").strip()
+	return {"email": str(email or "").strip().lower(), "for_user": linked_user, "first_name": first_name}
 
 
 def _referral_reward(inquiry: str):
