@@ -17,6 +17,7 @@ from qas_custom.services.support_view import get_support_view_parent
 ADMIN_ROLES = {"School Admin", "System Manager"}
 ANNOUNCEMENT_DOCTYPE = "School Announcement"
 RECIPIENT_DOCTYPE = "School Announcement Recipient"
+TARGET_DOCTYPE = "School Announcement Target"
 DEFAULT_PARENT_PORTAL_URL = "https://portal.queenslandartschool.com"
 ANNOUNCEMENT_BCC_BATCH_SIZE = 50
 ANNOUNCEMENT_VISIBLE_RECIPIENT = "queenslandartschool@gmail.com"
@@ -56,7 +57,14 @@ def get_school_admin_announcements_data(status=None, limit=80):
 		order_by="modified desc",
 		limit=_limit(limit, default=80, max_value=200),
 	)
-	return {"items": [_normalise_row(row) for row in rows]}
+	targets_by_announcement = _announcement_targets_by_announcement([row.name for row in rows])
+	items = []
+	for row in rows:
+		item = _normalise_row(row)
+		item["audience_targets"] = targets_by_announcement.get(row.name, [])
+		item["audience_target_summary"] = _announcement_target_summary(item["audience_targets"])
+		items.append(item)
+	return {"items": items}
 
 
 def search_school_admin_announcement_students_data(query=None, limit=20):
@@ -544,6 +552,8 @@ def _apply_announcement_payload(doc, payload):
 			if fieldname in {"body", "email_body"}:
 				value = _message_html(value, allowed_image_urls=_announcement_image_urls(doc))
 			doc.set(fieldname, value)
+	if "audience_targets" in payload:
+		doc.set("audience_targets", _normalise_announcement_targets(payload.get("audience_targets")))
 	_validate_announcement(doc)
 
 
@@ -556,8 +566,12 @@ def _validate_announcement(doc):
 		frappe.throw(_("Term is required for a term announcement."))
 	if doc.audience_type == "Term + Course" and (not doc.term or not doc.course):
 		frappe.throw(_("Term and course are required for a term course announcement."))
+	if doc.audience_type == "Term + Courses" and (not doc.term or not _announcement_target_values(doc, "Course")):
+		frappe.throw(_("Select a term and at least one course for this announcement."))
 	if doc.audience_type == "Course Session" and not doc.course_session:
 		frappe.throw(_("Course session is required for a course session announcement."))
+	if doc.audience_type == "Course Sessions" and not _announcement_target_values(doc, "Course Session"):
+		frappe.throw(_("Select at least one course session for this announcement."))
 	if doc.audience_type == "Single Student" and not doc.student:
 		frappe.throw(_("Student is required for a single student announcement."))
 
@@ -569,8 +583,18 @@ def _resolve_announcement_recipients(doc):
 		return _enrollment_parent_recipients({"term": doc.term})
 	if doc.audience_type == "Term + Course":
 		return _enrollment_parent_recipients({"term": doc.term, "course": doc.course})
+	if doc.audience_type == "Term + Courses":
+		recipients = []
+		for course in _announcement_target_values(doc, "Course"):
+			recipients.extend(_enrollment_parent_recipients({"term": doc.term, "course": course}))
+		return _dedupe_recipients(recipients)
 	if doc.audience_type == "Course Session":
 		return _session_parent_recipients(doc.course_session)
+	if doc.audience_type == "Course Sessions":
+		recipients = []
+		for course_session in _announcement_target_values(doc, "Course Session"):
+			recipients.extend(_session_parent_recipients(course_session))
+		return _dedupe_recipients(recipients)
 	if doc.audience_type == "Single Student":
 		return _dedupe_recipients([_single_student_recipient(doc.student)])
 	return []
@@ -632,6 +656,74 @@ def _session_parent_recipients(course_session):
 		parent = _student_parent(row.student)
 		recipients.append(_recipient_from_parent_name(parent, student=row.student, audience_source=row.enrollment_type or "Course Session", source_document=row.name))
 	return _dedupe_recipients(recipients)
+
+
+def _normalise_announcement_targets(values):
+	"""Return safe child-table rows for the two multi-target announcement audiences."""
+	if not isinstance(values, list):
+		return []
+	rows = []
+	seen = set()
+	for value in values:
+		if not isinstance(value, dict):
+			continue
+		target_type = str(value.get("target_type") or "").strip()
+		course = str(value.get("course") or "").strip()
+		course_session = str(value.get("course_session") or "").strip()
+		if target_type == "Course" and course:
+			key = (target_type, course)
+			row = {"target_type": target_type, "course": course, "course_session": ""}
+		elif target_type == "Course Session" and course_session:
+			key = (target_type, course_session)
+			row = {"target_type": target_type, "course": "", "course_session": course_session}
+		else:
+			continue
+		if key not in seen:
+			seen.add(key)
+			rows.append(row)
+	return rows
+
+
+def _announcement_target_values(doc, target_type):
+	fieldname = "course" if target_type == "Course" else "course_session"
+	values = []
+	for row in doc.get("audience_targets") or []:
+		if row.get("target_type") != target_type:
+			continue
+		value = str(row.get(fieldname) or "").strip()
+		if value and value not in values:
+			values.append(value)
+	return values
+
+
+def _announcement_targets_by_announcement(announcement_names):
+	if not announcement_names:
+		return {}
+	rows = frappe.get_all(
+		TARGET_DOCTYPE,
+		filters={"parent": ["in", announcement_names], "parenttype": ANNOUNCEMENT_DOCTYPE},
+		fields=["parent", "target_type", "course", "course_session"],
+		order_by="parent asc, idx asc",
+		limit=0,
+	)
+	items = {}
+	for row in rows:
+		items.setdefault(row.parent, []).append(
+			{
+				"target_type": row.target_type,
+				"course": row.course,
+				"course_session": row.course_session,
+			}
+		)
+	return items
+
+
+def _announcement_target_summary(targets):
+	if not targets:
+		return ""
+	count = len(targets)
+	label = "course" if targets[0].get("target_type") == "Course" else "session"
+	return f"{count} {label}{'' if count == 1 else 's'} selected"
 
 
 def _recipient_from_parent_name(parent, **extra):
@@ -793,6 +885,15 @@ def _delete_existing_recipients(announcement):
 
 def _doc_payload(doc):
 	data = {field.fieldname: doc.get(field.fieldname) for field in doc.meta.fields if field.fieldtype not in {"Section Break", "Column Break", "Tab Break", "Button", "HTML"}}
+	data["audience_targets"] = [
+		{
+			"target_type": row.get("target_type"),
+			"course": row.get("course"),
+			"course_session": row.get("course_session"),
+		}
+		for row in doc.get("audience_targets") or []
+	]
+	data["audience_target_summary"] = _announcement_target_summary(data["audience_targets"])
 	data["name"] = doc.name
 	data["body"] = _announcement_content_html(doc, doc.body)
 	data["image_url"] = _announcement_image_url(doc)

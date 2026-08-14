@@ -14,6 +14,7 @@
   "term",
   "course",
   "course_session",
+  "audience_targets",
   "student",
   "content_section",
   "body",
@@ -56,7 +57,7 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Audience Type",
-   "options": "All Parents\nTerm\nTerm + Course\nCourse Session\nSingle Student",
+   "options": "All Parents\nTerm\nTerm + Course\nTerm + Courses\nCourse Session\nCourse Sessions\nSingle Student",
    "reqd": 1
   },
   {
@@ -84,6 +85,12 @@
    "in_standard_filter": 1,
    "label": "Course Session",
    "options": "Course Sessions"
+  },
+  {
+   "fieldname": "audience_targets",
+   "fieldtype": "Table",
+   "label": "Audience Targets",
+   "options": "School Announcement Target"
   },
   {
    "fieldname": "student",

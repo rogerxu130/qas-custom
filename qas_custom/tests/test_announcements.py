@@ -130,6 +130,73 @@ class TestSingleStudentAnnouncements(TestCase):
 			with self.assertRaises(frappe.ValidationError):
 				_validate_announcement(doc)
 
+	def test_multi_course_audience_requires_at_least_one_course(self):
+		doc = frappe._dict(
+			title="Test",
+			body="Message",
+			audience_type="Term + Courses",
+			term="TERM-1",
+			audience_targets=[],
+		)
+
+		with patch("qas_custom.services.announcements._", side_effect=lambda message: message), patch(
+			"qas_custom.services.announcements.frappe.throw", side_effect=frappe.ValidationError
+		):
+			with self.assertRaises(frappe.ValidationError):
+				_validate_announcement(doc)
+
+	@patch("qas_custom.services.announcements._enrollment_parent_recipients")
+	def test_multi_course_audience_deduplicates_families(self, enrollment_recipients):
+		enrollment_recipients.side_effect = [
+			[
+				{"parent": "PAR-1", "student": "STU-1", "email": "one@example.com"},
+				{"parent": "PAR-2", "student": "STU-2", "email": "two@example.com"},
+			],
+			[
+				{"parent": "PAR-1", "student": "STU-3", "email": "one@example.com"},
+				{"parent": "PAR-3", "student": "STU-4", "email": "three@example.com"},
+			],
+		]
+		doc = frappe._dict(
+			audience_type="Term + Courses",
+			term="TERM-1",
+			audience_targets=[
+				frappe._dict(target_type="Course", course="COURSE-1"),
+				frappe._dict(target_type="Course", course="COURSE-2"),
+			],
+		)
+
+		result = _resolve_announcement_recipients(doc)
+
+		self.assertEqual([row["parent"] for row in result], ["PAR-1", "PAR-2", "PAR-3"])
+		self.assertEqual(
+			enrollment_recipients.call_args_list[0].args[0],
+			{"term": "TERM-1", "course": "COURSE-1"},
+		)
+		self.assertEqual(
+			enrollment_recipients.call_args_list[1].args[0],
+			{"term": "TERM-1", "course": "COURSE-2"},
+		)
+
+	@patch("qas_custom.services.announcements._session_parent_recipients")
+	def test_multi_session_audience_deduplicates_families(self, session_recipients):
+		session_recipients.side_effect = [
+			[{"parent": "PAR-1", "student": "STU-1", "email": "one@example.com"}],
+			[{"parent": "PAR-1", "student": "STU-2", "email": "one@example.com"}],
+		]
+		doc = frappe._dict(
+			audience_type="Course Sessions",
+			audience_targets=[
+				frappe._dict(target_type="Course Session", course_session="SESSION-1"),
+				frappe._dict(target_type="Course Session", course_session="SESSION-2"),
+			],
+		)
+
+		result = _resolve_announcement_recipients(doc)
+
+		self.assertEqual([row["parent"] for row in result], ["PAR-1"])
+		self.assertEqual([call.args[0] for call in session_recipients.call_args_list], ["SESSION-1", "SESSION-2"])
+
 	@patch("qas_custom.services.announcements._recipient_from_parent_name")
 	@patch("qas_custom.services.announcements._student_parent", return_value="PAR-1")
 	def test_single_student_resolves_exactly_one_family(self, _parent, recipient_from_parent):

@@ -1,0 +1,36 @@
+{
+ "actions": [],
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": ["target_type", "course", "course_session"],
+ "fields": [
+  {
+   "fieldname": "target_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Target Type",
+   "options": "Course\nCourse Session",
+   "reqd": 1
+  },
+  {
+   "fieldname": "course",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Course",
+   "options": "Course"
+  },
+  {
+   "fieldname": "course_session",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Course Session",
+   "options": "Course Sessions"
+  }
+ ],
+ "istable": 1,
+ "module": "QAS Custom",
+ "name": "School Announcement Target",
+ "sort_field": "idx",
+ "sort_order": "ASC"
+}
