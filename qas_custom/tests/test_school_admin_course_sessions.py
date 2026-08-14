@@ -7,6 +7,7 @@ from frappe.utils import getdate
 from qas_custom.api.school_admin import school_admin_get_course_sessions
 from qas_custom.services.school_admin import (
 	_course_session_sort_key,
+	_get_course_session_makeup_counts,
 	_get_course_session_rows,
 	get_school_admin_course_sessions_data,
 )
@@ -35,6 +36,27 @@ class TestSchoolAdminCourseSessions(TestCase):
 
 		self.assertEqual(result[0]["name"], "SESSION-VALID")
 		self.assertEqual({row["name"] for row in result[1:]}, {"SESSION-INVALID", "SESSION-MISSING"})
+
+	@patch("qas_custom.services.school_admin._has_field", return_value=True)
+	@patch("qas_custom.services.school_admin._doctype_available", return_value=True)
+	@patch("qas_custom.services.school_admin.frappe.get_all")
+	def test_makeup_counts_only_active_makeup_attendance(self, get_all, _doctype_available, _has_field):
+		get_all.return_value = [
+			_dict(course_session="SESSION-1", source_doctype="Makeup Voucher", makeup_voucher=None),
+			_dict(course_session="SESSION-1", source_doctype=None, makeup_voucher="MV-1"),
+			_dict(course_session="SESSION-2", source_doctype="Inquiry", makeup_voucher=None),
+		]
+
+		result = _get_course_session_makeup_counts(["SESSION-1", "SESSION-2"])
+
+		self.assertEqual(result, {"SESSION-1": 2})
+		self.assertEqual(
+			get_all.call_args.kwargs["filters"],
+			{
+				"course_session": ["in", ["SESSION-1", "SESSION-2"]],
+				"status": ["not in", ["Cancelled", "Leave"]],
+			},
+		)
 
 	@patch("qas_custom.api.school_admin.get_school_admin_course_sessions_data")
 	def test_api_accepts_and_passes_course_session_status_and_teacher(self, get_sessions):
@@ -129,6 +151,7 @@ class TestSchoolAdminCourseSessions(TestCase):
 		)
 
 	@patch("qas_custom.services.school_admin._get_course_session_leave_counts", return_value={})
+	@patch("qas_custom.services.school_admin._get_course_session_makeup_counts", return_value={})
 	@patch("qas_custom.services.school_admin._get_course_session_trial_counts", return_value={})
 	@patch("qas_custom.services.school_admin._get_course_session_student_counts", return_value={})
 	@patch("qas_custom.services.school_admin._get_timeslot_map")
@@ -143,6 +166,7 @@ class TestSchoolAdminCourseSessions(TestCase):
 		get_timeslot_map,
 		_student_counts,
 		_trial_counts,
+		_makeup_counts,
 		_leave_counts,
 	):
 		get_all.return_value = [
