@@ -1,7 +1,7 @@
 {
  "actions": [],
  "allow_rename": 1,
- "autoname": "MAT-PROD-.YYYY.-.#####",
+ "autoname": "STORE-PROD-.YYYY.-.#####",
  "doctype": "DocType",
  "document_type": "Document",
  "engine": "InnoDB",
@@ -14,13 +14,13 @@
   {"default": "0", "fieldname": "display_order", "fieldtype": "Int", "in_list_view": 1, "label": "Display order"},
   {"fieldname": "item_code", "fieldtype": "Link", "label": "ERPNext Item", "options": "Item", "read_only": 1},
   {"fieldname": "media_section", "fieldtype": "Section Break", "label": "Product media"},
-  {"fieldname": "images", "fieldtype": "Table", "label": "Images", "options": "Material Product Image"},
-  {"fieldname": "videos", "fieldtype": "Table", "label": "External videos", "options": "Material Product Video"}
+  {"fieldname": "images", "fieldtype": "Table", "label": "Images", "options": "Store Product Image"},
+  {"fieldname": "videos", "fieldtype": "Table", "label": "External videos", "options": "Store Product Video"}
  ],
  "index_web_pages_for_search": 1,
  "links": [],
  "module": "QAS Custom",
- "name": "Material Product",
+ "name": "Store Product",
  "permissions": [
   {"create": 1, "delete": 1, "email": 1, "export": 1, "print": 1, "read": 1, "report": 1, "role": "System Manager", "share": 1, "write": 1},
   {"create": 1, "delete": 1, "email": 1, "export": 1, "print": 1, "read": 1, "report": 1, "role": "School Admin", "share": 1, "write": 1}

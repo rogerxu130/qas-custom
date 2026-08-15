@@ -10,14 +10,14 @@ from frappe.utils import add_days, cint, flt, now_datetime, nowdate
 from frappe.utils.file_manager import save_file
 
 
-PRODUCT_DOCTYPE = "Material Product"
-ORDER_DOCTYPE = "Material Order"
+PRODUCT_DOCTYPE = "Store Product"
+ORDER_DOCTYPE = "Store Order"
 ADMIN_ROLES = {"School Admin", "System Manager"}
 IMAGE_FORMATS = {"jpeg": "jpg", "png": "png", "webp": "webp"}
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 
 
-def get_school_admin_material_products_data(active=None, query=None, limit=160):
+def get_school_admin_store_products_data(active=None, query=None, limit=160):
 	_require_school_admin()
 	filters = {}
 	if active is not None and str(active) != "":
@@ -34,12 +34,12 @@ def get_school_admin_material_products_data(active=None, query=None, limit=160):
 	return {"items": [_product_payload(frappe.get_doc(PRODUCT_DOCTYPE, row.name), include_media=False) for row in rows]}
 
 
-def get_school_admin_material_product_data(product=None):
+def get_school_admin_store_product_data(product=None):
 	_require_school_admin()
 	return _product_payload(_get_product(product), include_media=True)
 
 
-def save_school_admin_material_product_data(product=None, payload=None):
+def save_school_admin_store_product_data(product=None, payload=None):
 	_require_school_admin()
 	data = _payload(payload)
 	doc = _get_product(product) if product else frappe.new_doc(PRODUCT_DOCTYPE)
@@ -60,7 +60,7 @@ def save_school_admin_material_product_data(product=None, payload=None):
 	return _product_payload(doc, include_media=True)
 
 
-def upload_school_admin_material_product_image_data(product=None):
+def upload_school_admin_store_product_image_data(product=None):
 	_require_school_admin()
 	doc = _get_product(product)
 	upload = frappe.request.files.get("image") if frappe.request else None
@@ -82,7 +82,7 @@ def upload_school_admin_material_product_image_data(product=None):
 	return _product_payload(doc, include_media=True)
 
 
-def get_school_admin_material_orders_data(status=None, query=None, limit=160):
+def get_school_admin_store_orders_data(status=None, query=None, limit=160):
 	_require_school_admin()
 	filters = {}
 	if status:
@@ -104,18 +104,18 @@ def get_school_admin_material_orders_data(status=None, query=None, limit=160):
 	return {"items": items}
 
 
-def get_school_admin_material_order_data(order=None):
+def get_school_admin_store_order_data(order=None):
 	_require_school_admin()
 	return _order_payload(_get_order(order), include_items=True)
 
 
-def get_school_admin_material_order_options_data(parent=None):
+def get_school_admin_store_order_options_data(parent=None):
 	_require_school_admin()
 	parent_doc = _get_parent(parent)
 	return {"parent": _parent_payload(parent_doc), "pickup_sessions": _pickup_sessions_for_parent(parent_doc.name)}
 
 
-def create_school_admin_material_order_data(payload=None):
+def create_school_admin_store_order_data(payload=None):
 	_require_school_admin()
 	data = _payload(payload)
 	parent_doc = _get_parent(data.get("parent"))
@@ -125,10 +125,10 @@ def create_school_admin_material_order_data(payload=None):
 	if not frappe.db.exists("Customer", customer):
 		frappe.throw(_("The parent customer account was not found."))
 	pickup = _validate_pickup_session(parent_doc.name, data.get("pickup_course_session"))
-	items = _material_order_items(data.get("items"))
+	items = _store_order_items(data.get("items"))
 	order = frappe.get_doc(
 		{
-			"doctype": ORDER_DOCTYPE,
+		"doctype": ORDER_DOCTYPE,
 			"parent": parent_doc.name,
 			"customer": customer,
 			"status": "Ordered",
@@ -143,12 +143,12 @@ def create_school_admin_material_order_data(payload=None):
 	invoice = _create_and_submit_material_invoice(order, parent_doc)
 	order.invoice = invoice.name
 	order.save(ignore_permissions=True)
-	order.add_comment("Comment", _("Material order created by {0}. Invoice: {1}.").format(frappe.session.user, invoice.name))
+	order.add_comment("Comment", _("Store order created by {0}. Invoice: {1}.").format(frappe.session.user, invoice.name))
 	frappe.db.commit()
 	return _order_payload(order, include_items=True)
 
 
-def update_school_admin_material_order_status_data(order=None, status=None, reason=None):
+def update_school_admin_store_order_status_data(order=None, status=None, reason=None):
 	_require_school_admin()
 	doc = _get_order(order)
 	status = str(status or "").strip()
@@ -169,7 +169,7 @@ def update_school_admin_material_order_status_data(order=None, status=None, reas
 			doc.collected_at = now_datetime()
 			doc.collected_by = frappe.session.user
 		doc.save(ignore_permissions=True)
-		doc.add_comment("Comment", _("Material order marked {0} by {1}.").format(status, frappe.session.user))
+		doc.add_comment("Comment", _("Store order marked {0} by {1}.").format(status, frappe.session.user))
 		frappe.db.commit()
 	return _order_payload(doc, include_items=True)
 
@@ -182,7 +182,7 @@ def _cancel_order(doc, reason=None):
 
 		cancel_school_admin_invoice_data(
 			invoice=invoice.name,
-			reason=reason or "Material order cancelled",
+		reason=reason or "Store order cancelled",
 			allow_empty_reason=True,
 			send_notifications=True,
 		)
@@ -193,7 +193,7 @@ def _cancel_order(doc, reason=None):
 	doc.save(ignore_permissions=True)
 	doc.add_comment(
 		"Comment",
-		_("Material order cancelled by {0}.{1}").format(frappe.session.user, f" Reason: {reason}" if reason else ""),
+		_("Store order cancelled by {0}.{1}").format(frappe.session.user, f" Reason: {reason}" if reason else ""),
 	)
 	frappe.db.commit()
 
@@ -205,13 +205,13 @@ def _create_and_submit_material_invoice(order, parent_doc):
 	_set_if_field(invoice, "customer", order.customer)
 	_set_if_field(invoice, "due_date", nowdate())
 	_set_if_field(invoice, "parent", order.parent)
-	_set_if_field(invoice, "qas_invoice_type", "Material Order")
-	_set_if_field(invoice, "source_type", "Material Order")
+	_set_if_field(invoice, "qas_invoice_type", "Store Order")
+	_set_if_field(invoice, "source_type", "Store Order")
 	_set_if_field(invoice, "source_doctype", ORDER_DOCTYPE)
 	_set_if_field(invoice, "source_document", order.name)
 	_set_if_field(invoice, "qas_is_manual_invoice", 0)
 	_set_if_field(invoice, "qas_apply_store_credit_on_submit", 0)
-	_set_if_field(invoice, "remarks", _("Material order {0}. Pickup: {1} {2} at {3}.").format(order.name, order.pickup_campus or "", order.pickup_date or "", order.pickup_time or ""))
+	_set_if_field(invoice, "remarks", _("Store order {0}. Pickup: {1} {2} at {3}.").format(order.name, order.pickup_campus or "", order.pickup_date or "", order.pickup_time or ""))
 	for row in order.get("items") or []:
 		invoice.append(
 			"items",
@@ -229,14 +229,14 @@ def _create_and_submit_material_invoice(order, parent_doc):
 	return frappe.get_doc("Sales Invoice", invoice.name)
 
 
-def _material_order_items(rows):
+def _store_order_items(rows):
 	if not isinstance(rows, list) or not rows:
 		frappe.throw(_("Add at least one material product."))
 	items, seen = [], set()
 	for raw in rows:
 		if not isinstance(raw, dict):
 			continue
-		product_name = str(raw.get("material_product") or raw.get("product") or "").strip()
+		product_name = str(raw.get("store_product") or raw.get("product") or "").strip()
 		qty = cint(raw.get("qty"))
 		if not product_name or qty <= 0:
 			frappe.throw(_("Each material order line needs an active product and quantity greater than zero."))
@@ -251,7 +251,7 @@ def _material_order_items(rows):
 		seen.add(product_name)
 		items.append(
 			{
-				"material_product": product.name,
+				"store_product": product.name,
 				"product_name": product.product_name,
 				"item_code": item_code,
 				"unit_price": flt(product.unit_price),
@@ -387,7 +387,7 @@ def _order_payload(doc, include_items=True):
 	if include_items:
 		payload["items"] = [
 			{
-				"material_product": row.material_product,
+				"store_product": row.store_product,
 				"product_name": row.product_name,
 				"item_code": row.item_code,
 				"unit_price": flt(row.unit_price),

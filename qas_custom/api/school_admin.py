@@ -26,15 +26,15 @@ from qas_custom.services.teacher_training import (
 	upload_school_admin_training_inline_image_data,
 )
 from qas_custom.services.material_orders import (
-	create_school_admin_material_order_data,
-	get_school_admin_material_order_data,
-	get_school_admin_material_order_options_data,
-	get_school_admin_material_orders_data,
-	get_school_admin_material_product_data,
-	get_school_admin_material_products_data,
-	save_school_admin_material_product_data,
-	update_school_admin_material_order_status_data,
-	upload_school_admin_material_product_image_data,
+	create_school_admin_store_order_data,
+	get_school_admin_store_order_data,
+	get_school_admin_store_order_options_data,
+	get_school_admin_store_orders_data,
+	get_school_admin_store_product_data,
+	get_school_admin_store_products_data,
+	save_school_admin_store_product_data,
+	update_school_admin_store_order_status_data,
+	upload_school_admin_store_product_image_data,
 )
 from qas_custom.services.support_view import create_support_view_token, get_support_view_targets
 from qas_custom.services.school_admin_reporting import (
@@ -312,48 +312,48 @@ def school_admin_upload_training_inline_image(article=None):
 
 
 @frappe.whitelist()
-def school_admin_get_material_products(active=None, query=None, limit=160):
-	return get_school_admin_material_products_data(active=active, query=query, limit=limit)
+def school_admin_get_store_products(active=None, query=None, limit=160):
+	return get_school_admin_store_products_data(active=active, query=query, limit=limit)
 
 
 @frappe.whitelist()
-def school_admin_get_material_product(product=None):
-	return get_school_admin_material_product_data(product=product)
+def school_admin_get_store_product(product=None):
+	return get_school_admin_store_product_data(product=product)
 
 
 @frappe.whitelist()
-def school_admin_save_material_product(product=None, payload=None):
-	return save_school_admin_material_product_data(product=product, payload=payload)
+def school_admin_save_store_product(product=None, payload=None):
+	return save_school_admin_store_product_data(product=product, payload=payload)
 
 
 @frappe.whitelist()
-def school_admin_upload_material_product_image(product=None):
-	return upload_school_admin_material_product_image_data(product=product)
+def school_admin_upload_store_product_image(product=None):
+	return upload_school_admin_store_product_image_data(product=product)
 
 
 @frappe.whitelist()
-def school_admin_get_material_orders(status=None, query=None, limit=160):
-	return get_school_admin_material_orders_data(status=status, query=query, limit=limit)
+def school_admin_get_store_orders(status=None, query=None, limit=160):
+	return get_school_admin_store_orders_data(status=status, query=query, limit=limit)
 
 
 @frappe.whitelist()
-def school_admin_get_material_order(order=None):
-	return get_school_admin_material_order_data(order=order)
+def school_admin_get_store_order(order=None):
+	return get_school_admin_store_order_data(order=order)
 
 
 @frappe.whitelist()
-def school_admin_get_material_order_options(parent=None):
-	return get_school_admin_material_order_options_data(parent=parent)
+def school_admin_get_store_order_options(parent=None):
+	return get_school_admin_store_order_options_data(parent=parent)
 
 
 @frappe.whitelist()
-def school_admin_create_material_order(payload=None):
-	return create_school_admin_material_order_data(payload=payload)
+def school_admin_create_store_order(payload=None):
+	return create_school_admin_store_order_data(payload=payload)
 
 
 @frappe.whitelist()
-def school_admin_update_material_order_status(order=None, status=None, reason=None):
-	return update_school_admin_material_order_status_data(order=order, status=status, reason=reason)
+def school_admin_update_store_order_status(order=None, status=None, reason=None):
+	return update_school_admin_store_order_status_data(order=order, status=status, reason=reason)
 
 
 @frappe.whitelist()

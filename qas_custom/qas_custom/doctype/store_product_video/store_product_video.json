@@ -4,12 +4,13 @@
  "editable_grid": 1,
  "engine": "InnoDB",
  "fields": [
-  {"fieldname": "image", "fieldtype": "Attach Image", "in_list_view": 1, "label": "Image", "reqd": 1},
+  {"fieldname": "label", "fieldtype": "Data", "in_list_view": 1, "label": "Label", "reqd": 1},
+  {"fieldname": "url", "fieldtype": "Data", "in_list_view": 1, "label": "Video URL", "reqd": 1},
   {"default": "0", "fieldname": "display_order", "fieldtype": "Int", "label": "Display order"}
  ],
  "istable": 1,
  "module": "QAS Custom",
- "name": "Material Product Image",
+ "name": "Store Product Video",
  "sort_field": "idx",
  "sort_order": "ASC"
 }

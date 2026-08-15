@@ -4,7 +4,7 @@
  "editable_grid": 1,
  "engine": "InnoDB",
  "fields": [
-  {"fieldname": "material_product", "fieldtype": "Link", "in_list_view": 1, "label": "Material Product", "options": "Material Product", "reqd": 1},
+  {"fieldname": "store_product", "fieldtype": "Link", "in_list_view": 1, "label": "Store Product", "options": "Store Product", "reqd": 1},
   {"fieldname": "product_name", "fieldtype": "Data", "in_list_view": 1, "label": "Product name", "read_only": 1, "reqd": 1},
   {"fieldname": "item_code", "fieldtype": "Link", "label": "ERPNext Item", "options": "Item", "read_only": 1, "reqd": 1},
   {"fieldname": "unit_price", "fieldtype": "Currency", "label": "Unit price", "read_only": 1, "reqd": 1},
@@ -13,7 +13,7 @@
  ],
  "istable": 1,
  "module": "QAS Custom",
- "name": "Material Order Item",
+ "name": "Store Order Item",
  "sort_field": "idx",
  "sort_order": "ASC"
 }

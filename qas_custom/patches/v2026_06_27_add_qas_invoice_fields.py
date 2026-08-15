@@ -62,7 +62,7 @@ def _add_sales_invoice_fields():
 			"fieldname": "qas_invoice_type",
 			"fieldtype": "Select",
 			"label": "QAS Invoice Type",
-			"options": "Course\nStore Credit Top-up\nHoliday Program\nMaterial Order\nOther",
+			"options": "Course\nStore Credit Top-up\nHoliday Program\nStore Order\nOther",
 			"default": "Course",
 			"insert_after": "student_summary",
 			"in_standard_filter": 1,
