@@ -1,0 +1,41 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "MAT-ORD-.YYYY.-.#####",
+ "doctype": "DocType",
+ "document_type": "Document",
+ "engine": "InnoDB",
+ "field_order": ["parent", "customer", "status", "invoice", "pickup_section", "pickup_course_session", "pickup_campus", "pickup_date", "pickup_time", "items_section", "items", "activity_section", "ready_at", "ready_by", "collected_at", "collected_by", "cancelled_at", "cancelled_by", "cancellation_reason"],
+ "fields": [
+  {"fieldname": "parent", "fieldtype": "Link", "in_list_view": 1, "label": "Parent", "options": "Parent", "reqd": 1},
+  {"fieldname": "customer", "fieldtype": "Link", "in_list_view": 1, "label": "Customer", "options": "Customer", "reqd": 1},
+  {"default": "Ordered", "fieldname": "status", "fieldtype": "Select", "in_list_view": 1, "label": "Status", "options": "Ordered\nReady for collection\nCollected\nCancelled", "reqd": 1},
+  {"fieldname": "invoice", "fieldtype": "Link", "in_list_view": 1, "label": "Material Invoice", "options": "Sales Invoice", "read_only": 1},
+  {"fieldname": "pickup_section", "fieldtype": "Section Break", "label": "Pickup appointment"},
+  {"fieldname": "pickup_course_session", "fieldtype": "Link", "label": "Pickup Course Session", "options": "Course Sessions", "reqd": 1},
+  {"fieldname": "pickup_campus", "fieldtype": "Link", "label": "Pickup Campus", "options": "Campus", "read_only": 1},
+  {"fieldname": "pickup_date", "fieldtype": "Date", "label": "Pickup Date", "read_only": 1},
+  {"fieldname": "pickup_time", "fieldtype": "Data", "label": "Pickup Time", "read_only": 1},
+  {"fieldname": "items_section", "fieldtype": "Section Break", "label": "Order items"},
+  {"fieldname": "items", "fieldtype": "Table", "label": "Items", "options": "Material Order Item", "reqd": 1},
+  {"fieldname": "activity_section", "fieldtype": "Section Break", "label": "Activity"},
+  {"fieldname": "ready_at", "fieldtype": "Datetime", "label": "Ready at", "read_only": 1},
+  {"fieldname": "ready_by", "fieldtype": "Link", "label": "Ready by", "options": "User", "read_only": 1},
+  {"fieldname": "collected_at", "fieldtype": "Datetime", "label": "Collected at", "read_only": 1},
+  {"fieldname": "collected_by", "fieldtype": "Link", "label": "Collected by", "options": "User", "read_only": 1},
+  {"fieldname": "cancelled_at", "fieldtype": "Datetime", "label": "Cancelled at", "read_only": 1},
+  {"fieldname": "cancelled_by", "fieldtype": "Link", "label": "Cancelled by", "options": "User", "read_only": 1},
+  {"fieldname": "cancellation_reason", "fieldtype": "Small Text", "label": "Cancellation reason", "read_only": 1}
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "module": "QAS Custom",
+ "name": "Material Order",
+ "permissions": [
+  {"create": 1, "delete": 1, "email": 1, "export": 1, "print": 1, "read": 1, "report": 1, "role": "System Manager", "share": 1, "write": 1},
+  {"create": 1, "delete": 0, "email": 1, "export": 1, "print": 1, "read": 1, "report": 1, "role": "School Admin", "share": 1, "write": 1}
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1
+}

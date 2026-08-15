@@ -309,6 +309,8 @@ def grant_store_credit_bonus_for_payment_entry(payment_entry):
 		return {"created": False, "skipped": True, "reason": "No linked sales invoice."}
 
 	invoice_doc = frappe.get_doc("Sales Invoice", invoice_name) if invoice_name and _doctype_available("Sales Invoice") else None
+	if invoice_doc and not _is_course_invoice(invoice_doc):
+		return {"created": False, "skipped": True, "reason": "Invoice is not eligible for a Store Credit bonus."}
 	customer = doc.get("party") if doc.get("party_type") == "Customer" else None
 	if not customer and invoice_doc:
 		customer = invoice_doc.get("customer")
