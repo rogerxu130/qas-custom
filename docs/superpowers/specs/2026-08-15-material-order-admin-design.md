@@ -9,8 +9,8 @@ also out of scope.
 
 School Admin users can:
 
-- maintain a catalogue of active material products, including an image,
-  description, price, and display order;
+- maintain a catalogue of active material products, including multiple images,
+  external video links, description, price, and display order;
 - create an order for an existing family with one or more products and
   quantities;
 - select one of the family's future class sessions as the pickup appointment;
@@ -35,8 +35,11 @@ not choose a separate campus.
 
 A setup document containing:
 
-- product name, description, image attachment, unit price, active flag, and
-  display order;
+- product name, description, unit price, active flag, and display order;
+- an ordered product-image gallery using uploaded File attachments; and
+- an ordered list of external video links (such as YouTube or another web
+  resource). Videos are linked rather than uploaded to avoid large-file
+  storage and streaming requirements;
 - an ERPNext Item link, created/updated as a non-stock item; and
 - audit fields supplied by Frappe.
 
@@ -109,7 +112,8 @@ Add a `Materials` entry to the School Admin portal with two views.
 ### Products
 
 The catalogue view lists active/inactive products and supports creating and
-editing name, image, description, price, display order, and active state.
+editing name, description, price, display order, active state, an ordered
+image gallery, and ordered external video links.
 
 ### Orders
 
