@@ -5,6 +5,7 @@ from qas_custom.services.inquiry import (
 	assign_inquiry_course_session_data,
 	convert_inquiry_data,
 	create_inquiry_data,
+	create_school_visit_webhook_data,
 	create_inquiry_webhook_data,
 	get_inquiry_data,
 	mark_inquiry_cancelled_data,
@@ -24,6 +25,11 @@ def inquiry_create(payload=None):
 @frappe.whitelist(allow_guest=True)
 def inquiry_webhook_create(payload=None):
 	return create_inquiry_webhook_data(payload=payload)
+
+
+@frappe.whitelist(allow_guest=True)
+def school_visit_webhook_create(payload=None):
+	return create_school_visit_webhook_data(payload=payload)
 
 
 @frappe.whitelist()

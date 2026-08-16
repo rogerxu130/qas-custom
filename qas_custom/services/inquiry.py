@@ -81,6 +81,31 @@ def create_inquiry_webhook_data(payload=None):
 	return _build_webhook_response(inquiry_id, status="created", duplicate=False)
 
 
+def create_school_visit_webhook_data(payload=None):
+	"""Create a School Visit Inquiry from the public Fluent Form.
+
+	The adapter owns the external form contract while the shared Inquiry core
+	continues to own family matching, appointment validation, notifications, and
+	duplicate-safe creation.
+	"""
+	payload = _get_payload(payload)
+	_validate_webhook_token(payload)
+	normalized = _normalize_school_visit_webhook_payload(payload)
+	external_submission_id = normalized.get("external_submission_id")
+	if not external_submission_id:
+		frappe.throw(_("External submission ID is required."))
+
+	existing = _get_existing_webhook_inquiry(external_submission_id)
+	if existing:
+		return _build_webhook_response(existing, status="duplicate", duplicate=True)
+
+	normalized["skip_confirmation"] = True
+	normalized["raw_webhook_payload"] = payload
+	detail = create_inquiry_core(normalized, source="Fluent Form", actor=None)
+	inquiry_id = (detail.get("inquiry") or {}).get("id")
+	return _build_webhook_response(inquiry_id, status="created", duplicate=False)
+
+
 def get_inquiry_data(inquiry=None):
 	_require_admin()
 	if not inquiry:
@@ -694,6 +719,22 @@ def _normalize_webhook_payload(payload: dict):
 	return normalized
 
 
+def _normalize_school_visit_webhook_payload(payload: dict):
+	"""Pin a public form delivery to the School Visit workflow.
+
+	A form integration must never be able to accidentally attach a School Visit
+	to a class session merely because an unrelated field is present in its body.
+	"""
+	normalized = _normalize_webhook_payload(payload)
+	normalized["inquiry_type"] = "School Visit"
+	normalized["source"] = "Fluent Form"
+	normalized["webhook_source"] = normalized.get("webhook_source") or "Fluent Form"
+	normalized["create_parent"] = True
+	normalized["course_session"] = None
+	normalized["submitted_class_session"] = None
+	return normalized
+
+
 def _normalize_appointment_aliases(normalized: dict):
 	aliases = {
 		"visit_date": "appointment_date",
@@ -715,6 +756,17 @@ def _normalize_appointment_aliases(normalized: dict):
 		"customer_message": "referral_detail",
 		"interested_course": "preferred_course",
 		"requested_course": "preferred_course",
+		"campus_to_visit": "campus",
+		"campus_to_visit_": "campus",
+		"date_for_the_visit": "appointment_date",
+		"time_to_arrive": "appointment_time",
+		"class_that_interest_you": "preferred_course",
+		"class_that_interests_you": "preferred_course",
+		"Campus to visit": "campus",
+		"Date for the visit": "appointment_date",
+		"Time to arrive": "appointment_time",
+		"Class that interest you": "preferred_course",
+		"Class that interests you": "preferred_course",
 	}
 	for source, target in aliases.items():
 		if not normalized.get(target) and normalized.get(source):
