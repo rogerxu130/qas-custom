@@ -359,6 +359,188 @@ def get_school_admin_term_paid_invoice_summary_data(term=None):
 	}
 
 
+def get_school_admin_active_enrollment_trend_data(term=None):
+	"""Return a daily active-enrollment trend for a Term.
+
+	The trend is reconstructed from the Enrollment creation date and real status
+	changes recorded in Version.  It deliberately does not infer history from a
+	document's ``modified`` timestamp: that would create invented movement dates.
+	"""
+	_require_school_admin()
+	_validate_term(term)
+	for doctype in ("Enrollment", "Version"):
+		if not _doctype_available(doctype):
+			frappe.throw(_("{0} data is not installed yet. Please run the site migration.").format(doctype))
+
+	term_doc = frappe.get_doc("Term", term)
+	start_date = getdate(term_doc.start_date)
+	end_date = min(getdate(term_doc.end_date), get_datetime_in_timezone(BRISBANE_TIMEZONE).date())
+	if end_date < start_date:
+		return _empty_active_enrollment_trend(term, start_date, end_date)
+
+	enrollments = frappe.get_all(
+		"Enrollment",
+		filters={"term": term},
+		fields=_safe_fields("Enrollment", ["name", "student", "status", "creation"]),
+		order_by="creation asc, name asc",
+		limit_page_length=0,
+	)
+	enrollment_names = [row.get("name") for row in enrollments if row.get("name")]
+	versions_by_enrollment = defaultdict(list)
+	version_count = 0
+	if enrollment_names:
+		version_rows = frappe.get_all(
+			"Version",
+			filters={"ref_doctype": "Enrollment", "docname": ["in", enrollment_names]},
+			fields=["name", "docname", "data", "creation"],
+			order_by="creation asc, name asc",
+			limit_page_length=0,
+		)
+		version_count = len(version_rows)
+		for version in version_rows:
+			versions_by_enrollment[version.get("docname")].append(version)
+
+	day_events = defaultdict(list)
+	opening_active = 0
+	for enrollment in enrollments:
+		for event in _active_enrollment_trend_events(enrollment, versions_by_enrollment.get(enrollment.get("name"), [])):
+			event_date = event.get("date")
+			if event_date and event_date < start_date:
+				opening_active += event.get("delta", 0)
+			elif event_date:
+				day_events[event_date].append(event)
+
+	added_count = 0
+	ended_count = 0
+	days = []
+	active_total = 0
+	date_cursor = start_date
+	while date_cursor <= end_date:
+		day_key = str(date_cursor)
+		movements = []
+		for event in day_events.get(date_cursor, []):
+			if event.get("date") > end_date:
+				continue
+			movements.append(event)
+
+		if date_cursor == start_date:
+			active_total = opening_active
+		for event in movements:
+			active_total += event.get("delta", 0)
+			if event.get("kind") == "added":
+				added_count += 1
+			elif event.get("kind") == "ended":
+				ended_count += 1
+
+		days.append(
+			{
+				"date": day_key,
+				"active_end": active_total,
+				"added": sum(1 for event in movements if event.get("kind") == "added"),
+				"ended": sum(1 for event in movements if event.get("kind") == "ended"),
+				"movements": [
+					{
+						"kind": event.get("kind"),
+						"enrollment": event.get("enrollment"),
+						"student": event.get("student") or "-",
+						"status": event.get("status") or "",
+					}
+					for event in movements
+				],
+			}
+		)
+		date_cursor += timedelta(days=1)
+
+	return {
+		"term": term,
+		"range": {"start_date": str(start_date), "end_date": str(end_date)},
+		"summary": {
+			"opening_active": opening_active,
+			"added_count": added_count,
+			"ended_count": ended_count,
+			"current_active": active_total,
+		},
+		"days": days,
+		"diagnostics": {"enrollment_count": len(enrollments), "version_count": version_count},
+	}
+
+
+def _active_enrollment_trend_events(enrollment, versions):
+	"""Return lifecycle movements using only creation and explicit status history."""
+	status_changes = []
+	for version in versions:
+		data = _decode_json(version.get("data"), {})
+		changed = data.get("changed") if isinstance(data, dict) else []
+		if not isinstance(changed, list):
+			continue
+		for change in changed:
+			if not isinstance(change, (list, tuple)) or len(change) < 3 or change[0] != "status":
+				continue
+			status_changes.append(
+				{
+					"date": getdate(version.get("creation")),
+					"from_status": change[1] or "",
+					"to_status": change[2] or "",
+				}
+			)
+
+	initial_status = status_changes[0]["from_status"] if status_changes else enrollment.get("status") or ""
+	was_active = _is_active_enrollment_trend_status(initial_status)
+	events = []
+	if was_active:
+		events.append(
+			{
+				"date": getdate(enrollment.get("creation")),
+				"kind": "added",
+				"delta": 1,
+				"enrollment": enrollment.get("name"),
+				"student": enrollment.get("student"),
+				"status": initial_status,
+			}
+		)
+
+	for change in status_changes:
+		is_active = _is_active_enrollment_trend_status(change["to_status"])
+		if was_active and not is_active:
+			events.append(
+				{
+					"date": change["date"],
+					"kind": "ended",
+					"delta": -1,
+					"enrollment": enrollment.get("name"),
+					"student": enrollment.get("student"),
+					"status": change["to_status"],
+				}
+			)
+		elif not was_active and is_active:
+			events.append(
+				{
+					"date": change["date"],
+					"kind": "added",
+					"delta": 1,
+					"enrollment": enrollment.get("name"),
+					"student": enrollment.get("student"),
+					"status": change["to_status"],
+				}
+			)
+		was_active = is_active
+	return events
+
+
+def _is_active_enrollment_trend_status(status):
+	return str(status or "").strip() not in {"Inactive", "Cancelled"}
+
+
+def _empty_active_enrollment_trend(term, start_date, end_date):
+	return {
+		"term": term,
+		"range": {"start_date": str(start_date), "end_date": str(end_date)},
+		"summary": {"opening_active": 0, "added_count": 0, "ended_count": 0, "current_active": 0},
+		"days": [],
+		"diagnostics": {"enrollment_count": 0, "version_count": 0},
+	}
+
+
 def get_school_admin_teacher_trial_conversion_report_data(term=None):
 	"""Return live, teacher-attributed outcomes for Trials actually attended in one Term."""
 	_require_school_admin()

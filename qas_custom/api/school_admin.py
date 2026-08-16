@@ -38,6 +38,7 @@ from qas_custom.services.material_orders import (
 )
 from qas_custom.services.support_view import create_support_view_token, get_support_view_targets
 from qas_custom.services.school_admin_reporting import (
+	get_school_admin_active_enrollment_trend_data,
 	get_school_admin_daily_teacher_report_data,
 	get_school_admin_teacher_trial_conversion_report_data,
 	get_school_admin_term_paid_invoice_summary_data,
@@ -519,6 +520,11 @@ def school_admin_get_voucher_report(status=None, query=None, page=1, page_length
 @frappe.whitelist()
 def school_admin_get_term_paid_invoice_summary(term=None):
 	return get_school_admin_term_paid_invoice_summary_data(term=term)
+
+
+@frappe.whitelist()
+def school_admin_get_active_enrollment_trend(term=None):
+	return get_school_admin_active_enrollment_trend_data(term=term)
 
 
 @frappe.whitelist()
