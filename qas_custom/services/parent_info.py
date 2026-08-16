@@ -3,11 +3,13 @@ from __future__ import annotations
 import frappe
 
 from qas_custom.modules.billing.store_credit import get_store_credit_balance
+from qas_custom.config.shop_testing import parent_shop_testing_enabled
 from qas_custom.services.support_view import get_support_view_parent
 
 
 def get_parent_info_data():
-    parent = get_support_view_parent()
+    support_parent = get_support_view_parent()
+    parent = support_parent
     if parent:
         parent_name = parent.name
     else:
@@ -64,4 +66,5 @@ def get_parent_info_data():
         "parent_name": parent.get("parent_name"),
         "store_credit": float(get_store_credit_balance(parent=parent.name, customer=parent.get("customer")) or 0),
         "students": payload_students,
+        "shop_testing_enabled": parent_shop_testing_enabled() and not bool(support_parent),
     }

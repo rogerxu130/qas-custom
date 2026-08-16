@@ -119,6 +119,55 @@ def create_school_admin_store_order_data(payload=None):
 	_require_school_admin()
 	data = _payload(payload)
 	parent_doc = _get_parent(data.get("parent"))
+	return _create_store_order(parent_doc, data)
+
+
+def get_parent_store_products_data(limit=80):
+	parent_doc = _require_parent_shop_testing()
+	rows = frappe.get_all(
+		PRODUCT_DOCTYPE,
+		filters={"active": 1},
+		fields=["name"],
+		order_by="display_order asc, product_name asc, modified desc",
+		limit_page_length=_limit(limit, 80, 160),
+	)
+	return {
+		"items": [_parent_product_payload(frappe.get_doc(PRODUCT_DOCTYPE, row.name)) for row in rows],
+		"parent": _parent_payload(parent_doc),
+	}
+
+
+def get_parent_store_order_options_data():
+	parent_doc = _require_parent_shop_testing()
+	return {"parent": _parent_payload(parent_doc), "pickup_sessions": _pickup_sessions_for_parent(parent_doc.name)}
+
+
+def get_parent_store_orders_data(limit=80):
+	parent_doc = _require_parent_shop_testing()
+	rows = frappe.get_all(
+		ORDER_DOCTYPE,
+		filters={"parent": parent_doc.name},
+		fields=["name"],
+		order_by="modified desc",
+		limit_page_length=_limit(limit, 80, 160),
+	)
+	return {"items": [_order_payload(frappe.get_doc(ORDER_DOCTYPE, row.name), include_items=True) for row in rows]}
+
+
+def get_parent_store_order_data(order=None):
+	parent_doc = _require_parent_shop_testing()
+	doc = _get_order(order)
+	if doc.parent != parent_doc.name:
+		frappe.throw(_("This order does not belong to your family."), frappe.PermissionError)
+	return _order_payload(doc, include_items=True)
+
+
+def create_parent_store_order_data(payload=None):
+	parent_doc = _require_parent_shop_testing()
+	return _create_store_order(parent_doc, _payload(payload))
+
+
+def _create_store_order(parent_doc, data):
 	customer = str(parent_doc.get("customer") or "").strip()
 	if not customer:
 		frappe.throw(_("This parent does not have a customer account. Open the family record and save it first."))
@@ -362,6 +411,18 @@ def _product_payload(doc, include_media=True):
 	return payload
 
 
+def _parent_product_payload(doc):
+	payload = _product_payload(doc, include_media=True)
+	return {
+		"name": payload["name"],
+		"product_name": payload["product_name"],
+		"description": payload["description"],
+		"unit_price": payload["unit_price"],
+		"images": payload.get("images") or [],
+		"videos": payload.get("videos") or [],
+	}
+
+
 def _order_payload(doc, include_items=True):
 	invoice = _invoice_payment_payload(doc.invoice)
 	payload = {
@@ -486,6 +547,18 @@ def _payload(value):
 def _require_school_admin():
 	if not ADMIN_ROLES.intersection(set(frappe.get_roles(frappe.session.user))):
 		frappe.throw(_("School Admin access is required."), frappe.PermissionError)
+
+
+def _require_parent_shop_testing():
+	from qas_custom.config.shop_testing import require_parent_shop_testing
+
+	if frappe.session.user == "Guest":
+		frappe.throw(_("Login required."), frappe.PermissionError)
+	require_parent_shop_testing()
+	parent_name = frappe.db.get_value("Parent", {"linked_user": frappe.session.user}, "name")
+	if not parent_name:
+		frappe.throw(_("No parent record is linked to this account."), frappe.PermissionError)
+	return frappe.get_cached_doc("Parent", parent_name)
 
 
 def _has_field(doctype, fieldname):

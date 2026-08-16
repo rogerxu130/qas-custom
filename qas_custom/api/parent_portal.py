@@ -7,6 +7,13 @@ from qas_custom.services.parent_feed import (
     get_parent_feed_video_content,
 )
 from qas_custom.services.parent_info import get_parent_info_data
+from qas_custom.services.material_orders import (
+    create_parent_store_order_data,
+    get_parent_store_order_data,
+    get_parent_store_order_options_data,
+    get_parent_store_orders_data,
+    get_parent_store_products_data,
+)
 from qas_custom.services.parent_portal_read import (
     get_parent_invoices_data,
     get_parent_schedule_data,
@@ -121,6 +128,31 @@ def parent_portal_redeem_voucher(voucher_id=None, session_id=None, student=None)
 @frappe.whitelist()
 def parent_portal_get_invoices():
     return get_parent_invoices_data()
+
+
+@frappe.whitelist()
+def parent_portal_get_store_products(limit=80):
+    return get_parent_store_products_data(limit=limit)
+
+
+@frappe.whitelist()
+def parent_portal_get_store_order_options():
+    return get_parent_store_order_options_data()
+
+
+@frappe.whitelist()
+def parent_portal_get_store_orders(limit=80):
+    return get_parent_store_orders_data(limit=limit)
+
+
+@frappe.whitelist()
+def parent_portal_get_store_order(order=None):
+    return get_parent_store_order_data(order=order)
+
+
+@frappe.whitelist()
+def parent_portal_create_store_order(payload=None):
+    return create_parent_store_order_data(payload=payload)
 
 
 @frappe.whitelist()
