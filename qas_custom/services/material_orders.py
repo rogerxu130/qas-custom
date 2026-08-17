@@ -11,6 +11,7 @@ from frappe.utils.file_manager import save_file
 
 
 PRODUCT_DOCTYPE = "Store Product"
+PRODUCT_CATEGORY_DOCTYPE = "Store Product Category"
 ORDER_DOCTYPE = "Store Order"
 ADMIN_ROLES = {"School Admin", "System Manager"}
 IMAGE_FORMATS = {"jpeg": "jpg", "png": "png", "webp": "webp"}
@@ -34,6 +35,43 @@ def get_school_admin_store_products_data(active=None, query=None, limit=160):
 	return {"items": [_product_payload(frappe.get_doc(PRODUCT_DOCTYPE, row.name), include_media=False) for row in rows]}
 
 
+def get_school_admin_store_product_categories_data(active=None, query=None, limit=160):
+	_require_school_admin()
+	filters = {}
+	if active is not None and str(active) != "":
+		filters["active"] = cint(active)
+	if query:
+		filters["category_name"] = ["like", f"%{str(query).strip()}%"]
+	rows = frappe.get_all(
+		PRODUCT_CATEGORY_DOCTYPE,
+		filters=filters,
+		fields=["name", "category_name", "display_order", "active", "modified"],
+		order_by="display_order asc, category_name asc, modified desc",
+		limit_page_length=_limit(limit, 160, 400),
+	)
+	return {"items": [_category_payload(row) for row in rows]}
+
+
+def save_school_admin_store_product_category_data(category=None, payload=None):
+	_require_school_admin()
+	data = _payload(payload)
+	doc = frappe.get_doc(PRODUCT_CATEGORY_DOCTYPE, category) if category else frappe.new_doc(PRODUCT_CATEGORY_DOCTYPE)
+	doc.category_name = str(data.get("category_name") or "").strip()
+	doc.display_order = cint(data.get("display_order") or 0)
+	doc.active = cint(data.get("active", 1))
+	if not doc.category_name:
+		frappe.throw(_("Category name is required."))
+	duplicate = frappe.db.exists(
+		PRODUCT_CATEGORY_DOCTYPE,
+		{"category_name": doc.category_name, "name": ["!=", doc.name or ""]},
+	)
+	if duplicate:
+		frappe.throw(_("A product category with this name already exists."))
+	doc.save(ignore_permissions=True)
+	frappe.db.commit()
+	return _category_payload(doc)
+
+
 def get_school_admin_store_product_data(product=None):
 	_require_school_admin()
 	return _product_payload(_get_product(product), include_media=True)
@@ -48,6 +86,7 @@ def save_school_admin_store_product_data(product=None, payload=None):
 	doc.unit_price = flt(data.get("unit_price"))
 	doc.active = cint(data.get("active", 1))
 	doc.display_order = cint(data.get("display_order") or 0)
+	doc.primary_category = _valid_product_category(data.get("primary_category"))
 	if not doc.product_name:
 		frappe.throw(_("Product name is required."))
 	if doc.unit_price < 0:
@@ -76,7 +115,8 @@ def upload_school_admin_store_product_image_data(product=None):
 	file_doc = save_file(
 		f"{base_name}.{IMAGE_FORMATS[image_type]}", content, PRODUCT_DOCTYPE, doc.name, is_private=0, df="images"
 	)
-	doc.append("images", {"image": file_doc.file_url, "display_order": len(doc.get("images") or [])})
+	next_order = max((_media_display_order(row, index) for index, row in enumerate(doc.get("images") or [])), default=-1) + 1
+	doc.append("images", {"image": file_doc.file_url, "display_order": next_order})
 	doc.save(ignore_permissions=True)
 	frappe.db.commit()
 	return _product_payload(doc, include_media=True)
@@ -131,8 +171,16 @@ def get_parent_store_products_data(limit=80):
 		order_by="display_order asc, product_name asc, modified desc",
 		limit_page_length=_limit(limit, 80, 160),
 	)
+	categories = frappe.get_all(
+		PRODUCT_CATEGORY_DOCTYPE,
+		filters={"active": 1},
+		fields=["name", "category_name", "display_order", "active", "modified"],
+		order_by="display_order asc, category_name asc, modified desc",
+		limit_page_length=0,
+	)
 	return {
 		"items": [_parent_product_payload(frappe.get_doc(PRODUCT_DOCTYPE, row.name)) for row in rows],
+		"categories": [_category_payload(row) for row in categories],
 		"parent": _parent_payload(parent_doc),
 	}
 
@@ -388,6 +436,7 @@ def _ensure_material_item(product):
 
 
 def _product_payload(doc, include_media=True):
+	category = _category_payload_for_product(doc.get("primary_category"))
 	payload = {
 		"name": doc.name,
 		"product_name": doc.product_name or "",
@@ -396,17 +445,19 @@ def _product_payload(doc, include_media=True):
 		"active": cint(doc.active),
 		"display_order": cint(doc.display_order),
 		"item_code": doc.item_code or "",
+		"primary_category": doc.get("primary_category") or "",
+		"category": category,
 		"modified": doc.modified,
 	}
 	if include_media:
 		payload["images"] = [
-			{"image": row.image, "display_order": cint(row.display_order or index)}
-			for index, row in enumerate(doc.get("images") or [])
+			{"image": row.image, "display_order": _media_display_order(row, index)}
+			for index, row in _ordered_media(doc.get("images") or [])
 			if row.image
 		]
 		payload["videos"] = [
-			{"label": row.label, "url": row.url, "display_order": cint(row.display_order or index)}
-			for index, row in enumerate(doc.get("videos") or [])
+			{"label": row.label, "url": row.url, "display_order": _media_display_order(row, index)}
+			for index, row in _ordered_media(doc.get("videos") or [])
 		]
 	return payload
 
@@ -418,9 +469,44 @@ def _parent_product_payload(doc):
 		"product_name": payload["product_name"],
 		"description": payload["description"],
 		"unit_price": payload["unit_price"],
+		"primary_category": payload["primary_category"],
+		"category": payload["category"] if payload["category"] and payload["category"]["active"] else None,
 		"images": payload.get("images") or [],
 		"videos": payload.get("videos") or [],
 	}
+
+
+def _category_payload(doc):
+	return {
+		"name": doc.name,
+		"category_name": doc.category_name or "",
+		"display_order": cint(doc.display_order),
+		"active": cint(doc.active),
+		"modified": doc.get("modified"),
+	}
+
+
+def _category_payload_for_product(category):
+	if not category or not frappe.db.exists(PRODUCT_CATEGORY_DOCTYPE, category):
+		return None
+	return _category_payload(frappe.get_cached_doc(PRODUCT_CATEGORY_DOCTYPE, category))
+
+
+def _valid_product_category(category):
+	category = str(category or "").strip()
+	if category and not frappe.db.exists(PRODUCT_CATEGORY_DOCTYPE, category):
+		frappe.throw(_("Product category was not found."))
+	return category or None
+
+
+def _ordered_media(rows):
+	indexed = list(enumerate(rows))
+	return sorted(indexed, key=lambda entry: (_media_display_order(entry[1], entry[0]), entry[0]))
+
+
+def _media_display_order(row, fallback):
+	value = row.get("display_order")
+	return cint(value) if value is not None else fallback
 
 
 def _order_payload(doc, include_items=True):

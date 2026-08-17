@@ -5,9 +5,10 @@
  "doctype": "DocType",
  "document_type": "Document",
  "engine": "InnoDB",
- "field_order": ["product_name", "description", "unit_price", "active", "display_order", "item_code", "media_section", "images", "videos"],
+ "field_order": ["product_name", "primary_category", "description", "unit_price", "active", "display_order", "item_code", "media_section", "images", "videos"],
  "fields": [
   {"fieldname": "product_name", "fieldtype": "Data", "in_list_view": 1, "label": "Product name", "reqd": 1},
+  {"fieldname": "primary_category", "fieldtype": "Link", "in_list_view": 1, "label": "Primary category", "options": "Store Product Category"},
   {"fieldname": "description", "fieldtype": "Text Editor", "label": "Description"},
   {"fieldname": "unit_price", "fieldtype": "Currency", "in_list_view": 1, "label": "Unit price", "reqd": 1},
   {"default": "1", "fieldname": "active", "fieldtype": "Check", "in_list_view": 1, "label": "Active"},

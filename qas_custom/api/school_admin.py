@@ -27,11 +27,13 @@ from qas_custom.services.teacher_training import (
 )
 from qas_custom.services.material_orders import (
 	create_school_admin_store_order_data,
+	get_school_admin_store_product_categories_data,
 	get_school_admin_store_order_data,
 	get_school_admin_store_order_options_data,
 	get_school_admin_store_orders_data,
 	get_school_admin_store_product_data,
 	get_school_admin_store_products_data,
+	save_school_admin_store_product_category_data,
 	save_school_admin_store_product_data,
 	update_school_admin_store_order_status_data,
 	upload_school_admin_store_product_image_data,
@@ -318,6 +320,11 @@ def school_admin_get_store_products(active=None, query=None, limit=160):
 
 
 @frappe.whitelist()
+def school_admin_get_store_product_categories(active=None, query=None, limit=160):
+	return get_school_admin_store_product_categories_data(active=active, query=query, limit=limit)
+
+
+@frappe.whitelist()
 def school_admin_get_store_product(product=None):
 	return get_school_admin_store_product_data(product=product)
 
@@ -325,6 +332,11 @@ def school_admin_get_store_product(product=None):
 @frappe.whitelist()
 def school_admin_save_store_product(product=None, payload=None):
 	return save_school_admin_store_product_data(product=product, payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_save_store_product_category(category=None, payload=None):
+	return save_school_admin_store_product_category_data(category=category, payload=payload)
 
 
 @frappe.whitelist()
