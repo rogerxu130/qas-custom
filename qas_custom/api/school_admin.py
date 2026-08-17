@@ -523,8 +523,8 @@ def school_admin_get_term_paid_invoice_summary(term=None):
 
 
 @frappe.whitelist()
-def school_admin_get_active_enrollment_trend(term=None):
-	return get_school_admin_active_enrollment_trend_data(term=term)
+def school_admin_get_active_enrollment_trend(term=None, campus=None):
+	return get_school_admin_active_enrollment_trend_data(term=term, campus=campus)
 
 
 @frappe.whitelist()

@@ -359,7 +359,7 @@ def get_school_admin_term_paid_invoice_summary_data(term=None):
 	}
 
 
-def get_school_admin_active_enrollment_trend_data(term=None):
+def get_school_admin_active_enrollment_trend_data(term=None, campus=None):
 	"""Return a daily active-enrollment trend for a Term.
 
 	The trend is reconstructed from the Enrollment creation date and real status
@@ -368,23 +368,42 @@ def get_school_admin_active_enrollment_trend_data(term=None):
 	"""
 	_require_school_admin()
 	_validate_term(term)
-	for doctype in ("Enrollment", "Version"):
+	for doctype in ("Enrollment", "Version", "Weekly Timeslot"):
 		if not _doctype_available(doctype):
 			frappe.throw(_("{0} data is not installed yet. Please run the site migration.").format(doctype))
+
+	timeslots = frappe.get_all(
+		"Weekly Timeslot",
+		filters={"term": term},
+		fields=_safe_fields("Weekly Timeslot", ["name", "campus"]),
+		limit_page_length=0,
+	)
+	timeslot_map = {row.get("name"): dict(row) for row in timeslots if row.get("name")}
+	campus_names = sorted({str(row.get("campus")).strip() for row in timeslots if row.get("campus")})
+	campus = str(campus or "").strip()
+	if campus and campus not in campus_names:
+		frappe.throw(_("Campus {0} is not available for the selected Term.").format(campus))
+	campus_options = [{"value": item, "label": item} for item in campus_names]
 
 	term_doc = frappe.get_doc("Term", term)
 	start_date = getdate(term_doc.start_date)
 	end_date = min(getdate(term_doc.end_date), get_datetime_in_timezone(BRISBANE_TIMEZONE).date())
 	if end_date < start_date:
-		return _empty_active_enrollment_trend(term, start_date, end_date)
+		return _empty_active_enrollment_trend(term, start_date, end_date, campus=campus, campus_options=campus_options)
 
 	enrollments = frappe.get_all(
 		"Enrollment",
 		filters={"term": term},
-		fields=_safe_fields("Enrollment", ["name", "student", "status", "creation"]),
+		fields=_safe_fields("Enrollment", ["name", "student", "status", "creation", "weekly_timeslot"]),
 		order_by="creation asc, name asc",
 		limit_page_length=0,
 	)
+	if campus:
+		enrollments = [
+			row
+			for row in enrollments
+			if (timeslot_map.get(row.get("weekly_timeslot")) or {}).get("campus") == campus
+		]
 	enrollment_names = [row.get("name") for row in enrollments if row.get("name")]
 	versions_by_enrollment = defaultdict(list)
 	version_count = 0
@@ -453,6 +472,8 @@ def get_school_admin_active_enrollment_trend_data(term=None):
 
 	return {
 		"term": term,
+		"campus": campus,
+		"campus_options": campus_options,
 		"range": {"start_date": str(start_date), "end_date": str(end_date)},
 		"summary": {
 			"opening_active": opening_active,
@@ -531,9 +552,11 @@ def _is_active_enrollment_trend_status(status):
 	return str(status or "").strip() not in {"Inactive", "Cancelled"}
 
 
-def _empty_active_enrollment_trend(term, start_date, end_date):
+def _empty_active_enrollment_trend(term, start_date, end_date, campus="", campus_options=None):
 	return {
 		"term": term,
+		"campus": campus,
+		"campus_options": campus_options or [],
 		"range": {"start_date": str(start_date), "end_date": str(end_date)},
 		"summary": {"opening_active": 0, "added_count": 0, "ended_count": 0, "current_active": 0},
 		"days": [],
