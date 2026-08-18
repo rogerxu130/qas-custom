@@ -97,7 +97,7 @@ def set_course_invoice_source(invoice, inquiry: str):
 	if not current_source:
 		set_if_field(invoice, "source_doctype", "Inquiry")
 		set_if_field(invoice, "source_document", inquiry)
-		set_if_field(invoice, "billing_note", _("Draft course invoice generated from trial conversion."))
+		set_if_field(invoice, "billing_note", _("Draft course invoice generated from Inquiry conversion."))
 	elif current_source != inquiry:
 		set_if_field(
 			invoice,

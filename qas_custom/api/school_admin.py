@@ -174,7 +174,12 @@ from qas_custom.services.school_admin import (
 	submit_school_admin_invoice_data,
 	transfer_school_admin_enrollment_data,
 	copy_school_admin_term_data,
+	convert_school_admin_school_visit_to_enrollment_data,
+	convert_school_admin_school_visit_to_trial_data,
+	create_school_admin_school_visit_data,
 	create_school_admin_trial_inquiry_data,
+	get_school_admin_school_visit_enrollment_sessions_data,
+	preview_school_admin_school_visit_enrollment_data,
 	update_school_admin_attendance_data,
 	update_school_admin_course_session_teacher_data,
 	update_school_admin_draft_invoice_data,
@@ -694,6 +699,36 @@ def school_admin_get_inquiry(inquiry=None):
 @frappe.whitelist()
 def school_admin_create_trial_inquiry(payload=None):
 	return create_school_admin_trial_inquiry_data(payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_create_school_visit(payload=None):
+	return create_school_admin_school_visit_data(payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_convert_school_visit_to_trial(inquiry=None, payload=None):
+	return convert_school_admin_school_visit_to_trial_data(inquiry=inquiry, payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_get_school_visit_enrollment_sessions(inquiry=None, start_date=None, course=None, campus=None):
+	return get_school_admin_school_visit_enrollment_sessions_data(
+		inquiry=inquiry,
+		start_date=start_date,
+		course=course,
+		campus=campus,
+	)
+
+
+@frappe.whitelist()
+def school_admin_preview_school_visit_enrollment(inquiry=None, payload=None):
+	return preview_school_admin_school_visit_enrollment_data(inquiry=inquiry, payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_convert_school_visit_to_enrollment(inquiry=None, payload=None):
+	return convert_school_admin_school_visit_to_enrollment_data(inquiry=inquiry, payload=payload)
 
 
 @frappe.whitelist()

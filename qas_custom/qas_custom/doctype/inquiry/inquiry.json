@@ -49,6 +49,7 @@
   "trial_invoice",
   "confirmation_status",
   "reminder_status",
+  "converted_trial_inquiry",
   "converted_enrollment",
   "converted_invoice",
   "inactive_reason"
@@ -323,6 +324,13 @@
    "fieldtype": "Select",
    "label": "Reminder Status",
    "options": "Not Required\nPending\nSent\nFailed"
+  },
+  {
+   "fieldname": "converted_trial_inquiry",
+   "fieldtype": "Link",
+   "label": "Converted Trial Inquiry",
+   "options": "Inquiry",
+   "read_only": 1
   },
   {
    "fieldname": "converted_enrollment",

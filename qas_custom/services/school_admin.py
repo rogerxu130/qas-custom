@@ -20,9 +20,12 @@ from PIL import Image, ImageOps
 
 from qas_custom.services.billing_enrollment import (
 	convert_inquiry_to_full_term_core,
+	convert_school_visit_to_full_term_core,
 	get_conversion_session_options,
+	get_school_visit_conversion_session_options,
 	link_existing_enrollment_core,
 	mark_inquiry_inactive_core,
+	preview_school_visit_enrollment_core,
 )
 from qas_custom.modules.attendance.commands import create_full_term_attendance_entries, update_attendance_status
 from qas_custom.modules.billing.store_credit import (
@@ -73,6 +76,7 @@ from qas_custom.modules.makeup.pricing import (
 	preview_makeup_target_pricing,
 )
 from qas_custom.modules.notifications.commands import enqueue_session_staff_notification
+from qas_custom.modules.inquiry.notes import add_system_note
 from qas_custom.modules.notifications.makeup_parent_notifications import (
     queue_makeup_booking_confirmation,
     queue_makeup_voucher_issued_email,
@@ -1290,6 +1294,276 @@ def create_school_admin_trial_inquiry_data(payload=None):
 		detail = add_inquiry_note_core(inquiry, note, actor=frappe.session.user, commit=False)
 	frappe.db.commit()
 	return detail
+
+
+def create_school_admin_school_visit_data(payload=None):
+	_require_school_admin()
+	payload = _get_payload(payload)
+	parent_name = str(payload.get("parent_name") or payload.get("contact_name") or "").strip()
+	email = str(payload.get("contact_email") or payload.get("email") or "").strip().lower()
+	phone = str(payload.get("contact_phone") or payload.get("phone") or "").strip()
+	campus = str(payload.get("campus") or "").strip()
+	appointment_date = payload.get("appointment_date") or payload.get("visit_date")
+	appointment_time = payload.get("appointment_time") or payload.get("visit_time")
+	missing = []
+	for label, value in (
+		(_("Parent name"), parent_name),
+		(_("Parent email"), email),
+		(_("Mobile phone"), phone),
+		(_("Campus"), campus),
+		(_("Visit date"), appointment_date),
+		(_("Visit time"), appointment_time),
+	):
+		if not value:
+			missing.append(label)
+	if missing:
+		frappe.throw(_("Required fields are missing: {0}.").format(", ".join(str(item) for item in missing)))
+	validate_email_address(email, throw=True)
+
+	visit_payload = {
+		"inquiry_type": "School Visit",
+		"parent_name": parent_name,
+		"contact_name": parent_name,
+		"contact_email": email,
+		"contact_phone": phone,
+		"campus": campus,
+		"appointment_date": appointment_date,
+		"appointment_time": appointment_time,
+		"preferred_course": payload.get("preferred_course") or payload.get("course"),
+		"create_parent": True,
+		"skip_confirmation": True,
+	}
+	detail = create_inquiry_core(
+		visit_payload,
+		source="Manual",
+		actor=frappe.session.user,
+		commit=False,
+	)
+	inquiry = (detail.get("inquiry") or {}).get("id")
+	note = str(payload.get("note") or "").strip()
+	if note:
+		detail = add_inquiry_note_core(inquiry, note, actor=frappe.session.user, commit=False)
+	frappe.db.commit()
+	return detail
+
+
+def convert_school_admin_school_visit_to_trial_data(inquiry=None, payload=None):
+	_require_school_admin()
+	payload = _get_payload(payload)
+	inquiry = inquiry or payload.get("inquiry")
+	visit = _get_school_visit_for_conversion(inquiry)
+	existing_trial = str(visit.get("converted_trial_inquiry") or "").strip()
+	if existing_trial:
+		return {
+			"inquiry": build_inquiry_detail(visit.name),
+			"conversion": {"trial_inquiry": existing_trial, "trial": build_inquiry_detail(existing_trial)},
+			"duplicate": True,
+		}
+	_assert_school_visit_conversion_available(visit)
+
+	course_session = str(payload.get("course_session") or "").strip()
+	if not course_session:
+		frappe.throw(_("Course Session is required."))
+	student_payload = _school_visit_conversion_student_payload(visit, payload)
+	trial_payload = {
+		**student_payload,
+		"parent": visit.parent,
+		"inquiry_type": "Trial Lesson",
+		"course_session": course_session,
+		"require_bookable_session": True,
+		"prevent_duplicate_student_session": True,
+		"contact_name": visit.contact_name,
+		"contact_email": visit.contact_email,
+		"contact_phone": visit.contact_phone,
+		"preferred_course": visit.preferred_course,
+		"referral_source": visit.referral_source,
+		"referral_detail": visit.referral_detail,
+	}
+	trial_detail = create_inquiry_core(
+		trial_payload,
+		source="School Visit Conversion",
+		actor=frappe.session.user,
+		commit=False,
+	)
+	trial_inquiry = (trial_detail.get("inquiry") or {}).get("id")
+	trial_student = (trial_detail.get("inquiry") or {}).get("student")
+	trial_doc = frappe.get_doc("Inquiry", trial_inquiry)
+	_copy_school_visit_notes(visit, trial_doc)
+	note = str(payload.get("note") or "").strip()
+	if note:
+		add_inquiry_note_core(trial_inquiry, note, actor=frappe.session.user, commit=False)
+
+	visit.student = trial_student
+	visit.converted_trial_inquiry = trial_inquiry
+	visit.status = "Converted"
+	visit.save(ignore_permissions=True)
+	add_system_note(
+		visit,
+		_("School Visit converted to Trial Lesson Inquiry {0} by {1}.").format(trial_inquiry, frappe.session.user),
+		source_doctype="Inquiry",
+		source_document=trial_inquiry,
+		actor=frappe.session.user,
+	)
+	add_system_note(
+		trial_doc,
+		_("Trial Lesson created from School Visit {0} by {1}.").format(visit.name, frappe.session.user),
+		source_doctype="Inquiry",
+		source_document=visit.name,
+		actor=frappe.session.user,
+	)
+	frappe.db.commit()
+	return {
+		"inquiry": build_inquiry_detail(visit.name),
+		"conversion": {"trial_inquiry": trial_inquiry, "trial": build_inquiry_detail(trial_inquiry)},
+		"duplicate": False,
+	}
+
+
+def get_school_admin_school_visit_enrollment_sessions_data(
+	inquiry=None,
+	start_date=None,
+	course=None,
+	campus=None,
+):
+	_require_school_admin()
+	return get_school_visit_conversion_session_options(
+		inquiry=inquiry,
+		start_date=start_date,
+		course=course,
+		campus=campus,
+	)
+
+
+def preview_school_admin_school_visit_enrollment_data(inquiry=None, payload=None):
+	_require_school_admin()
+	payload = _get_payload(payload)
+	inquiry = inquiry or payload.get("inquiry")
+	visit = _get_school_visit_for_conversion(inquiry)
+	_assert_school_visit_conversion_available(visit)
+	student = str(payload.get("student") or "").strip()
+	if student:
+		_assert_student_belongs_to_parent(student, visit.parent)
+		visit.student = student
+	return preview_school_visit_enrollment_core(visit.name, payload.get("course_session"), inquiry_doc=visit)
+
+
+def convert_school_admin_school_visit_to_enrollment_data(inquiry=None, payload=None):
+	_require_school_admin()
+	payload = _get_payload(payload)
+	inquiry = inquiry or payload.get("inquiry")
+	visit = _get_school_visit_for_conversion(inquiry)
+	existing_enrollment = str(visit.get("converted_enrollment") or "").strip()
+	if existing_enrollment:
+		return {
+			"inquiry": build_inquiry_detail(visit.name),
+			"conversion": {
+				"enrollment": existing_enrollment,
+				"invoice": visit.get("converted_invoice"),
+			},
+			"duplicate": True,
+		}
+	_assert_school_visit_conversion_available(visit)
+	student = _resolve_school_visit_conversion_student(visit, payload)
+	visit.student = student
+	visit.save(ignore_permissions=True)
+	result = convert_school_visit_to_full_term_core(
+		visit,
+		payload.get("course_session"),
+		actor=frappe.session.user,
+		internal_note=payload.get("internal_note") or payload.get("note"),
+	)
+	result["duplicate"] = False
+	return result
+
+
+def _get_school_visit_for_conversion(inquiry):
+	if not inquiry:
+		frappe.throw(_("Inquiry is required."))
+	frappe.db.sql("select name from `tabInquiry` where name = %s for update", (inquiry,))
+	visit = frappe.get_doc("Inquiry", inquiry)
+	if visit.inquiry_type != "School Visit":
+		frappe.throw(_("Only School Visit inquiries can use this action."))
+	return visit
+
+
+def _assert_school_visit_conversion_available(visit):
+	if visit.get("converted_trial_inquiry") or visit.get("converted_enrollment"):
+		frappe.throw(_("This School Visit has already been converted."))
+	if visit.status not in {"Completed", "Follow-up"}:
+		frappe.throw(_("Only Completed or Follow-up School Visits can be converted."))
+	if not visit.get("parent"):
+		frappe.throw(_("Parent is required before converting a School Visit."))
+
+
+def _school_visit_conversion_student_payload(visit, payload):
+	student = str(payload.get("student") or "").strip()
+	if student:
+		_assert_student_belongs_to_parent(student, visit.parent)
+		return {"student": student}
+	student_name = str(payload.get("student_name") or "").strip()
+	date_of_birth = payload.get("date_of_birth")
+	if not student_name or not date_of_birth:
+		frappe.throw(_("Student name and date of birth are required when creating a Student."))
+	return {
+		"student_name": student_name,
+		"date_of_birth": date_of_birth,
+		"student_status": "Inactive",
+	}
+
+
+def _resolve_school_visit_conversion_student(visit, payload):
+	student_payload = _school_visit_conversion_student_payload(visit, payload)
+	if student_payload.get("student"):
+		return student_payload["student"]
+	student_name = student_payload["student_name"]
+	date_of_birth = getdate(student_payload["date_of_birth"])
+	parent_field = _student_parent_field()
+	if not parent_field:
+		frappe.throw(_("Student parent link is not configured."))
+	existing = frappe.db.get_value(
+		"Student",
+		{parent_field: visit.parent, "date_of_birth": date_of_birth},
+		"name",
+	)
+	if existing:
+		return existing
+	student_doc = frappe.new_doc("Student")
+	student_doc.student_name = student_name
+	student_doc.date_of_birth = date_of_birth
+	_set_student_parent(student_doc, visit.parent)
+	if _has_field("Student", "status"):
+		student_doc.status = "Inactive"
+	student_doc.insert(ignore_permissions=True)
+	return student_doc.name
+
+
+def _assert_student_belongs_to_parent(student, parent):
+	if not frappe.db.exists("Student", student):
+		frappe.throw(_("Student was not found."))
+	parent_field = _student_parent_field()
+	student_parent = frappe.db.get_value("Student", student, parent_field) if parent_field else None
+	if not parent_field or student_parent != parent:
+		frappe.throw(_("The selected Student does not belong to the School Visit Parent."))
+
+
+def _copy_school_visit_notes(visit, trial_doc):
+	rows = frappe.get_all(
+		"Inquiry Note",
+		filters={"inquiry": visit.name},
+		fields=["note", "note_type", "author", "edited_at"],
+		order_by="creation asc",
+	)
+	for row in rows:
+		note_doc = frappe.new_doc("Inquiry Note")
+		note_doc.inquiry = trial_doc.name
+		note_doc.student = trial_doc.student
+		note_doc.note = row.note
+		note_doc.author = row.author or frappe.session.user
+		note_doc.edited_at = row.edited_at or now_datetime()
+		_set_if_field(note_doc, "note_type", row.get("note_type") or "Manual")
+		_set_if_field(note_doc, "source_doctype", "Inquiry")
+		_set_if_field(note_doc, "source_document", visit.name)
+		note_doc.insert(ignore_permissions=True)
 
 
 def _manual_trial_existing_family_payload(payload):

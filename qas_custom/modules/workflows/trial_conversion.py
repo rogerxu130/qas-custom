@@ -5,7 +5,11 @@ from frappe import _
 from frappe.utils import flt, getdate, nowdate
 
 from qas_custom.modules.attendance.commands import create_full_term_attendance_entries
-from qas_custom.modules.billing.commands import create_prorata_invoice, run_invoice_mutation_as_administrator
+from qas_custom.modules.billing.commands import (
+	create_prorata_invoice,
+	get_prorata_invoice_context,
+	run_invoice_mutation_as_administrator,
+)
 from qas_custom.modules.common import clear_frappe_messages
 from qas_custom.modules.course_schedule.queries import (
 	build_session_option,
@@ -34,6 +38,15 @@ def get_conversion_session_options(inquiry: str | None, start_date=None, course=
 	if inquiry_doc.status not in {"Completed", "Follow-up"}:
 		frappe.throw(_("Conversion sessions are only available after a trial lesson is completed."))
 
+	return _get_conversion_session_options(inquiry_doc, start_date, course, campus, limit)
+
+
+def get_school_visit_conversion_session_options(inquiry: str | None, start_date=None, course=None, campus=None, limit=80):
+	inquiry_doc = _get_school_visit_for_conversion(inquiry)
+	return _get_conversion_session_options(inquiry_doc, start_date, course, campus, limit)
+
+
+def _get_conversion_session_options(inquiry_doc, start_date=None, course=None, campus=None, limit=80):
 	session_date = getdate(start_date or nowdate())
 	timeslot_filters = {"campus": campus or inquiry_doc.campus}
 	if course:
@@ -68,6 +81,25 @@ def get_conversion_session_options(inquiry: str | None, start_date=None, course=
 	return {"items": items}
 
 
+def preview_school_visit_enrollment_core(inquiry: str | None, course_session: str | None, inquiry_doc=None):
+	inquiry_doc = _get_school_visit_for_conversion(inquiry, inquiry_doc=inquiry_doc)
+	context = _get_full_term_conversion_context(inquiry_doc, course_session)
+	pricing = get_prorata_invoice_context(
+		inquiry_doc=inquiry_doc,
+		course=context["course"],
+		remaining_session_count=len(context["remaining_sessions"]),
+	)
+	return {
+		"course_session": context["session"].name,
+		"course": context["course"],
+		"term": context["term"],
+		"campus": context["timeslot"].get("campus"),
+		"remaining_sessions": len(context["remaining_sessions"]),
+		"unit_rate": flt(pricing["unit_rate"]),
+		"estimated_amount": flt(pricing["unit_rate"]) * len(context["remaining_sessions"]),
+	}
+
+
 def convert_inquiry_to_full_term_core(
 	inquiry: str | None,
 	course_session: str | None,
@@ -79,20 +111,26 @@ def convert_inquiry_to_full_term_core(
 	internal_note = normalize_conversion_internal_note(internal_note)
 
 	inquiry_doc = get_inquiry_for_conversion(inquiry)
-	context = get_session_context(course_session)
-	session = context["session"]
-	timeslot = context["timeslot"]
-	course = timeslot.get("course")
-	term = timeslot.get("term")
-	if not course:
-		frappe.throw(_("Selected session is missing a course."))
-	if not term:
-		frappe.throw(_("Selected session is missing a term."))
+	return _convert_inquiry_doc_to_full_term_core(inquiry_doc, course_session, actor, internal_note)
 
-	assert_no_active_full_term_enrollment(inquiry_doc.student, term, course, timeslot.name)
-	remaining_sessions = get_remaining_sessions(timeslot.name, session.session_date)
-	if not remaining_sessions:
-		frappe.throw(_("No remaining course sessions were found from the selected start session."))
+
+def convert_school_visit_to_full_term_core(inquiry_doc, course_session: str | None, actor=None, internal_note=None):
+	_get_school_visit_for_conversion(inquiry_doc.name, inquiry_doc=inquiry_doc)
+	if not inquiry_doc.get("student"):
+		frappe.throw(_("Student is required before converting a School Visit."))
+	return _convert_inquiry_doc_to_full_term_core(inquiry_doc, course_session, actor, internal_note)
+
+
+def _convert_inquiry_doc_to_full_term_core(inquiry_doc, course_session, actor=None, internal_note=None):
+	if not course_session:
+		frappe.throw(_("Course session is required."))
+	internal_note = normalize_conversion_internal_note(internal_note)
+	conversion_context = _get_full_term_conversion_context(inquiry_doc, course_session)
+	session = conversion_context["session"]
+	timeslot = conversion_context["timeslot"]
+	course = conversion_context["course"]
+	term = conversion_context["term"]
+	remaining_sessions = conversion_context["remaining_sessions"]
 
 	enrollment = create_full_term_enrollment(
 		inquiry_doc=inquiry_doc,
@@ -149,6 +187,48 @@ def convert_inquiry_to_full_term_core(
 			"referral_reward": referral_reward,
 		},
 	}
+
+
+def _get_full_term_conversion_context(inquiry_doc, course_session):
+	if not course_session:
+		frappe.throw(_("Course session is required."))
+	context = get_session_context(course_session)
+	session = context["session"]
+	timeslot = context["timeslot"]
+	course = timeslot.get("course")
+	term = timeslot.get("term")
+	if not course:
+		frappe.throw(_("Selected session is missing a course."))
+	if not term:
+		frappe.throw(_("Selected session is missing a term."))
+
+	if inquiry_doc.get("student"):
+		assert_no_active_full_term_enrollment(inquiry_doc.student, term, course, timeslot.name)
+	remaining_sessions = get_remaining_sessions(timeslot.name, session.session_date)
+	if not remaining_sessions:
+		frappe.throw(_("No remaining course sessions were found from the selected start session."))
+	return {
+		"session": session,
+		"timeslot": timeslot,
+		"course": course,
+		"term": term,
+		"remaining_sessions": remaining_sessions,
+	}
+
+
+def _get_school_visit_for_conversion(inquiry: str | None, inquiry_doc=None):
+	if not inquiry:
+		frappe.throw(_("Inquiry is required."))
+	inquiry_doc = inquiry_doc or frappe.get_doc("Inquiry", inquiry)
+	if inquiry_doc.inquiry_type != "School Visit":
+		frappe.throw(_("Only School Visit inquiries can use this conversion."))
+	if inquiry_doc.status not in {"Completed", "Follow-up"}:
+		frappe.throw(_("Only Completed or Follow-up School Visits can be converted."))
+	if inquiry_doc.get("converted_trial_inquiry") or inquiry_doc.get("converted_enrollment"):
+		frappe.throw(_("This School Visit has already been converted."))
+	if not inquiry_doc.get("parent"):
+		frappe.throw(_("Parent is required before converting a School Visit."))
+	return inquiry_doc
 
 
 def link_existing_enrollment_core(

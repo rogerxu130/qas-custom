@@ -1549,6 +1549,7 @@ def _build_inquiry_payload(doc, include_campus_address=False):
 		"trial_invoice": trial_invoice_status.get("trial_invoice") or doc.trial_invoice,
 		"trial_invoice_status": trial_invoice_status.get("trial_invoice_status"),
 		"trial_invoice_message": trial_invoice_status.get("trial_invoice_message"),
+		"converted_trial_inquiry": doc.get("converted_trial_inquiry"),
 		"converted_enrollment": doc.converted_enrollment,
 		"converted_invoice": doc.get("converted_invoice"),
 		"inactive_reason": doc.inactive_reason,

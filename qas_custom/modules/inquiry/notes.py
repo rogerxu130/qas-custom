@@ -17,6 +17,7 @@ def add_conversion_note(inquiry_doc, enrollment, invoice, session, timeslot, rem
 		session=session,
 		timeslot=timeslot,
 		remaining_session_count=remaining_session_count,
+		inquiry_type=inquiry_doc.inquiry_type,
 	)
 	note_doc.author = actor or frappe.session.user
 	note_doc.edited_at = now_datetime()
@@ -33,7 +34,7 @@ def add_conversion_internal_note(inquiry_doc, invoice, internal_note, actor=None
 		return
 	add_system_note(
 		inquiry_doc=inquiry_doc,
-		note=_("Campus Admin conversion note: {0}").format(note_text),
+		note=_("Conversion note: {0}").format(note_text),
 		source_doctype="Sales Invoice",
 		source_document=invoice.name,
 		actor=actor,
@@ -70,11 +71,16 @@ def add_system_note(inquiry_doc, note, source_doctype=None, source_document=None
 	note_doc.insert()
 
 
-def build_conversion_note(enrollment, invoice, session, timeslot, remaining_session_count: int):
+def build_conversion_note(enrollment, invoice, session, timeslot, remaining_session_count: int, inquiry_type=None):
 	start_date = session.session_date if session and session.get("session_date") else None
 	start_time = timeslot.start_time if timeslot and timeslot.get("start_time") else None
+	conversion_label = (
+		_("School Visit converted to full-term enrollment.")
+		if inquiry_type == "School Visit"
+		else _("Trial converted to full-term enrollment.")
+	)
 	parts = [
-		_("Trial converted to full-term enrollment."),
+		conversion_label,
 		_("Course: {0}").format(timeslot.course),
 		_("Term: {0}").format(timeslot.term),
 		_("Start session: {0}").format(session.name),
