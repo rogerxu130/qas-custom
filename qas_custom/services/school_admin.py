@@ -3998,12 +3998,16 @@ def change_school_admin_weekly_timeslot_teacher_data(weekly_timeslot=None, teach
 	effective_date = getdate(effective_date)
 	if effective_date < getdate(today()):
 		frappe.throw(_("Effective date cannot be before today."))
-	_assert_active_teacher(teacher)
+	teacher = (teacher or "").strip()
+	if teacher:
+		_assert_active_teacher(teacher)
 
 	doc = frappe.get_doc("Weekly Timeslot", weekly_timeslot)
-	previous_teacher = doc.get("teacher")
+	previous_teacher = doc.get("teacher") or ""
 	if teacher == previous_teacher:
 		frappe.throw(_("Choose a different teacher."))
+	previous_teacher_label = previous_teacher or _("Unassigned")
+	teacher_label = teacher or _("Unassigned")
 
 	sessions = frappe.get_all(
 		"Course Sessions",
@@ -4013,7 +4017,7 @@ def change_school_admin_weekly_timeslot_teacher_data(weekly_timeslot=None, teach
 	)
 	preserved_count = 0
 	for session in sessions:
-		if session.get("teacher_override"):
+		if session.get("teacher_override") or not previous_teacher:
 			continue
 		frappe.db.set_value("Course Sessions", session.name, "teacher_override", previous_teacher, update_modified=True)
 		preserved_count += 1
@@ -4031,9 +4035,9 @@ def change_school_admin_weekly_timeslot_teacher_data(weekly_timeslot=None, teach
 	_add_comment(
 		"Weekly Timeslot",
 		doc.name,
-		_("Teacher changed from {0} to {1} effective {2}. Preserved {3} earlier session(s).").format(
-			previous_teacher,
-			teacher,
+		_("Weekly teacher assignment changed from {0} to {1} effective {2}. Preserved {3} earlier session(s).").format(
+			previous_teacher_label,
+			teacher_label,
 			effective_date,
 			preserved_count,
 		),
@@ -4043,6 +4047,8 @@ def change_school_admin_weekly_timeslot_teacher_data(weekly_timeslot=None, teach
 	result["teacher_reassignment"] = {
 		"previous_teacher": previous_teacher,
 		"teacher": teacher,
+		"previous_teacher_label": previous_teacher_label,
+		"teacher_label": teacher_label,
 		"effective_date": str(effective_date),
 		"preserved_session_count": preserved_count,
 		"future_override_count": future_override_count,

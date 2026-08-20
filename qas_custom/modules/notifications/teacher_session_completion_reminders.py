@@ -216,6 +216,11 @@ def _build_completion_states(sessions, timeslots, attendance_rows, published_ses
 		timeslot = timeslots.get(session.get("weekly_timeslot"))
 		if not timeslot:
 			continue
+		teacher = session.get("teacher_override") or timeslot.get("teacher")
+		# Sessions without a teacher remain visible to admins, but must never
+		# produce a teacher-facing attendance/photo reminder.
+		if not teacher:
+			continue
 		expected_rows = [
 			row
 			for row in attendance_by_session.get(session.get("name"), [])
@@ -239,7 +244,7 @@ def _build_completion_states(sessions, timeslots, attendance_rows, published_ses
 				"classroom": timeslot.get("classroom") or "Not assigned",
 				"start_time": _display_time(timeslot.get("start_time")),
 				"end_time": _display_time(timeslot.get("end_time")),
-				"teacher": session.get("teacher_override") or timeslot.get("teacher"),
+				"teacher": teacher,
 				"expected_student_count": len(expected_rows),
 				"needs_attendance": needs_attendance,
 				"needs_photos": needs_photos,

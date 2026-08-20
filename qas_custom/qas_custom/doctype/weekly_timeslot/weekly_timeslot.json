@@ -57,8 +57,7 @@
    "fieldtype": "Link",
    "in_list_view": 1,
    "label": "Teacher",
-   "options": "Teacher",
-   "reqd": 1
+   "options": "Teacher"
   },
   {
    "fieldname": "day_of_week",
