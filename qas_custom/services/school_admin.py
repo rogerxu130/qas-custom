@@ -515,7 +515,9 @@ def update_school_admin_parent_data(parent=None, payload=None):
 	if not parent:
 		frappe.throw(_("Parent is required."))
 	doc = frappe.get_doc("Parent", parent)
-	_apply_master_payload(doc, _get_payload(payload), PARENT_UPDATE_FIELDS)
+	payload_data = _get_payload(payload)
+	_normalize_parent_mass_email_preference(doc, payload_data)
+	_apply_master_payload(doc, payload_data, PARENT_UPDATE_FIELDS)
 	_validate_required(doc, ["parent_name"])
 	doc.save(ignore_permissions=True)
 	_add_comment("Parent", doc.name, _("Parent updated by School Admin."))
@@ -5582,6 +5584,21 @@ def _apply_master_payload(doc, payload, candidate_fields):
 	for fieldname in candidate_fields:
 		if fieldname in payload:
 			_set_if_field(doc, fieldname, payload.get(fieldname))
+
+
+def _normalize_parent_mass_email_preference(doc, payload):
+	fieldname = "mass_email_unsubscribed"
+	if fieldname not in (payload or {}):
+		return
+
+	if not doc.meta.has_field(fieldname):
+		frappe.throw(
+			_(
+				"Mass email preference is not available yet. Please update the QAS Custom app and run migration."
+			)
+		)
+
+	payload[fieldname] = cint(payload.get(fieldname))
 
 
 def _normalize_student_teaching_notes(payload):
