@@ -5,6 +5,11 @@ from qas_custom.services.password_reset import (
     request_teacher_password_reset,
     validate_teacher_password_reset_token,
 )
+from qas_custom.services.parent_classroom_messages import (
+    create_teacher_parent_classroom_message_data,
+    get_teacher_parent_classroom_messages_data,
+    retry_teacher_parent_classroom_message_data,
+)
 from qas_custom.services.teacher_portal import (
     get_teacher_csrf_token_data,
     get_teacher_me_data,
@@ -71,6 +76,39 @@ def teacher_portal_get_training_article(article=None):
 @frappe.whitelist()
 def teacher_portal_update_attendance(course_session=None, updates=None):
     return update_teacher_attendance_data(course_session=course_session, updates=updates)
+
+
+@frappe.whitelist()
+def teacher_portal_create_parent_classroom_message(
+    course_session=None,
+    attendance_entry=None,
+    student=None,
+    category=None,
+    message=None,
+    client_request_id=None,
+):
+    return create_teacher_parent_classroom_message_data(
+        course_session=course_session,
+        attendance_entry=attendance_entry,
+        student=student,
+        category=category,
+        message=message,
+        client_request_id=client_request_id,
+    )
+
+
+@frappe.whitelist()
+def teacher_portal_get_parent_classroom_messages(course_session=None, student=None, limit=50):
+    return get_teacher_parent_classroom_messages_data(
+        course_session=course_session,
+        student=student,
+        limit=limit,
+    )
+
+
+@frappe.whitelist()
+def teacher_portal_retry_parent_classroom_message(parent_classroom_message=None):
+    return retry_teacher_parent_classroom_message_data(parent_classroom_message=parent_classroom_message)
 
 
 @frappe.whitelist()

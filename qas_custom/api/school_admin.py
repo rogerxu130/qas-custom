@@ -1,5 +1,7 @@
 import frappe
 
+from qas_custom.services.parent_classroom_messages import get_school_admin_parent_classroom_messages_data
+
 from qas_custom.services.payment_collection_requests import (
 	get_school_admin_payment_requests_data,
 	resolve_school_admin_payment_request_data,
@@ -237,6 +239,33 @@ def school_admin_get_teacher_directory(query=None, limit=300):
 @frappe.whitelist()
 def school_admin_get_dashboard():
 	return get_school_admin_dashboard_data()
+
+
+@frappe.whitelist()
+def school_admin_get_parent_classroom_messages(
+	query=None,
+	from_date=None,
+	to_date=None,
+	teacher=None,
+	student=None,
+	campus=None,
+	category=None,
+	status=None,
+	limit_start=0,
+	limit=100,
+):
+	return get_school_admin_parent_classroom_messages_data(
+		query=query,
+		from_date=from_date,
+		to_date=to_date,
+		teacher=teacher,
+		student=student,
+		campus=campus,
+		category=category,
+		status=status,
+		limit_start=limit_start,
+		limit=limit,
+	)
 
 
 @frappe.whitelist()

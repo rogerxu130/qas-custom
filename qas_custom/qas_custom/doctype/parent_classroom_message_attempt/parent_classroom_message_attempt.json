@@ -1,0 +1,91 @@
+{
+ "actions": [],
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "attempt_number",
+  "requested_by",
+  "requested_at",
+  "sender_email",
+  "reply_to_email",
+  "email_queue",
+  "status",
+  "sent_at",
+  "error_summary"
+ ],
+ "fields": [
+  {
+   "fieldname": "attempt_number",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Attempt Number",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "requested_by",
+   "fieldtype": "Link",
+   "label": "Requested By",
+   "options": "User",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "requested_at",
+   "fieldtype": "Datetime",
+   "label": "Requested At",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "sender_email",
+   "fieldtype": "Data",
+   "label": "Sender Email",
+   "options": "Email",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reply_to_email",
+   "fieldtype": "Data",
+   "label": "Reply To Email",
+   "options": "Email",
+   "read_only": 1
+  },
+  {
+   "fieldname": "email_queue",
+   "fieldtype": "Link",
+   "label": "Email Queue",
+   "options": "Email Queue",
+   "read_only": 1
+  },
+  {
+   "default": "Queued",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Status",
+   "options": "Queued\nSent\nFailed",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "sent_at",
+   "fieldtype": "Datetime",
+   "label": "Sent At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "error_summary",
+   "fieldtype": "Small Text",
+   "label": "Error Summary",
+   "read_only": 1
+  }
+ ],
+ "istable": 1,
+ "module": "QAS Custom",
+ "name": "Parent Classroom Message Attempt",
+ "permissions": [],
+ "sort_field": "idx",
+ "sort_order": "ASC"
+}

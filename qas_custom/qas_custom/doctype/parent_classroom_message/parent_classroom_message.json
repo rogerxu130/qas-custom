@@ -1,0 +1,176 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "PCM-.YYYY.-.#####",
+ "doctype": "DocType",
+ "document_type": "Document",
+ "engine": "InnoDB",
+ "field_order": [
+  "course_session",
+  "attendance_entry",
+  "student",
+  "parent",
+  "teacher",
+  "content_section",
+  "category",
+  "message",
+  "delivery_section",
+  "recipient_email",
+  "status",
+  "attempt_count",
+  "sent_at",
+  "client_request_id",
+  "created_by_user",
+  "attempts"
+ ],
+ "fields": [
+  {
+   "fieldname": "course_session",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Course Session",
+   "options": "Course Sessions",
+   "reqd": 1
+  },
+  {
+   "fieldname": "attendance_entry",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Attendance Entry",
+   "options": "Class Attendance Entry",
+   "reqd": 1
+  },
+  {
+   "fieldname": "student",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Student",
+   "options": "Student",
+   "reqd": 1
+  },
+  {
+   "fieldname": "parent",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Parent",
+   "options": "Parent",
+   "reqd": 1
+  },
+  {
+   "fieldname": "teacher",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Teacher",
+   "options": "Teacher",
+   "reqd": 1
+  },
+  {
+   "fieldname": "content_section",
+   "fieldtype": "Section Break",
+   "label": "Message"
+  },
+  {
+   "fieldname": "category",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Category",
+   "options": "Behaviour concern\nLearning progress\nParticipation\nMaterials / homework\nOther",
+   "reqd": 1
+  },
+  {
+   "fieldname": "message",
+   "fieldtype": "Small Text",
+   "label": "Message",
+   "reqd": 1
+  },
+  {
+   "fieldname": "delivery_section",
+   "fieldtype": "Section Break",
+   "label": "Delivery"
+  },
+  {
+   "fieldname": "recipient_email",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Recipient Email",
+   "options": "Email",
+   "reqd": 1
+  },
+  {
+   "default": "Queued",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Queued\nSent\nFailed",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "default": "1",
+   "fieldname": "attempt_count",
+   "fieldtype": "Int",
+   "label": "Attempt Count",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sent_at",
+   "fieldtype": "Datetime",
+   "label": "Sent At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "client_request_id",
+   "fieldtype": "Data",
+   "label": "Client Request ID",
+   "read_only": 1,
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "created_by_user",
+   "fieldtype": "Link",
+   "label": "Created By User",
+   "options": "User",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "attempts",
+   "fieldtype": "Table",
+   "label": "Delivery Attempts",
+   "options": "Parent Classroom Message Attempt",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "module": "QAS Custom",
+ "name": "Parent Classroom Message",
+ "permissions": [
+  {
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager"
+  },
+  {
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "School Admin"
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

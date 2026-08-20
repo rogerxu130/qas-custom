@@ -147,6 +147,7 @@ def get_teacher_session_detail_data(course_session=None):
                 "teaching_notes": (student.get("teaching_notes") or "").strip(),
                 "parent_name": parent.get("parent_name") or "",
                 "parent_phone": parent.get("parent_phone") or "",
+                "parent_email": parent.get("parent_email") or "",
                 "enrollment_type": row.get("enrollment_type"),
                 "status": row.get("status"),
                 "comments": row.get("comments") or "",
@@ -647,11 +648,12 @@ def _get_parent_contact_map(parent_ids: list[str]):
     if not parent_ids:
         return {}
 
-    fields = _safe_fields("Parent", ["name", "parent_name", "mobile_number", "phone"])
+    fields = _safe_fields("Parent", ["name", "parent_name", "mobile_number", "phone", "linked_user"])
     return {
         row["name"]: {
             "parent_name": row.get("parent_name") or row.get("name"),
             "parent_phone": row.get("mobile_number") or row.get("phone") or "",
+            "parent_email": _parent_contact_email(row),
         }
         for row in frappe.get_all(
             "Parent",
@@ -660,6 +662,13 @@ def _get_parent_contact_map(parent_ids: list[str]):
             limit_page_length=0,
         )
     }
+
+
+def _parent_contact_email(parent):
+    linked_user = str(parent.get("linked_user") or "").strip()
+    if not linked_user:
+        return ""
+    return str(frappe.db.get_value("User", linked_user, "email") or linked_user).strip()
 
 
 def _safe_fields(doctype: str, candidates: list[str]):
