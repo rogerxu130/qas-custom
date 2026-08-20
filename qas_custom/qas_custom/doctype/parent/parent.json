@@ -11,6 +11,7 @@
   "parent_name",
   "linked_user",
   "status",
+  "mass_email_unsubscribed",
   "mobile_number",
   "store_credit",
   "customer"
@@ -41,6 +42,13 @@
    "label": "Status",
    "options": "Active\nInactive",
    "reqd": 1
+  },
+  {
+   "default": "0",
+   "description": "Stops announcements, workshops, and deal emails only.",
+   "fieldname": "mass_email_unsubscribed",
+   "fieldtype": "Check",
+   "label": "Unsubscribed from mass emails"
   },
   {
    "fieldname": "mobile_number",

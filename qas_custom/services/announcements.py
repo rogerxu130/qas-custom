@@ -21,6 +21,7 @@ TARGET_DOCTYPE = "School Announcement Target"
 DEFAULT_PARENT_PORTAL_URL = "https://portal.queenslandartschool.com"
 ANNOUNCEMENT_BCC_BATCH_SIZE = 50
 ANNOUNCEMENT_VISIBLE_RECIPIENT = "queenslandartschool@gmail.com"
+MASS_EMAIL_UNSUBSCRIBED_ERROR = "Parent unsubscribed from mass emails."
 MAX_ANNOUNCEMENT_IMAGE_BYTES = 5 * 1024 * 1024
 ANNOUNCEMENT_IMAGE_FORMATS = {"jpeg": "jpg", "png": "png", "webp": "webp"}
 
@@ -151,6 +152,9 @@ def publish_school_admin_announcement_data(announcement=None, payload=None):
 		_delete_existing_recipients(doc.name)
 		email_requested = bool(cint(doc.send_email_on_publish))
 		email_enabled = outbound_email_enabled()
+		unsubscribed_parent_names = _mass_email_unsubscribed_parent_names(
+			[recipient.get("parent") for recipient in recipients]
+		)
 		created = []
 		for recipient in recipients:
 			row = frappe.new_doc(RECIPIENT_DOCTYPE)
@@ -162,13 +166,18 @@ def publish_school_admin_announcement_data(announcement=None, payload=None):
 			row.email = recipient.get("email")
 			row.audience_source = recipient.get("audience_source")
 			row.source_document = recipient.get("source_document")
-			row.email_status = "Queued" if email_requested and email_enabled and recipient.get("email") else "Not Requested"
-			if email_requested and not email_enabled and recipient.get("email"):
+			row.email_status = "Not Requested"
+			if email_requested and recipient.get("parent") in unsubscribed_parent_names:
 				row.email_status = "Skipped"
-				row.email_error = email_block_reason()
-			if email_requested and not recipient.get("email"):
+				row.email_error = MASS_EMAIL_UNSUBSCRIBED_ERROR
+			elif email_requested and not recipient.get("email"):
 				row.email_status = "Failed"
 				row.email_error = "No parent email found."
+			elif email_requested and not email_enabled:
+				row.email_status = "Skipped"
+				row.email_error = email_block_reason()
+			elif email_requested:
+				row.email_status = "Queued"
 			row.insert(ignore_permissions=True)
 			created.append(row.name)
 
@@ -311,9 +320,23 @@ def send_school_announcement_email_job(announcement: str):
 	rows = frappe.get_all(
 		RECIPIENT_DOCTYPE,
 		filters={"announcement": announcement, "email_status": "Queued"},
-		fields=["name", "email"],
+		fields=["name", "parent", "email"],
 		limit=0,
 	)
+	unsubscribed_parent_names = _mass_email_unsubscribed_parent_names(
+		[row.get("parent") for row in rows]
+	)
+	unsubscribed_row_names = [
+		row.get("name") for row in rows if row.get("parent") in unsubscribed_parent_names
+	]
+	if unsubscribed_row_names:
+		_set_announcement_recipient_email_status(
+			unsubscribed_row_names,
+			"Skipped",
+			error=MASS_EMAIL_UNSUBSCRIBED_ERROR,
+		)
+		rows = [row for row in rows if row.get("name") not in set(unsubscribed_row_names)]
+		frappe.db.commit()
 	sent = 0
 	failed = 0
 	grouped_rows = {}
@@ -834,10 +857,27 @@ def _announcement_student_preview(row):
 
 def _parent_fields():
 	fields = ["name"]
-	for fieldname in ["parent_name", "customer", "linked_user", "email", "email_id", "contact_email", "status"]:
+	for fieldname in ["parent_name", "customer", "linked_user", "email", "email_id", "contact_email", "status", "mass_email_unsubscribed"]:
 		if frappe.db.has_column("Parent", fieldname):
 			fields.append(fieldname)
 	return fields
+
+
+def _mass_email_unsubscribed_parent_names(parent_names):
+	parent_names = list(dict.fromkeys(str(name).strip() for name in (parent_names or []) if str(name).strip()))
+	if not parent_names or not frappe.db.has_column("Parent", "mass_email_unsubscribed"):
+		return set()
+	return set(
+		frappe.get_all(
+			"Parent",
+			filters={
+				"name": ["in", parent_names],
+				"mass_email_unsubscribed": 1,
+			},
+			pluck="name",
+			limit=0,
+		)
+	)
 
 
 def _require_school_admin():
