@@ -1016,6 +1016,8 @@ def _resolve_school_visit_context(payload: dict):
 	review_reasons = []
 	if not (payload.get("contact_name") or payload.get("parent_name")):
 		review_reasons.append(_("Contact name is required for a school tour."))
+	if not (payload.get("contact_email") or payload.get("email")):
+		review_reasons.append(_("Email is required for a school tour."))
 	if not (payload.get("contact_phone") or payload.get("phone") or payload.get("contact_email") or payload.get("email")):
 		review_reasons.append(_("Phone or email is required for a school tour."))
 
