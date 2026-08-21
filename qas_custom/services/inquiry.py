@@ -884,10 +884,10 @@ def _resolve_student(payload: dict, parent: str | None, inquiry_type: str | None
 		return student
 
 	student_name = payload.get("student_name") or payload.get("submitted_student_name")
-	if inquiry_type == "School Visit" and not student_name:
+	date_of_birth = payload.get("date_of_birth") or payload.get("submitted_student_dob")
+	if inquiry_type == "School Visit" and not (student_name and date_of_birth):
 		return None
 	student_name = student_name or "Student"
-	date_of_birth = payload.get("date_of_birth") or payload.get("submitted_student_dob")
 	if parent and date_of_birth:
 		student = frappe.db.get_value("Student", {"guardian": parent, "date_of_birth": date_of_birth}, "name")
 		if student:

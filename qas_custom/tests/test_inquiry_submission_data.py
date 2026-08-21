@@ -5,12 +5,41 @@ from qas_custom.modules.trial_referrals import is_referral_claim
 from qas_custom.services.inquiry import (
 	_normalize_inquiry_payload,
 	_normalize_school_visit_webhook_payload,
+	_resolve_student,
 	_submission_data_rows,
 	create_school_visit_webhook_data,
 )
 
 
 class TestInquirySubmissionData(TestCase):
+	@patch("qas_custom.services.inquiry.frappe.new_doc")
+	def test_school_visit_incomplete_student_identity_never_creates_student(self, mock_new_doc):
+		for payload in (
+			{"student_name": "Leo"},
+			{"date_of_birth": "2018-08-17"},
+			{},
+		):
+			with self.subTest(payload=payload):
+				self.assertIsNone(_resolve_student(payload, "PAR-001", "School Visit"))
+		mock_new_doc.assert_not_called()
+
+	@patch("qas_custom.services.inquiry.frappe.new_doc")
+	@patch("qas_custom.services.inquiry.frappe.db.get_value", return_value="STU-001")
+	def test_school_visit_complete_student_identity_matches_by_parent_and_dob(self, mock_get_value, mock_new_doc):
+		result = _resolve_student(
+			{"student_name": "Leo", "date_of_birth": "2018-08-17"},
+			"PAR-001",
+			"School Visit",
+		)
+
+		self.assertEqual(result, "STU-001")
+		mock_get_value.assert_called_once_with(
+			"Student",
+			{"guardian": "PAR-001", "date_of_birth": "2018-08-17"},
+			"name",
+		)
+		mock_new_doc.assert_not_called()
+
 	def test_referral_claim_requires_referring_family_name_for_new_trials(self):
 		self.assertTrue(is_referral_claim({"referral_source": "Google", "referral_detail": "Lindsey's mum"}))
 		self.assertFalse(is_referral_claim({"referral_source": "Referral", "referral_detail": ""}))
@@ -106,6 +135,7 @@ class TestInquirySubmissionData(TestCase):
 			"form_id": "12",
 			"submission_id": "456",
 			"parent_name": "Mia Wong",
+			"student_name": "Leo",
 			"campus_to_visit": "Indooroopilly",
 			"date_for_the_visit": "08/22/2026",
 			"time_to_arrive": "10:30",
@@ -119,6 +149,8 @@ class TestInquirySubmissionData(TestCase):
 		payload = mock_create.call_args.args[0]
 		self.assertEqual(payload["inquiry_type"], "School Visit")
 		self.assertEqual(payload["course_session"], None)
+		self.assertEqual(payload["submitted_student_name"], "Leo")
+		self.assertIsNone(payload.get("submitted_student_dob"))
 		self.assertEqual(payload["raw_webhook_payload"], original)
 		self.assertEqual(mock_create.call_args.kwargs["source"], "Fluent Form")
 
