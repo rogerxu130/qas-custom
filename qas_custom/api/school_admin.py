@@ -72,6 +72,7 @@ from qas_custom.services.school_admin_import import (
 	run_store_credit_import_data,
 	run_trial_inquiry_import_data,
 )
+from qas_custom.services.school_admin_trial_export import export_school_admin_trial_inquiries_data
 from qas_custom.services.term_overdue_invoice_reminders import (
 	get_term_overdue_invoice_reminder_job_data,
 	get_term_overdue_invoice_reminder_preview_data,
@@ -723,6 +724,11 @@ def school_admin_get_inquiries(status=None, inquiry_type=None, confirmation_stat
 @frappe.whitelist()
 def school_admin_get_inquiry(inquiry=None):
 	return get_school_admin_inquiry_data(inquiry=inquiry)
+
+
+@frappe.whitelist()
+def school_admin_export_trial_inquiries(from_date=None, to_date=None):
+	return export_school_admin_trial_inquiries_data(from_date=from_date, to_date=to_date)
 
 
 @frappe.whitelist()
