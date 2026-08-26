@@ -1,5 +1,5 @@
 from unittest import TestCase
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from qas_custom.modules.trial_referrals import is_referral_claim
 from qas_custom.services.inquiry import (
@@ -13,6 +13,15 @@ from qas_custom.services.inquiry import (
 
 class TestInquirySubmissionData(TestCase):
 	@patch("qas_custom.services.inquiry.frappe.new_doc")
+	@patch("qas_custom.services.inquiry._validate_exists")
+	def test_explicit_student_id_keeps_direct_selection_behavior(self, mock_validate_exists, mock_new_doc):
+		result = _resolve_student({"student": "STU-001"}, "PAR-001", "Trial Lesson")
+
+		self.assertEqual(result, "STU-001")
+		mock_validate_exists.assert_called_once_with("Student", "STU-001", "Student was not found.")
+		mock_new_doc.assert_not_called()
+
+	@patch("qas_custom.services.inquiry.frappe.new_doc")
 	def test_school_visit_incomplete_student_identity_never_creates_student(self, mock_new_doc):
 		for payload in (
 			{"student_name": "Leo"},
@@ -24,21 +33,46 @@ class TestInquirySubmissionData(TestCase):
 		mock_new_doc.assert_not_called()
 
 	@patch("qas_custom.services.inquiry.frappe.new_doc")
-	@patch("qas_custom.services.inquiry.frappe.db.get_value", return_value="STU-001")
-	def test_school_visit_complete_student_identity_matches_by_parent_and_dob(self, mock_get_value, mock_new_doc):
+	@patch(
+		"qas_custom.services.inquiry.frappe.get_all",
+		return_value=[{"name": "STU-001", "student_name": "  lEO   wong "}],
+	)
+	def test_school_visit_complete_student_identity_matches_by_parent_dob_and_normalized_name(
+		self, mock_get_all, mock_new_doc
+	):
 		result = _resolve_student(
-			{"student_name": "Leo", "date_of_birth": "2018-08-17"},
+			{"student_name": "Leo Wong", "date_of_birth": "2018-08-17"},
 			"PAR-001",
 			"School Visit",
 		)
 
 		self.assertEqual(result, "STU-001")
-		mock_get_value.assert_called_once_with(
+		mock_get_all.assert_called_once_with(
 			"Student",
-			{"guardian": "PAR-001", "date_of_birth": "2018-08-17"},
-			"name",
+			filters={"guardian": "PAR-001", "date_of_birth": "2018-08-17"},
+			fields=["name", "student_name"],
+			limit_page_length=0,
 		)
 		mock_new_doc.assert_not_called()
+
+	@patch("qas_custom.services.inquiry.frappe.get_all", return_value=[{"name": "STU-OLDER", "student_name": "Ava Wong"}])
+	@patch("qas_custom.services.inquiry.frappe.new_doc")
+	def test_same_parent_and_dob_with_different_name_creates_twin_student(self, mock_new_doc, _mock_get_all):
+		student_doc = MagicMock()
+		student_doc.name = "STU-YOUNGER"
+		mock_new_doc.return_value = student_doc
+
+		result = _resolve_student(
+			{"student_name": "Mia Wong", "date_of_birth": "2018-08-17"},
+			"PAR-001",
+			"Trial Lesson",
+		)
+
+		self.assertEqual(result, "STU-YOUNGER")
+		self.assertEqual(student_doc.student_name, "Mia Wong")
+		self.assertEqual(student_doc.guardian, "PAR-001")
+		self.assertEqual(student_doc.date_of_birth, "2018-08-17")
+		student_doc.insert.assert_called_once_with()
 
 	def test_referral_claim_requires_referring_family_name_for_new_trials(self):
 		self.assertTrue(is_referral_claim({"referral_source": "Google", "referral_detail": "Lindsey's mum"}))

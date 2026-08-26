@@ -889,9 +889,16 @@ def _resolve_student(payload: dict, parent: str | None, inquiry_type: str | None
 		return None
 	student_name = student_name or "Student"
 	if parent and date_of_birth:
-		student = frappe.db.get_value("Student", {"guardian": parent, "date_of_birth": date_of_birth}, "name")
-		if student:
-			return student
+		normalized_student_name = _normalize_student_identity_name(student_name)
+		students = frappe.get_all(
+			"Student",
+			filters={"guardian": parent, "date_of_birth": date_of_birth},
+			fields=["name", "student_name"],
+			limit_page_length=0,
+		)
+		for candidate in students:
+			if _normalize_student_identity_name(candidate.get("student_name")) == normalized_student_name:
+				return candidate.get("name")
 
 	if parent and student_name:
 		student_doc = frappe.new_doc("Student")
@@ -908,6 +915,10 @@ def _resolve_student(payload: dict, parent: str | None, inquiry_type: str | None
 		return student_doc.name
 
 	return None
+
+
+def _normalize_student_identity_name(value):
+	return re.sub(r"\s+", " ", str(value or "").strip()).casefold()
 
 
 def _get_or_create_user_for_parent(email: str | None, parent_name: str | None):
