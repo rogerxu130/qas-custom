@@ -1059,6 +1059,7 @@ def _map_trial_form_session(payload: dict):
 		or derived_course_candidate
 	)
 	parsed_session = _parse_class_session(class_session)
+	class_language = _parse_class_language(class_session)
 
 	result = {
 		"campus": campus,
@@ -1090,6 +1091,7 @@ def _map_trial_form_session(payload: dict):
 		"day_of_week": parsed_session["day_of_week"],
 		"start_time": parsed_session["start_time"],
 		"course": course,
+		"class_language": class_language,
 	}
 	if parsed_session.get("end_time"):
 		timeslot_filters["end_time"] = parsed_session.get("end_time")
@@ -1098,7 +1100,7 @@ def _map_trial_form_session(payload: dict):
 	timeslots = frappe.get_all(
 		"Weekly Timeslot",
 		filters=timeslot_filters,
-		fields=["name", "course", "campus", "start_time", "end_time", "status"],
+		fields=["name", "course", "class_language", "campus", "start_time", "end_time", "status"],
 		order_by="modified desc",
 		limit_page_length=0,
 	)
@@ -1206,6 +1208,10 @@ def _parse_class_session(class_session: str | None):
 		"start_time": _normalize_time_string(match.group(2)),
 		"end_time": _normalize_time_string(match.group(3)) if match.group(3) else None,
 	}
+
+
+def _parse_class_language(class_session: str | None):
+	return "Chinese" if re.search(r"\(\s*in\s+chinese\s*\)", class_session or "", re.IGNORECASE) else "English"
 
 
 def _normalize_name_value(value):
