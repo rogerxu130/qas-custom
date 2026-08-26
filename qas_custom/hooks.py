@@ -152,7 +152,13 @@ doc_events = {
 		"on_change": "qas_custom.modules.notifications.guard.purge_legacy_invoice_email_queue",
 	},
 	"Payment Entry": {
-		"on_submit": "qas_custom.modules.billing.store_credit.grant_store_credit_bonus_on_payment_entry_submit",
+		"on_submit": [
+			"qas_custom.modules.billing.store_credit.grant_store_credit_bonus_on_payment_entry_submit",
+			"qas_custom.services.google_conversion_sync.capture_payment_entry_submit",
+		],
+	},
+	"Inquiry": {
+		"on_update": "qas_custom.services.google_conversion_sync.capture_inquiry_conversion_update",
 	},
 	"Student": {
 		"validate": "qas_custom.services.display_labels.sync_student_code",
@@ -189,6 +195,7 @@ scheduler_events = {
 		"*/15 * * * *": [
 			"qas_custom.tasks.teacher_session_completion_reminders.send_teacher_session_completion_reminders",
 			"qas_custom.tasks.trial_parent_notifications.send_trial_parent_24h_reminders",
+			"qas_custom.services.google_conversion_sync.run_google_conversion_sync_recovery",
 		],
 		"0 * * * *": [
 			"qas_custom.tasks.campus_admin_trial_digest.send_campus_admin_next_day_trial_digests",

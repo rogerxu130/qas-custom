@@ -1,0 +1,222 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "GCS-.YYYY.-.#####",
+ "doctype": "DocType",
+ "document_type": "Document",
+ "engine": "InnoDB",
+ "field_order": [
+  "event_key",
+  "event_name",
+  "order_id",
+  "status",
+  "source_section",
+  "source_doctype",
+  "source_document",
+  "inquiry",
+  "invoice",
+  "payment_entry",
+  "enrollment",
+  "conversion_date_time",
+  "conversion_value",
+  "delivery_section",
+  "payload_json",
+  "attempt_count",
+  "next_retry_at",
+  "last_attempted_at",
+  "sent_at",
+  "destination_range",
+  "last_error",
+  "error_notification_sent"
+ ],
+ "fields": [
+  {
+   "fieldname": "event_key",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Event Key",
+   "read_only": 1,
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "event_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Event Name",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "order_id",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Order ID",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "default": "Pending",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Pending\nSent\nFailed",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "source_section",
+   "fieldtype": "Section Break",
+   "label": "Source"
+  },
+  {
+   "fieldname": "source_doctype",
+   "fieldtype": "Link",
+   "label": "Source DocType",
+   "options": "DocType",
+   "read_only": 1
+  },
+  {
+   "fieldname": "source_document",
+   "fieldtype": "Data",
+   "label": "Source Document",
+   "read_only": 1
+  },
+  {
+   "fieldname": "inquiry",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Inquiry",
+   "options": "Inquiry",
+   "read_only": 1
+  },
+  {
+   "fieldname": "invoice",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Sales Invoice",
+   "options": "Sales Invoice",
+   "read_only": 1
+  },
+  {
+   "fieldname": "payment_entry",
+   "fieldtype": "Link",
+   "label": "Payment Entry",
+   "options": "Payment Entry",
+   "read_only": 1
+  },
+  {
+   "fieldname": "enrollment",
+   "fieldtype": "Link",
+   "label": "Enrollment",
+   "options": "Enrollment",
+   "read_only": 1
+  },
+  {
+   "fieldname": "conversion_date_time",
+   "fieldtype": "Datetime",
+   "in_standard_filter": 1,
+   "label": "Conversion Date Time",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "conversion_value",
+   "fieldtype": "Currency",
+   "label": "Conversion Value",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "delivery_section",
+   "fieldtype": "Section Break",
+   "label": "Delivery"
+  },
+  {
+   "fieldname": "payload_json",
+   "fieldtype": "Code",
+   "label": "Payload JSON",
+   "options": "JSON",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "attempt_count",
+   "fieldtype": "Int",
+   "label": "Attempt Count",
+   "read_only": 1
+  },
+  {
+   "fieldname": "next_retry_at",
+   "fieldtype": "Datetime",
+   "in_standard_filter": 1,
+   "label": "Next Retry At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_attempted_at",
+   "fieldtype": "Datetime",
+   "label": "Last Attempted At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sent_at",
+   "fieldtype": "Datetime",
+   "in_standard_filter": 1,
+   "label": "Sent At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "destination_range",
+   "fieldtype": "Data",
+   "label": "Destination Range",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_error",
+   "fieldtype": "Small Text",
+   "label": "Last Error",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "error_notification_sent",
+   "fieldtype": "Check",
+   "label": "Error Notification Sent",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "module": "QAS Custom",
+ "name": "Google Conversion Sync Event",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "select": 1,
+   "write": 1
+  },
+  {
+   "export": 1,
+   "read": 1,
+   "report": 1,
+   "role": "School Admin",
+   "select": 1
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

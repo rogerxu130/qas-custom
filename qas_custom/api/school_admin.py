@@ -73,6 +73,11 @@ from qas_custom.services.school_admin_import import (
 	run_trial_inquiry_import_data,
 )
 from qas_custom.services.school_admin_trial_export import export_school_admin_trial_inquiries_data
+from qas_custom.services.google_conversion_sync import (
+	get_school_admin_google_conversion_sync_events_data,
+	retry_school_admin_google_conversion_sync_event_data,
+	validate_school_admin_google_conversion_sync_data,
+)
 from qas_custom.services.term_overdue_invoice_reminders import (
 	get_term_overdue_invoice_reminder_job_data,
 	get_term_overdue_invoice_reminder_preview_data,
@@ -729,6 +734,25 @@ def school_admin_get_inquiry(inquiry=None):
 @frappe.whitelist()
 def school_admin_export_trial_inquiries(from_date=None, to_date=None):
 	return export_school_admin_trial_inquiries_data(from_date=from_date, to_date=to_date)
+
+
+@frappe.whitelist()
+def school_admin_get_google_conversion_sync_events(status=None, limit_start=0, limit=50):
+	return get_school_admin_google_conversion_sync_events_data(
+		status=status,
+		limit_start=limit_start,
+		limit=limit,
+	)
+
+
+@frappe.whitelist()
+def school_admin_retry_google_conversion_sync_event(event=None):
+	return retry_school_admin_google_conversion_sync_event_data(event=event)
+
+
+@frappe.whitelist()
+def school_admin_validate_google_conversion_sync():
+	return validate_school_admin_google_conversion_sync_data()
 
 
 @frappe.whitelist()
