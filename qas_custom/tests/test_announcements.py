@@ -9,7 +9,9 @@ from qas_custom.services.announcements import (
 	_announcement_email_message,
 	_announcement_student_preview,
 	_message_html,
+	mark_parent_announcement_read_data,
 	publish_school_admin_announcement_data,
+	save_school_admin_announcement_data,
 	_resolve_announcement_recipients,
 	_send_announcement_bcc_batch,
 	_student_search_rank,
@@ -21,6 +23,59 @@ from qas_custom.services.announcements import (
 
 
 class TestSingleStudentAnnouncements(TestCase):
+	def test_saving_published_announcement_updates_portal_content_only(self):
+		announcement = SimpleNamespace(name="ANN-0001", status="Published", save=Mock())
+		fake_frappe = SimpleNamespace(
+			get_doc=Mock(return_value=announcement),
+			db=SimpleNamespace(commit=Mock()),
+		)
+		with patch("qas_custom.services.announcements.frappe", fake_frappe), patch(
+			"qas_custom.services.announcements._require_school_admin"
+		), patch(
+			"qas_custom.services.announcements._apply_published_announcement_payload"
+		) as apply_payload, patch(
+			"qas_custom.services.announcements._delete_unused_announcement_inline_images"
+		), patch(
+			"qas_custom.services.announcements.get_school_admin_announcement_data",
+			return_value={"name": "ANN-0001", "status": "Published"},
+		):
+			result = save_school_admin_announcement_data(
+				announcement="ANN-0001", payload={"title": "Corrected title", "body": "Corrected portal message"}
+			)
+
+		apply_payload.assert_called_once_with(announcement, {"title": "Corrected title", "body": "Corrected portal message"})
+		announcement.save.assert_called_once_with(ignore_permissions=True)
+		self.assertEqual(result["status"], "Published")
+
+	def test_parent_marks_only_own_announcement_recipient_read(self):
+		recipient = SimpleNamespace(name="ANR-0001", read_at=None)
+		fake_db = SimpleNamespace(
+			get_value=Mock(return_value=recipient),
+			set_value=Mock(),
+			commit=Mock(),
+		)
+		fake_frappe = SimpleNamespace(db=fake_db, session=SimpleNamespace(user="parent@example.com"))
+		with patch("qas_custom.services.announcements.frappe", fake_frappe), patch(
+			"qas_custom.services.announcements._require_parent", return_value=SimpleNamespace(name="PAR-0001")
+		), patch("qas_custom.services.announcements._announcement_available", return_value=True), patch(
+			"qas_custom.services.announcements.now_datetime", return_value="2026-08-27 12:00:00"
+		):
+			result = mark_parent_announcement_read_data("ANN-0001")
+
+		fake_db.get_value.assert_called_once_with(
+			"School Announcement Recipient",
+			{"announcement": "ANN-0001", "parent": "PAR-0001"},
+			["name", "read_at"],
+			as_dict=True,
+		)
+		fake_db.set_value.assert_called_once_with(
+			"School Announcement Recipient",
+			"ANR-0001",
+			{"read_at": "2026-08-27 12:00:00", "read_by": "parent@example.com"},
+			update_modified=True,
+		)
+		self.assertEqual(result, {"announcement": "ANN-0001", "read": True})
+
 	def test_publish_uses_current_editor_payload_without_prior_draft_save(self):
 		announcement = SimpleNamespace(
 			name="ANN-0001",
@@ -31,7 +86,13 @@ class TestSingleStudentAnnouncements(TestCase):
 			save=Mock(),
 		)
 		recipient_row = SimpleNamespace(name="ANR-0001", insert=Mock())
-		fake_db = SimpleNamespace(savepoint=Mock(), commit=Mock(), rollback=Mock(), get_value=Mock(return_value="Not Requested"))
+		fake_db = SimpleNamespace(
+			savepoint=Mock(),
+			commit=Mock(),
+			rollback=Mock(),
+			get_value=Mock(return_value="Not Requested"),
+			has_column=Mock(return_value=False),
+		)
 		fake_frappe = SimpleNamespace(
 			db=fake_db,
 			session=SimpleNamespace(user="school-admin@example.com"),
@@ -296,6 +357,7 @@ class TestAnnouncementBccEmailDelivery(TestCase):
 		)
 		db = SimpleNamespace(
 			exists=Mock(return_value=True),
+			has_column=Mock(return_value=False),
 			set_value=Mock(),
 			commit=Mock(),
 		)

@@ -1,6 +1,6 @@
 import frappe
 
-from qas_custom.services.announcements import get_parent_announcements_data
+from qas_custom.services.announcements import get_parent_announcements_data, mark_parent_announcement_read_data
 from qas_custom.services.parent_feed import (
     get_parent_feed_data,
     get_parent_feed_photo_content,
@@ -158,6 +158,11 @@ def parent_portal_create_store_order(payload=None):
 @frappe.whitelist()
 def parent_portal_get_announcements(limit=30):
     return get_parent_announcements_data(limit=limit)
+
+
+@frappe.whitelist()
+def parent_portal_mark_announcement_read(announcement=None):
+    return mark_parent_announcement_read_data(announcement=announcement)
 
 
 @frappe.whitelist()

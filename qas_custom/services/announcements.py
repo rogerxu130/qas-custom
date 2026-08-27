@@ -11,7 +11,7 @@ from frappe.utils import cint, escape_html, get_datetime, get_url, now_datetime,
 from frappe.utils.file_manager import save_file
 
 from qas_custom.utils.environment import email_block_reason, outbound_email_enabled
-from qas_custom.services.support_view import get_support_view_parent
+from qas_custom.services.support_view import get_support_view_parent, reject_support_view_write
 
 
 ADMIN_ROLES = {"School Admin", "System Manager"}
@@ -106,13 +106,16 @@ def save_school_admin_announcement_data(announcement=None, payload=None):
 	payload = _parse_payload(payload)
 	if announcement:
 		doc = frappe.get_doc(ANNOUNCEMENT_DOCTYPE, announcement)
-		if doc.status in {"Published", "Archived"}:
-			frappe.throw(_("Published or archived announcements cannot be edited. Create a new draft instead."))
+		if doc.status == "Archived":
+			frappe.throw(_("Archived announcements cannot be edited."))
+		if doc.status == "Published":
+			_apply_published_announcement_payload(doc, payload)
+		else:
+			_apply_announcement_payload(doc, payload)
 	else:
 		doc = frappe.new_doc(ANNOUNCEMENT_DOCTYPE)
 		doc.status = "Draft"
-
-	_apply_announcement_payload(doc, payload)
+		_apply_announcement_payload(doc, payload)
 	doc.save(ignore_permissions=True)
 	_delete_unused_announcement_inline_images(doc)
 	frappe.db.commit()
@@ -277,8 +280,8 @@ def get_parent_announcements_data(limit=30):
 
 	recipient_rows = frappe.get_all(
 		RECIPIENT_DOCTYPE,
-		filters={"parent": parent.name},
-		fields=["name", "announcement", "student", "email_status"],
+		filters={"parent": parent.name, "read_at": ["is", "not set"]},
+		fields=["name", "announcement", "student", "email_status", "read_at"],
 		order_by="creation desc",
 		limit=_limit(limit, default=30, max_value=100),
 	)
@@ -311,6 +314,34 @@ def get_parent_announcements_data(limit=30):
 			}
 		)
 	return {"items": items}
+
+
+def mark_parent_announcement_read_data(announcement=None):
+	reject_support_view_write()
+	parent = _require_parent()
+	announcement = str(announcement or "").strip()
+	if not announcement:
+		frappe.throw(_("Announcement is required."))
+	if not _announcement_available():
+		frappe.throw(_("Announcements are not available."))
+
+	recipient = frappe.db.get_value(
+		RECIPIENT_DOCTYPE,
+		{"announcement": announcement, "parent": parent.name},
+		["name", "read_at"],
+		as_dict=True,
+	)
+	if not recipient:
+		frappe.throw(_("Announcement was not found."), frappe.PermissionError)
+	if not recipient.read_at:
+		frappe.db.set_value(
+			RECIPIENT_DOCTYPE,
+			recipient.name,
+			{"read_at": now_datetime(), "read_by": frappe.session.user},
+			update_modified=True,
+		)
+		frappe.db.commit()
+	return {"announcement": announcement, "read": True}
 
 
 def send_school_announcement_email_job(announcement: str):
@@ -577,6 +608,18 @@ def _apply_announcement_payload(doc, payload):
 			doc.set(fieldname, value)
 	if "audience_targets" in payload:
 		doc.set("audience_targets", _normalise_announcement_targets(payload.get("audience_targets")))
+	_validate_announcement(doc)
+
+
+def _apply_published_announcement_payload(doc, payload):
+	"""Update portal-only fields without changing recipients or email history."""
+	for fieldname in ["title", "body", "expires_at"]:
+		if fieldname not in payload:
+			continue
+		value = payload.get(fieldname)
+		if fieldname == "body":
+			value = _message_html(value, allowed_image_urls=_announcement_image_urls(doc))
+		doc.set(fieldname, value)
 	_validate_announcement(doc)
 
 
@@ -954,8 +997,8 @@ def _get_editable_announcement(announcement):
 	if not announcement:
 		frappe.throw(_("The announcement record must be created before uploading an image."))
 	doc = frappe.get_doc(ANNOUNCEMENT_DOCTYPE, announcement)
-	if doc.status != "Draft":
-		frappe.throw(_("Images can only be changed while an announcement is a Draft."))
+	if doc.status == "Archived":
+		frappe.throw(_("Images cannot be changed after an announcement is archived."))
 	return doc
 
 

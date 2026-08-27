@@ -18,7 +18,10 @@
   "email_section",
   "email_status",
   "email_sent_at",
-  "email_error"
+  "email_error",
+  "read_section",
+  "read_at",
+  "read_by"
  ],
  "fields": [
   {
@@ -97,6 +100,24 @@
    "fieldname": "email_error",
    "fieldtype": "Small Text",
    "label": "Email Error"
+  },
+  {
+   "fieldname": "read_section",
+   "fieldtype": "Section Break",
+   "label": "Read state"
+  },
+  {
+   "fieldname": "read_at",
+   "fieldtype": "Datetime",
+   "label": "Read At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "read_by",
+   "fieldtype": "Link",
+   "label": "Read By",
+   "options": "User",
+   "read_only": 1
   }
  ],
  "index_web_pages_for_search": 1,
