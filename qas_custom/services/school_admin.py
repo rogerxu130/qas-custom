@@ -2545,6 +2545,12 @@ def get_school_admin_term_data(term=None):
 		include_inactive_timeslots=1,
 		limit=300,
 	).get("items", [])
+	payload["copied_from_term"] = doc.get("copied_from_term") if _has_field("Term", "copied_from_term") else None
+	payload["setup"] = {
+		"weekly_timeslots": {"count": payload["weekly_timeslot_count"]},
+		"enrollments": {"count": payload["planned_enrollment_count"] + payload["active_enrollment_count"]},
+		"course_sessions": {"count": payload["course_session_count"]},
+	}
 	payload["timeslot_options"] = _get_weekly_timeslot_reference_options()
 	return payload
 
@@ -2575,6 +2581,12 @@ def update_school_admin_term_data(term=None, payload=None):
 		frappe.throw(_("Term is required."))
 	payload = _get_payload(payload)
 	doc = frappe.get_doc("Term", term)
+	date_change_requested = any(
+		fieldname in payload and str(payload.get(fieldname) or "") != str(doc.get(fieldname) or "")
+		for fieldname in ("start_date", "end_date")
+	)
+	if date_change_requested and _term_course_session_count(term):
+		frappe.throw(_("Term dates cannot be changed after course sessions have been generated. Resolve the existing sessions first."))
 	for fieldname in ["term_name", "start_date", "end_date", "status", "notes"]:
 		if fieldname in payload:
 			_set_if_field(doc, fieldname, payload.get(fieldname))
@@ -2612,16 +2624,103 @@ def copy_school_admin_term_data(payload=None):
 	if not frappe.db.exists("Term", source_term) or not frappe.db.exists("Term", target_term):
 		frappe.throw(_("Source or target term does not exist."))
 
-	timeslot_map = _copy_term_weekly_timeslots(source_term, target_term)
+	timeslot_map, timeslot_summary = _copy_term_weekly_timeslots(source_term, target_term)
 	planned_count = _copy_term_planned_enrollments(source_term, target_term, timeslot_map)
 	frappe.db.commit()
 	return {
 		"term": get_school_admin_term_data(target_term),
 		"summary": {
 			"copied_timeslots": len(set(timeslot_map.values())),
+			"created_weekly_timeslots": timeslot_summary["created"],
 			"planned_enrollments": planned_count,
 		},
 	}
+
+
+def create_school_admin_term_from_copy_data(payload=None):
+	_require_school_admin()
+	_require_term_copy_mapping_fields()
+	payload = _get_payload(payload)
+	source_term = payload.get("source_term")
+	if not source_term:
+		frappe.throw(_("Source term is required."))
+	if not frappe.db.exists("Term", source_term):
+		frappe.throw(_("Source term was not found."))
+
+	term_name = (payload.get("term_name") or "").strip()
+	start_date = payload.get("start_date")
+	end_date = payload.get("end_date")
+	if not term_name:
+		frappe.throw(_("Term name is required."))
+	if not start_date or not end_date:
+		frappe.throw(_("Term start and end dates are required."))
+	if getdate(end_date) < getdate(start_date):
+		frappe.throw(_("Term end date cannot be before start date."))
+	if frappe.db.exists("Term", term_name):
+		frappe.throw(_("A term with this name already exists."))
+
+	frappe.db.savepoint("create_term_from_copy")
+	try:
+		target = frappe.new_doc("Term")
+		_set_if_field(target, "term_name", term_name)
+		_set_if_field(target, "start_date", start_date)
+		_set_if_field(target, "end_date", end_date)
+		_set_if_field(target, "status", "Upcoming")
+		_set_if_field(target, "notes", payload.get("notes") or "")
+		_set_if_field(target, "copied_from_term", source_term)
+		target.insert(ignore_permissions=True)
+		_timeslot_map, summary = _copy_term_weekly_timeslots(source_term, target.name, active_only=True)
+		_add_comment("Term", target.name, _("Created from term {0}; active weekly timeslots copied for review.").format(source_term))
+		frappe.db.commit()
+	except Exception:
+		frappe.db.rollback(save_point="create_term_from_copy")
+		raise
+
+	return {
+		"term": get_school_admin_term_data(target.name),
+		"summary": {
+			"eligible_weekly_timeslots": summary["eligible"],
+			"created_weekly_timeslots": summary["created"],
+			"existing_weekly_timeslots": summary["existing"],
+		},
+	}
+
+
+def copy_school_admin_term_enrollments_data(term=None):
+	_require_school_admin()
+	_require_term_copy_mapping_fields()
+	if not term:
+		frappe.throw(_("Target term is required."))
+	if not frappe.db.exists("Term", term):
+		frappe.throw(_("Target term was not found."))
+	target_term = frappe.get_doc("Term", term)
+	source_term = target_term.get("copied_from_term")
+	if not source_term:
+		frappe.throw(_("This term was not created from another term."))
+	if not frappe.db.exists("Term", source_term):
+		frappe.throw(_("The source term for this copied term was not found."))
+	if not _count("Weekly Timeslot", {"term": term, "status": "Active"}):
+		frappe.throw(_("Copy or add active weekly timeslots before copying enrollments."))
+
+	timeslot_map = _copied_target_timeslot_map(term)
+	source_rows = _source_term_enrollments_for_planning(source_term)
+	missing = [
+		row for row in source_rows
+		if timeslot_map.get(row.get("weekly_timeslot"))
+		and not _existing_target_enrollment(row.get("student"), term, timeslot_map[row.get("weekly_timeslot")], statuses=["Planned", "Active"])
+	]
+	if _term_course_session_count(term) and missing:
+		frappe.throw(_("Copy enrollments before generating course sessions. Resolve existing sessions before adding more copied enrollments."))
+
+	frappe.db.savepoint("copy_term_enrollments")
+	try:
+		summary = _copy_active_full_term_enrollments(source_term, term, timeslot_map)
+		frappe.db.commit()
+	except Exception:
+		frappe.db.rollback(save_point="copy_term_enrollments")
+		raise
+
+	return {"term": get_school_admin_term_data(term), "summary": summary}
 
 
 def populate_school_admin_term_data(term=None):
@@ -2683,7 +2782,7 @@ def _term_summary(term):
 	return _term_row_payload(rows[0]) if rows else None
 
 
-def _copy_term_weekly_timeslots(source_term, target_term):
+def _copy_term_weekly_timeslots(source_term, target_term, active_only=False):
 	fields = _safe_fields(
 		"Weekly Timeslot",
 		[
@@ -2705,18 +2804,23 @@ def _copy_term_weekly_timeslots(source_term, target_term):
 			"ndis_public_listing_enabled",
 		],
 	)
+	filters = {"term": source_term}
+	if active_only:
+		filters["status"] = "Active"
 	rows = frappe.get_all(
 		"Weekly Timeslot",
-		filters={"term": source_term},
+		filters=filters,
 		fields=fields,
 		order_by="course asc, campus asc, day_of_week asc, start_time asc",
 		limit_page_length=0,
 	)
 	timeslot_map = {}
+	summary = {"eligible": len(rows), "created": 0, "existing": 0}
 	for row in rows:
 		existing = _matching_target_timeslot(row, target_term)
 		if existing:
 			timeslot_map[row.name] = existing
+			summary["existing"] += 1
 			continue
 		doc = frappe.new_doc("Weekly Timeslot")
 		for fieldname in fields:
@@ -2724,12 +2828,21 @@ def _copy_term_weekly_timeslots(source_term, target_term):
 				continue
 			_set_if_field(doc, fieldname, row.get(fieldname))
 		_set_if_field(doc, "term", target_term)
+		_set_if_field(doc, "copied_from_weekly_timeslot", row.name)
 		doc.insert(ignore_permissions=True)
 		timeslot_map[row.name] = doc.name
-	return timeslot_map
+		summary["created"] += 1
+	return timeslot_map, summary
 
 
 def _matching_target_timeslot(source_row, target_term):
+	if _has_field("Weekly Timeslot", "copied_from_weekly_timeslot"):
+		mapped = frappe.db.exists(
+			"Weekly Timeslot",
+			{"term": target_term, "copied_from_weekly_timeslot": source_row.get("name")},
+		)
+		if mapped:
+			return mapped
 	filters = {"term": target_term}
 	for fieldname in ["course", "campus", "classroom", "teacher", "day_of_week", "start_time"]:
 		if _has_field("Weekly Timeslot", fieldname):
@@ -2787,6 +2900,69 @@ def _copy_term_planned_enrollments(source_term, target_term, timeslot_map):
 		_add_comment("Enrollment", doc.name, _("Planned enrollment copied from {0}.").format(enrollment.get("name")))
 		planned_count += 1
 	return planned_count
+
+
+def _copied_target_timeslot_map(target_term):
+	rows = frappe.get_all(
+		"Weekly Timeslot",
+		filters={"term": target_term},
+		fields=["name", "copied_from_weekly_timeslot"],
+		limit_page_length=0,
+	)
+	return {
+		row.get("copied_from_weekly_timeslot"): row.get("name")
+		for row in rows
+		if row.get("copied_from_weekly_timeslot")
+	}
+
+
+def _copy_active_full_term_enrollments(source_term, target_term, timeslot_map):
+	target_term_doc = frappe.get_doc("Term", target_term)
+	summary = {"eligible": 0, "created": 0, "existing": 0, "skipped": 0, "skipped_rows": []}
+	for enrollment in _source_term_enrollments_for_planning(source_term):
+		summary["eligible"] += 1
+		target_timeslot = timeslot_map.get(enrollment.get("weekly_timeslot"))
+		if not target_timeslot:
+			summary["skipped"] += 1
+			summary["skipped_rows"].append(
+				{
+					"enrollment": enrollment.get("name"),
+					"student": enrollment.get("student"),
+					"reason": _("No copied target weekly timeslot is available."),
+				}
+			)
+			continue
+		if _existing_target_enrollment(enrollment.get("student"), target_term, target_timeslot, statuses=["Planned", "Active"]):
+			summary["existing"] += 1
+			continue
+		doc = frappe.new_doc("Enrollment")
+		_apply_enrollment_payload(
+			doc,
+			{
+				"student": enrollment.get("student"),
+				"parent": enrollment.get("parent"),
+				"term": target_term,
+				"course": enrollment.get("course"),
+				"weekly_timeslot": target_timeslot,
+				"enrollment_type": "Full-Term",
+				"status": "Planned",
+				"enrollment_date": target_term_doc.get("start_date") or today(),
+			},
+		)
+		doc.insert(ignore_permissions=True)
+		_add_comment("Enrollment", doc.name, _("Planned enrollment copied from {0}.").format(enrollment.get("name")))
+		summary["created"] += 1
+	return summary
+
+
+def _require_term_copy_mapping_fields():
+	if not _has_field("Term", "copied_from_term") or not _has_field("Weekly Timeslot", "copied_from_weekly_timeslot"):
+		frappe.throw(_("Term copy fields are unavailable. Run site migration before using the staged term-copy workflow."))
+
+
+def _term_course_session_count(term):
+	timeslot_ids = frappe.get_all("Weekly Timeslot", filters={"term": term}, pluck="name", limit_page_length=0)
+	return _count("Course Sessions", {"weekly_timeslot": ["in", timeslot_ids]}) if timeslot_ids else 0
 
 
 def _existing_target_enrollment(student, term, weekly_timeslot, statuses=None):

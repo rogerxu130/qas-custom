@@ -113,6 +113,18 @@
    "in_standard_filter": 1,
    "label": "Status",
    "options": "Active\nInactive\nArchived"
+  },
+  {
+   "fieldname": "copy_source_section",
+   "fieldtype": "Section Break",
+   "label": "Copy source"
+  },
+  {
+   "fieldname": "copied_from_weekly_timeslot",
+   "fieldtype": "Link",
+   "label": "Copied From Weekly Timeslot",
+   "options": "Weekly Timeslot",
+   "read_only": 1
   }
  ],
  "grid_page_length": 50,
@@ -154,6 +166,8 @@
   "ndis_friendly",
   "ndis_public_listing_enabled",
   "ndis_capacity_alert_active",
-  "status"
+  "status",
+  "copy_source_section",
+  "copied_from_weekly_timeslot"
  ]
 }

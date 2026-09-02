@@ -10,7 +10,9 @@
   "start_date",
   "end_date",
   "status",
-  "notes"
+  "notes",
+  "copy_source_section",
+  "copied_from_term"
  ],
  "fields": [
   {
@@ -52,6 +54,18 @@
    "fieldname": "notes",
    "fieldtype": "Small Text",
    "label": "Notes"
+  },
+  {
+   "fieldname": "copy_source_section",
+   "fieldtype": "Section Break",
+   "label": "Copy source"
+  },
+  {
+   "fieldname": "copied_from_term",
+   "fieldtype": "Link",
+   "label": "Copied From Term",
+   "options": "Term",
+   "read_only": 1
   }
  ],
  "grid_page_length": 50,

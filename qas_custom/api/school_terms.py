@@ -1,8 +1,10 @@
 import frappe
 
 from qas_custom.services.school_admin import (
+	copy_school_admin_term_enrollments_data,
 	copy_school_admin_term_data,
 	create_school_admin_term_data,
+	create_school_admin_term_from_copy_data,
 	get_school_admin_term_data,
 	get_school_admin_terms_data,
 	populate_school_admin_term_data,
@@ -34,6 +36,16 @@ def school_terms_update_term(term=None, payload=None):
 @frappe.whitelist()
 def school_terms_copy_term(payload=None):
 	return copy_school_admin_term_data(payload=payload)
+
+
+@frappe.whitelist()
+def school_terms_create_term_from_copy(payload=None):
+	return create_school_admin_term_from_copy_data(payload=payload)
+
+
+@frappe.whitelist()
+def school_terms_copy_active_enrollments(term=None):
+	return copy_school_admin_term_enrollments_data(term=term)
 
 
 @frappe.whitelist()
