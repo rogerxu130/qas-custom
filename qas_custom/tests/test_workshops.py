@@ -11,11 +11,40 @@ from qas_custom.services.workshops import (
 	duplicate_school_admin_workshop_offering_data,
 	_enrollment_payload,
 	_serialise_workshop_time,
+	_workshop_invoice_item,
 	_update_attendance,
 )
 
 
 class TestWorkshops(TestCase):
+	@patch("qas_custom.services.workshops.frappe")
+	def test_workshop_invoice_item_prefers_configured_item(self, workshop_frappe):
+		workshop_frappe.conf.get.side_effect = ["Configured Workshop Fee"]
+		workshop_frappe.db.exists.return_value = True
+
+		self.assertEqual(_workshop_invoice_item(), "Configured Workshop Fee")
+		workshop_frappe.db.exists.assert_called_once_with("Item", "Configured Workshop Fee")
+
+	@patch("qas_custom.services.workshops.frappe")
+	def test_workshop_invoice_item_falls_back_to_existing_workshop_fee(self, workshop_frappe):
+		workshop_frappe.conf.get.side_effect = [None, None]
+		workshop_frappe.db.exists.return_value = True
+
+		self.assertEqual(_workshop_invoice_item(), "Workshop Fee")
+		workshop_frappe.db.exists.assert_called_once_with("Item", "Workshop Fee")
+
+	@patch("qas_custom.services.workshops.frappe")
+	@patch("qas_custom.services.workshops._", side_effect=lambda value: value)
+	def test_workshop_invoice_item_rejects_missing_configured_item(self, _translate, workshop_frappe):
+		workshop_frappe.conf.get.side_effect = ["Missing Item"]
+		workshop_frappe.db.exists.return_value = False
+		workshop_frappe.throw.side_effect = frappe.ValidationError
+
+		with self.assertRaises(frappe.ValidationError):
+			_workshop_invoice_item()
+
+		workshop_frappe.throw.assert_called_once_with("Configured Workshop invoice Item Missing Item does not exist.")
+
 	@patch("qas_custom.services.workshops.frappe")
 	@patch("qas_custom.services.workshops.get_student_parent_name", return_value="Student One")
 	def test_enrollment_payload_includes_student_and_parent_display_names(self, _student_name, workshop_frappe):

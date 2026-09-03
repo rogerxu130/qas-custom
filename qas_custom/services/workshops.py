@@ -542,10 +542,16 @@ def _offering_map(names):
 
 
 def _workshop_invoice_item():
-	item = frappe.conf.get("qas_workshop_invoice_item") or frappe.conf.get("qas_default_invoice_item")
-	if item and frappe.db.exists("Item", item):
-		return item
-	frappe.throw(_("Workshop invoice item is not configured. Set qas_workshop_invoice_item or qas_default_invoice_item."))
+	configured_item = frappe.conf.get("qas_workshop_invoice_item") or frappe.conf.get("qas_default_invoice_item")
+	if configured_item:
+		if frappe.db.exists("Item", configured_item):
+			return configured_item
+		frappe.throw(_("Configured Workshop invoice Item {0} does not exist.").format(configured_item))
+
+	default_item = "Workshop Fee"
+	if frappe.db.exists("Item", default_item):
+		return default_item
+	frappe.throw(_("Workshop invoice item is not configured. Create the Item Workshop Fee, or set qas_workshop_invoice_item or qas_default_invoice_item."))
 
 
 def _require_school_admin():
