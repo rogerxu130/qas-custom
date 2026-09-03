@@ -273,6 +273,7 @@ def consolidate_school_admin_workshop_invoices_data(payload=None):
 				if cint(row.get(INVOICE_ADJUSTMENT_FIELD) or 0):
 					target.append("taxes", _copy_child_row_values(row))
 
+		set_if_field(target, "qas_invoice_type", "Workshop")
 		sync_invoice_student_summary(target)
 		apply_invoice_payment_snapshot(target)
 		run_invoice_mutation_as_administrator(lambda: target.save(ignore_permissions=True))
@@ -651,11 +652,11 @@ def _validate_workshop_invoice_consolidation(invoices):
 		frappe.throw(_("Select at least two Workshop draft invoices to consolidate."))
 	if any(cint(invoice.docstatus) != 0 or invoice.get("status") == "Cancelled" for invoice in invoices):
 		frappe.throw(_("Only Draft invoices can be consolidated."))
-	if any(invoice.get("qas_invoice_type") != "Workshop" for invoice in invoices):
+	if any(not _is_workshop_invoice(invoice) for invoice in invoices):
 		frappe.throw(_("Only Workshop invoices can be consolidated together."))
-	parents = {invoice.get("parent") for invoice in invoices}
+	parents = {invoice.get("parent") for invoice in invoices if invoice.get("parent")}
 	customers = {invoice.get("customer") for invoice in invoices}
-	if len(parents) != 1 or not next(iter(parents), None) or len(customers) != 1 or not next(iter(customers), None):
+	if len(parents) > 1 or len(customers) != 1 or not next(iter(customers), None):
 		frappe.throw(_("Selected Workshop invoices must belong to the same Parent / Family and Customer."))
 	seen_enrollments = set()
 	for invoice in invoices:
@@ -671,6 +672,10 @@ def _validate_workshop_invoice_consolidation(invoices):
 		]
 		if unsupported:
 			frappe.throw(_("Workshop invoice {0} has taxes or charges that cannot be consolidated automatically.").format(invoice.name))
+
+
+def _is_workshop_invoice(invoice):
+	return invoice.get("qas_invoice_type") == "Workshop" or invoice.get("source_doctype") == "Workshop Enrollment"
 
 
 def _copy_child_row_values(row):

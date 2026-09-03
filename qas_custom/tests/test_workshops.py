@@ -10,6 +10,7 @@ from qas_custom.services.workshops import (
 	_copy_child_row_values,
 	_find_draft_workshop_invoice,
 	_invoice_has_workshop_enrollment_item,
+	_is_workshop_invoice,
 	_validate_workshop_invoice_consolidation,
 	activate_school_admin_workshop_enrollment_data,
 	consolidate_school_admin_workshop_invoices_data,
@@ -53,6 +54,11 @@ class TestWorkshops(TestCase):
 		self.assertTrue(_invoice_has_workshop_enrollment_item(invoice, "WEN-2"))
 		self.assertFalse(_invoice_has_workshop_enrollment_item(invoice, "WEN-1"))
 
+	def test_legacy_workshop_invoice_is_recognised_by_source_doctype(self):
+		invoice = frappe._dict(qas_invoice_type=None, source_doctype="Workshop Enrollment")
+
+		self.assertTrue(_is_workshop_invoice(invoice))
+
 	def test_copy_child_row_values_removes_document_metadata(self):
 		row = frappe._dict(name="ROW-1", parent="SINV-1", parenttype="Sales Invoice", item_code="Workshop Fee", rate=200)
 
@@ -90,6 +96,7 @@ class TestWorkshops(TestCase):
 			doc.taxes = []
 			values = {
 				"creation": creation, "status": "Draft", "qas_invoice_type": "Workshop",
+				"source_doctype": "Workshop Enrollment",
 				"parent": "PAR-1", "customer": "CUS-1", "items": doc.items, "taxes": doc.taxes,
 			}
 			doc.get.side_effect = lambda field, default=None: values.get(field, default)
