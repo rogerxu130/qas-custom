@@ -3,6 +3,7 @@ import frappe
 from qas_custom.services.workshops import (
 	activate_school_admin_workshop_enrollment_data,
 	cancel_school_admin_workshop_enrollment_data,
+	consolidate_school_admin_workshop_invoices_data,
 	create_school_admin_workshop_enrollment_data,
 	create_school_admin_workshop_invoice_data,
 	duplicate_school_admin_workshop_offering_data,
@@ -1426,6 +1427,11 @@ def school_admin_cancel_workshop_enrollment(workshop_enrollment=None):
 @frappe.whitelist()
 def school_admin_create_workshop_invoice(workshop_enrollment=None):
 	return create_school_admin_workshop_invoice_data(workshop_enrollment=workshop_enrollment)
+
+
+@frappe.whitelist()
+def school_admin_consolidate_workshop_invoices(payload=None):
+	return consolidate_school_admin_workshop_invoices_data(payload=payload)
 
 
 @frappe.whitelist()

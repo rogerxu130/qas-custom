@@ -26,6 +26,11 @@ ADMIN_ROLES = {"School Admin", "System Manager"}
 ATTENDANCE_STATUSES = ("Not Marked", "Present", "Absent", "Late", "Cancelled")
 MAX_PHOTO_UPLOADS = 12
 MAX_VIDEO_UPLOAD_BYTES = 100 * 1024 * 1024
+INVOICE_ADJUSTMENT_FIELD = "qas_is_invoice_adjustment"
+CHILD_ROW_META_FIELDS = {
+	"name", "owner", "creation", "modified", "modified_by", "docstatus", "idx",
+	"parent", "parentfield", "parenttype", "doctype",
+}
 
 
 # School Admin
@@ -202,15 +207,25 @@ def create_school_admin_workshop_invoice_data(workshop_enrollment=None):
 	student_name = get_student_parent_name(enrollment.student) or enrollment.student
 	description = f"{offering.title}\n{student_name}\n{offering.campus}\n{date_label}"
 	disable_sales_invoice_auto_notifications()
-	invoice = frappe.new_doc("Sales Invoice")
-	invoice.customer = customer
-	apply_default_invoice_dates(invoice)
-	set_if_field(invoice, "parent", enrollment.parent)
-	set_if_field(invoice, "qas_invoice_type", "Workshop")
-	set_if_field(invoice, "source_doctype", "Workshop Enrollment")
-	set_if_field(invoice, "source_document", enrollment.name)
-	set_if_field(invoice, "primary_student", enrollment.student)
-	set_if_field(invoice, "billing_note", _("Draft Workshop invoice. Review and apply any manual discount before submitting."))
+	invoice_name = _find_draft_workshop_invoice(parent=enrollment.parent, customer=customer)
+	created = not bool(invoice_name)
+	invoice = frappe.new_doc("Sales Invoice") if created else frappe.get_doc("Sales Invoice", invoice_name)
+	if created:
+		invoice.customer = customer
+		apply_default_invoice_dates(invoice)
+		set_if_field(invoice, "parent", enrollment.parent)
+		set_if_field(invoice, "qas_invoice_type", "Workshop")
+		set_if_field(invoice, "source_doctype", "Workshop Enrollment")
+		set_if_field(invoice, "source_document", enrollment.name)
+		set_if_field(invoice, "primary_student", enrollment.student)
+		set_if_field(invoice, "billing_note", _("Draft Workshop invoice. Review and apply any manual discount before submitting."))
+	if _invoice_has_workshop_enrollment_item(invoice, enrollment.name):
+		enrollment.invoice = invoice.name
+		enrollment.invoice_status = "Draft"
+		enrollment.invoice_amount = invoice.grand_total
+		enrollment.save(ignore_permissions=True)
+		frappe.db.commit()
+		return {"enrollment": _enrollment_payload(enrollment), "invoice": invoice.name, "reused": True}
 	item = invoice.append("items", {"item_code": item_code, "item_name": offering.title, "description": description, "qty": 1, "rate": flt(enrollment.standard_price_snapshot)})
 	set_if_field(item, "qas_line_type", "Workshop")
 	set_if_field(item, "student", enrollment.student)
@@ -219,13 +234,71 @@ def create_school_admin_workshop_invoice_data(workshop_enrollment=None):
 	set_if_field(item, "enrollment", enrollment.name)
 	sync_invoice_student_summary(invoice)
 	apply_invoice_payment_snapshot(invoice)
-	run_invoice_mutation_as_administrator(lambda: invoice.insert(ignore_permissions=True))
+	if created:
+		run_invoice_mutation_as_administrator(lambda: invoice.insert(ignore_permissions=True))
+	else:
+		run_invoice_mutation_as_administrator(lambda: invoice.save(ignore_permissions=True))
 	enrollment.invoice = invoice.name
 	enrollment.invoice_status = "Draft"
 	enrollment.invoice_amount = invoice.grand_total
 	enrollment.save(ignore_permissions=True)
 	frappe.db.commit()
-	return {"enrollment": _enrollment_payload(enrollment), "invoice": invoice.name}
+	return {"enrollment": _enrollment_payload(enrollment), "invoice": invoice.name, "reused": not created}
+
+
+def consolidate_school_admin_workshop_invoices_data(payload=None):
+	_require_school_admin()
+	payload = _payload(payload)
+	invoice_names = list(dict.fromkeys((name or "").strip() for name in (payload.get("invoices") or []) if (name or "").strip()))
+	if len(invoice_names) < 2:
+		frappe.throw(_("Select at least two Workshop draft invoices to consolidate."))
+
+	invoices = [frappe.get_doc("Sales Invoice", name) for name in invoice_names]
+	_validate_workshop_invoice_consolidation(invoices)
+	invoices.sort(key=lambda doc: (str(doc.get("creation") or ""), doc.name))
+	target, sources = invoices[0], invoices[1:]
+	enrollment_names = frappe.get_all(
+		"Workshop Enrollment",
+		filters={"invoice": ["in", invoice_names]},
+		pluck="name",
+		limit_page_length=0,
+	)
+	savepoint = "consolidate_workshop_draft_invoices"
+	frappe.db.savepoint(savepoint)
+	try:
+		for source in sources:
+			for row in source.get("items") or []:
+				target.append("items", _copy_child_row_values(row))
+			for row in source.get("taxes") or []:
+				if cint(row.get(INVOICE_ADJUSTMENT_FIELD) or 0):
+					target.append("taxes", _copy_child_row_values(row))
+
+		sync_invoice_student_summary(target)
+		apply_invoice_payment_snapshot(target)
+		run_invoice_mutation_as_administrator(lambda: target.save(ignore_permissions=True))
+
+		for enrollment_name in enrollment_names:
+			enrollment = frappe.get_doc("Workshop Enrollment", enrollment_name)
+			enrollment.invoice = target.name
+			enrollment.invoice_status = "Draft"
+			enrollment.invoice_amount = target.grand_total
+			enrollment.save(ignore_permissions=True)
+
+		for source in sources:
+			run_invoice_mutation_as_administrator(
+				lambda source_name=source.name: frappe.delete_doc("Sales Invoice", source_name, ignore_permissions=True)
+			)
+		frappe.db.commit()
+	except Exception:
+		frappe.db.rollback(save_point=savepoint)
+		raise
+
+	return {
+		"invoice": target.name,
+		"merged_invoices": len(sources),
+		"invoice_items": len(target.get("items") or []),
+		"workshop_enrollments": len(enrollment_names),
+	}
 
 
 def update_school_admin_workshop_attendance_data(workshop_session=None, updates=None):
@@ -552,6 +625,62 @@ def _workshop_invoice_item():
 	if frappe.db.exists("Item", default_item):
 		return default_item
 	frappe.throw(_("Workshop invoice item is not configured. Create the Item Workshop Fee, or set qas_workshop_invoice_item or qas_default_invoice_item."))
+
+
+def _find_draft_workshop_invoice(parent, customer):
+	if not parent or not customer or not has_field("Sales Invoice", "qas_invoice_type"):
+		return None
+	filters = {"customer": customer, "docstatus": 0, "qas_invoice_type": "Workshop"}
+	if has_field("Sales Invoice", "parent"):
+		filters["parent"] = parent
+	if has_field("Sales Invoice", "status"):
+		filters["status"] = ["!=", "Cancelled"]
+	rows = frappe.get_all("Sales Invoice", filters=filters, pluck="name", order_by="creation asc", limit=1)
+	return rows[0] if rows else None
+
+
+def _invoice_has_workshop_enrollment_item(invoice, workshop_enrollment):
+	return any(
+		row.get("qas_line_type") == "Workshop" and row.get("enrollment") == workshop_enrollment
+		for row in (invoice.get("items") or [])
+	)
+
+
+def _validate_workshop_invoice_consolidation(invoices):
+	if len(invoices) < 2:
+		frappe.throw(_("Select at least two Workshop draft invoices to consolidate."))
+	if any(cint(invoice.docstatus) != 0 or invoice.get("status") == "Cancelled" for invoice in invoices):
+		frappe.throw(_("Only Draft invoices can be consolidated."))
+	if any(invoice.get("qas_invoice_type") != "Workshop" for invoice in invoices):
+		frappe.throw(_("Only Workshop invoices can be consolidated together."))
+	parents = {invoice.get("parent") for invoice in invoices}
+	customers = {invoice.get("customer") for invoice in invoices}
+	if len(parents) != 1 or not next(iter(parents), None) or len(customers) != 1 or not next(iter(customers), None):
+		frappe.throw(_("Selected Workshop invoices must belong to the same Parent / Family and Customer."))
+	seen_enrollments = set()
+	for invoice in invoices:
+		for row in invoice.get("items") or []:
+			enrollment = row.get("enrollment") if row.get("qas_line_type") == "Workshop" else None
+			if enrollment and enrollment in seen_enrollments:
+				frappe.throw(_("Workshop Enrollment {0} appears on more than one selected invoice.").format(enrollment))
+			if enrollment:
+				seen_enrollments.add(enrollment)
+		unsupported = [
+			row for row in (invoice.get("taxes") or [])
+			if not cint(row.get(INVOICE_ADJUSTMENT_FIELD) or 0) and abs(flt(row.get("tax_amount") or 0)) > 0.0001
+		]
+		if unsupported:
+			frappe.throw(_("Workshop invoice {0} has taxes or charges that cannot be consolidated automatically.").format(invoice.name))
+
+
+def _copy_child_row_values(row):
+	as_dict = getattr(row, "as_dict", None)
+	data = as_dict() if callable(as_dict) else dict(row)
+	return {
+		fieldname: value
+		for fieldname, value in data.items()
+		if fieldname not in CHILD_ROW_META_FIELDS and not fieldname.startswith("__")
+	}
 
 
 def _require_school_admin():

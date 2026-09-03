@@ -7,7 +7,12 @@ import frappe
 
 from qas_custom.services.workshops import (
 	ATTENDANCE_STATUSES,
+	_copy_child_row_values,
+	_find_draft_workshop_invoice,
+	_invoice_has_workshop_enrollment_item,
+	_validate_workshop_invoice_consolidation,
 	activate_school_admin_workshop_enrollment_data,
+	consolidate_school_admin_workshop_invoices_data,
 	duplicate_school_admin_workshop_offering_data,
 	_enrollment_payload,
 	_serialise_workshop_time,
@@ -17,6 +22,112 @@ from qas_custom.services.workshops import (
 
 
 class TestWorkshops(TestCase):
+	@patch("qas_custom.services.workshops.has_field", return_value=True)
+	@patch("qas_custom.services.workshops.frappe")
+	def test_find_draft_workshop_invoice_uses_family_customer_and_type(self, workshop_frappe, _has_field):
+		workshop_frappe.get_all.return_value = ["ACC-SINV-0001"]
+
+		result = _find_draft_workshop_invoice("PAR-1", "CUS-1")
+
+		self.assertEqual(result, "ACC-SINV-0001")
+		workshop_frappe.get_all.assert_called_once_with(
+			"Sales Invoice",
+			filters={
+				"customer": "CUS-1",
+				"docstatus": 0,
+				"qas_invoice_type": "Workshop",
+				"parent": "PAR-1",
+				"status": ["!=", "Cancelled"],
+			},
+			pluck="name",
+			order_by="creation asc",
+			limit=1,
+		)
+
+	def test_invoice_has_workshop_enrollment_item_matches_line_type_and_enrollment(self):
+		invoice = frappe._dict(items=[
+			frappe._dict(qas_line_type="Course", enrollment="WEN-1"),
+			frappe._dict(qas_line_type="Workshop", enrollment="WEN-2"),
+		])
+
+		self.assertTrue(_invoice_has_workshop_enrollment_item(invoice, "WEN-2"))
+		self.assertFalse(_invoice_has_workshop_enrollment_item(invoice, "WEN-1"))
+
+	def test_copy_child_row_values_removes_document_metadata(self):
+		row = frappe._dict(name="ROW-1", parent="SINV-1", parenttype="Sales Invoice", item_code="Workshop Fee", rate=200)
+
+		self.assertEqual(_copy_child_row_values(row), {"item_code": "Workshop Fee", "rate": 200})
+
+	@patch("qas_custom.services.workshops.frappe")
+	@patch("qas_custom.services.workshops._", side_effect=lambda value: value)
+	def test_consolidation_validation_rejects_duplicate_workshop_enrollment(self, _translate, workshop_frappe):
+		workshop_frappe.throw.side_effect = frappe.ValidationError
+		invoices = [
+			frappe._dict(name="SINV-1", docstatus=0, status="Draft", qas_invoice_type="Workshop", parent="PAR-1", customer="CUS-1", items=[frappe._dict(qas_line_type="Workshop", enrollment="WEN-1")], taxes=[]),
+			frappe._dict(name="SINV-2", docstatus=0, status="Draft", qas_invoice_type="Workshop", parent="PAR-1", customer="CUS-1", items=[frappe._dict(qas_line_type="Workshop", enrollment="WEN-1")], taxes=[]),
+		]
+
+		with self.assertRaises(frappe.ValidationError):
+			_validate_workshop_invoice_consolidation(invoices)
+
+		workshop_frappe.throw.assert_called_once_with("Workshop Enrollment WEN-1 appears on more than one selected invoice.")
+
+	@patch("qas_custom.services.workshops.apply_invoice_payment_snapshot")
+	@patch("qas_custom.services.workshops.sync_invoice_student_summary")
+	@patch("qas_custom.services.workshops.run_invoice_mutation_as_administrator", side_effect=lambda callback: callback())
+	@patch("qas_custom.services.workshops._require_school_admin")
+	@patch("qas_custom.services.workshops.frappe")
+	def test_consolidate_workshop_drafts_keeps_oldest_and_relinks_enrollments(
+		self, workshop_frappe, _require, _administrator, sync_summary, payment_snapshot
+	):
+		def invoice(name, creation, enrollment, amount):
+			doc = Mock()
+			doc.name = name
+			doc.docstatus = 0
+			doc.grand_total = amount
+			doc.creation = creation
+			doc.items = [frappe._dict(qas_line_type="Workshop", enrollment=enrollment, item_code="Workshop Fee", rate=amount)]
+			doc.taxes = []
+			values = {
+				"creation": creation, "status": "Draft", "qas_invoice_type": "Workshop",
+				"parent": "PAR-1", "customer": "CUS-1", "items": doc.items, "taxes": doc.taxes,
+			}
+			doc.get.side_effect = lambda field, default=None: values.get(field, default)
+			def append(field, values):
+				row = frappe._dict(values)
+				getattr(doc, field).append(row)
+				return row
+			doc.append.side_effect = append
+			return doc
+
+		target = invoice("SINV-OLD", "2026-09-01 09:00:00", "WEN-1", 200)
+		source = invoice("SINV-NEW", "2026-09-02 09:00:00", "WEN-2", 180)
+		enrollment_one = Mock()
+		enrollment_two = Mock()
+		workshop_frappe.get_doc.side_effect = lambda doctype, name: {
+			("Sales Invoice", "SINV-OLD"): target,
+			("Sales Invoice", "SINV-NEW"): source,
+			("Workshop Enrollment", "WEN-1"): enrollment_one,
+			("Workshop Enrollment", "WEN-2"): enrollment_two,
+		}[(doctype, name)]
+		workshop_frappe.get_all.return_value = ["WEN-1", "WEN-2"]
+		target.save.side_effect = lambda **_kwargs: setattr(target, "grand_total", 380)
+
+		result = consolidate_school_admin_workshop_invoices_data({"invoices": ["SINV-NEW", "SINV-OLD"]})
+
+		self.assertEqual(result["invoice"], "SINV-OLD")
+		self.assertEqual(result["merged_invoices"], 1)
+		self.assertEqual(len(target.items), 2)
+		sync_summary.assert_called_once_with(target)
+		payment_snapshot.assert_called_once_with(target)
+		self.assertEqual(enrollment_one.invoice, "SINV-OLD")
+		self.assertEqual(enrollment_two.invoice, "SINV-OLD")
+		self.assertEqual(enrollment_one.invoice_amount, 380)
+		enrollment_one.save.assert_called_once_with(ignore_permissions=True)
+		enrollment_two.save.assert_called_once_with(ignore_permissions=True)
+		workshop_frappe.delete_doc.assert_called_once_with("Sales Invoice", "SINV-NEW", ignore_permissions=True)
+		workshop_frappe.db.commit.assert_called_once()
+
 	@patch("qas_custom.services.workshops.frappe")
 	def test_workshop_invoice_item_prefers_configured_item(self, workshop_frappe):
 		workshop_frappe.conf.get.side_effect = ["Configured Workshop Fee"]
