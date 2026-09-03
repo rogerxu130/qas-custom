@@ -1118,32 +1118,49 @@ def _map_trial_form_session(payload: dict):
 	if not timeslots:
 		result["reason"] = _("No Weekly Timeslot matched the submitted campus, weekday, and time.")
 		return result
-	if len(timeslots) > 1:
-		result["reason"] = _("Multiple Weekly Timeslots matched the submitted campus, weekday, and time.")
-		return result
 
-	result["course"] = timeslots[0].course
+	timeslots_by_name = {row.name: row for row in timeslots}
 	sessions = frappe.get_all(
 		"Course Sessions",
-		filters={"weekly_timeslot": timeslots[0].name, "session_date": trial_date},
+		filters={"weekly_timeslot": ["in", list(timeslots_by_name)], "session_date": trial_date},
 		fields=["name", "weekly_timeslot", "session_date", "status"],
 		order_by="modified desc",
 		limit_page_length=0,
 	)
 	if not sessions:
-		result["reason"] = _("No Course Session exists for the matched Weekly Timeslot and trial date.")
-		return result
-	if len(sessions) > 1:
-		result["reason"] = _("Multiple Course Sessions matched the submitted trial request.")
-		return result
-	if sessions[0].get("status") == "Cancelled":
-		result["reason"] = _("Matched Course Session is cancelled.")
-		return result
-	if _course_session_has_started(sessions[0], timeslots[0]):
-		result["reason"] = _("Matched Course Session has already started.")
+		result["reason"] = _("No Course Session matched the submitted trial date and schedule.")
 		return result
 
-	result["course_session"] = sessions[0].name
+	bookable_sessions = []
+	cancelled_sessions = []
+	started_sessions = []
+	for session in sessions:
+		timeslot = timeslots_by_name.get(session.get("weekly_timeslot"))
+		if not timeslot:
+			continue
+		if session.get("status") == "Cancelled":
+			cancelled_sessions.append(session)
+		elif _course_session_has_started(session, timeslot):
+			started_sessions.append(session)
+		else:
+			bookable_sessions.append(session)
+
+	if len(bookable_sessions) > 1:
+		result["reason"] = _("Multiple Course Sessions matched the submitted trial request.")
+		return result
+	if not bookable_sessions and len(cancelled_sessions) == len(sessions):
+		result["reason"] = _("Matched Course Session is cancelled.")
+		return result
+	if not bookable_sessions and len(started_sessions) == len(sessions):
+		result["reason"] = _("Matched Course Session has already started.")
+		return result
+	if not bookable_sessions:
+		result["reason"] = _("No bookable Course Session matched the submitted trial date and schedule.")
+		return result
+
+	selected_session = bookable_sessions[0]
+	result["course"] = timeslots_by_name[selected_session.weekly_timeslot].course
+	result["course_session"] = selected_session.name
 	return result
 
 
