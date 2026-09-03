@@ -9,12 +9,24 @@ from qas_custom.services.workshops import (
 	ATTENDANCE_STATUSES,
 	activate_school_admin_workshop_enrollment_data,
 	duplicate_school_admin_workshop_offering_data,
+	_enrollment_payload,
 	_serialise_workshop_time,
 	_update_attendance,
 )
 
 
 class TestWorkshops(TestCase):
+	@patch("qas_custom.services.workshops.frappe")
+	@patch("qas_custom.services.workshops.get_student_parent_name", return_value="Student One")
+	def test_enrollment_payload_includes_student_and_parent_display_names(self, _student_name, workshop_frappe):
+		workshop_frappe.db.get_value.return_value = "Parent One"
+
+		payload = _enrollment_payload(frappe._dict(name="WEN-1", student="STU-1", parent="PAR-1"))
+
+		self.assertEqual(payload["student_name"], "Student One")
+		self.assertEqual(payload["parent_name"], "Parent One")
+		workshop_frappe.db.get_value.assert_called_once_with("Parent", "PAR-1", "parent_name")
+
 	def test_workshop_time_serialization_zero_pads_morning_hours(self):
 		self.assertEqual(_serialise_workshop_time("9:30:00"), "09:30:00")
 		self.assertEqual(_serialise_workshop_time(timedelta(hours=9, minutes=30)), "09:30:00")

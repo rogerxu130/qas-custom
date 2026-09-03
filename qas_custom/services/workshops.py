@@ -460,6 +460,9 @@ def _serialise_workshop_time(value):
 def _enrollment_payload(row):
 	payload = {field: row.get(field) for field in ("name", "workshop_offering", "student", "parent", "status", "enrollment_date", "standard_price_snapshot", "adult_participant_name", "adult_participant_parent", "invoice", "invoice_status", "invoice_amount")}
 	payload["student_name"] = get_student_parent_name(payload.get("student")) or payload.get("student")
+	payload["parent_name"] = None
+	if payload.get("parent"):
+		payload["parent_name"] = frappe.db.get_value("Parent", payload.get("parent"), "parent_name") or payload.get("parent")
 	if payload.get("invoice") and frappe.db.exists("Sales Invoice", payload["invoice"]):
 		invoice = frappe.db.get_value("Sales Invoice", payload["invoice"], ["docstatus", "status", "grand_total", "outstanding_amount"], as_dict=True)
 		if invoice:
