@@ -10,8 +10,8 @@ from qas_custom.utils.environment import payment_block_reason, payment_mutations
 
 LEDGER_DOCTYPE = "QAS Store Credit Ledger"
 STORE_CREDIT_LIABILITY_ACCOUNT_NAME = "Store Credit Liability"
-COURSE_INVOICE_TYPES = {"Course", "Store Credit Top-up", "Holiday Program"}
-COURSE_LINE_TYPES = {"Course Fee", "Trial Fee", "Makeup", "Pay-as-you-go", "Holiday Program"}
+COURSE_INVOICE_TYPES = {"Course", "Store Credit Top-up", "Holiday Program", "Workshop"}
+COURSE_LINE_TYPES = {"Course Fee", "Trial Fee", "Makeup", "Pay-as-you-go", "Holiday Program", "Workshop"}
 BALANCE_FIELDS = ("store_credit", "credit_balance", "available_credit", "balance")
 STORE_CREDIT_BONUS_TYPE = "Promotion Bonus"
 STORE_CREDIT_BONUS_SCOPES = {"Both", "Top-up", "Invoice Payment"}

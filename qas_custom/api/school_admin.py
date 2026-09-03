@@ -1,5 +1,17 @@
 import frappe
 
+from qas_custom.services.workshops import (
+	activate_school_admin_workshop_enrollment_data,
+	cancel_school_admin_workshop_enrollment_data,
+	create_school_admin_workshop_enrollment_data,
+	create_school_admin_workshop_invoice_data,
+	get_school_admin_workshop_offering_data,
+	get_school_admin_workshop_offerings_data,
+	get_school_admin_workshop_session_data,
+	save_school_admin_workshop_offering_data,
+	update_school_admin_workshop_attendance_data,
+)
+
 from qas_custom.services.parent_classroom_messages import get_school_admin_parent_classroom_messages_data
 
 from qas_custom.services.payment_collection_requests import (
@@ -1356,3 +1368,48 @@ def school_admin_get_teacher_revenue_share_sessions(
 		owned_only=owned_only,
 		limit=limit,
 	)
+
+
+@frappe.whitelist()
+def school_admin_get_workshop_offerings(query=None, category=None, campus=None, status=None, limit=120):
+	return get_school_admin_workshop_offerings_data(query=query, category=category, campus=campus, status=status, limit=limit)
+
+
+@frappe.whitelist()
+def school_admin_get_workshop_offering(workshop_offering=None):
+	return get_school_admin_workshop_offering_data(workshop_offering=workshop_offering)
+
+
+@frappe.whitelist()
+def school_admin_save_workshop_offering(workshop_offering=None, payload=None):
+	return save_school_admin_workshop_offering_data(workshop_offering=workshop_offering, payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_create_workshop_enrollment(payload=None):
+	return create_school_admin_workshop_enrollment_data(payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_activate_workshop_enrollment(workshop_enrollment=None):
+	return activate_school_admin_workshop_enrollment_data(workshop_enrollment=workshop_enrollment)
+
+
+@frappe.whitelist()
+def school_admin_cancel_workshop_enrollment(workshop_enrollment=None):
+	return cancel_school_admin_workshop_enrollment_data(workshop_enrollment=workshop_enrollment)
+
+
+@frappe.whitelist()
+def school_admin_create_workshop_invoice(workshop_enrollment=None):
+	return create_school_admin_workshop_invoice_data(workshop_enrollment=workshop_enrollment)
+
+
+@frappe.whitelist()
+def school_admin_get_workshop_session(workshop_session=None):
+	return get_school_admin_workshop_session_data(workshop_session=workshop_session)
+
+
+@frappe.whitelist()
+def school_admin_update_workshop_attendance(workshop_session=None, updates=None):
+	return update_school_admin_workshop_attendance_data(workshop_session=workshop_session, updates=updates)

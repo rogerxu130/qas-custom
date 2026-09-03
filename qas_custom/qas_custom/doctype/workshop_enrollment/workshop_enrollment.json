@@ -1,0 +1,20 @@
+{
+ "actions":[],"allow_rename":0,"autoname":"WEN-.YYYY.-.#####","doctype":"DocType","engine":"InnoDB",
+ "field_order":["workshop_offering","student","parent","status","enrollment_date","standard_price_snapshot","adult_participant_name","adult_participant_parent","invoice","invoice_status","invoice_amount"],
+ "fields":[
+  {"fieldname":"workshop_offering","fieldtype":"Link","label":"Workshop Offering","options":"Workshop Offering","reqd":1,"in_list_view":1,"in_standard_filter":1},
+  {"fieldname":"student","fieldtype":"Link","label":"Student","options":"Student","reqd":1,"in_list_view":1,"in_standard_filter":1},
+  {"fieldname":"parent","fieldtype":"Link","label":"Parent / Family","options":"Parent","reqd":1,"in_standard_filter":1},
+  {"fieldname":"status","fieldtype":"Select","label":"Status","options":"Planned\nActive\nCompleted\nCancelled","default":"Planned","reqd":1,"in_list_view":1,"in_standard_filter":1},
+  {"fieldname":"enrollment_date","fieldtype":"Date","label":"Enrollment Date"},
+  {"fieldname":"standard_price_snapshot","fieldtype":"Currency","label":"Package Price Snapshot","read_only":1},
+  {"fieldname":"adult_participant_name","fieldtype":"Data","label":"Adult Participant Name"},
+  {"fieldname":"adult_participant_parent","fieldtype":"Link","label":"Adult Participant Parent Record","options":"Parent"},
+  {"fieldname":"invoice","fieldtype":"Link","label":"Invoice","options":"Sales Invoice","read_only":1},
+  {"fieldname":"invoice_status","fieldtype":"Data","label":"Invoice Status","read_only":1},
+  {"fieldname":"invoice_amount","fieldtype":"Currency","label":"Invoice Amount","read_only":1}
+ ],
+ "index_web_pages_for_search":1,"links":[],"module":"QAS Custom","name":"Workshop Enrollment",
+ "permissions":[{"role":"System Manager","read":1,"write":1,"create":1,"delete":1,"report":1,"export":1,"print":1},{"role":"School Admin","read":1,"write":1,"create":1,"delete":1,"report":1,"export":1}],
+ "sort_field":"modified","sort_order":"DESC","states":[],"track_changes":1
+}

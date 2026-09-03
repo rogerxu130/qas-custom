@@ -1,0 +1,12 @@
+{
+ "actions":[],"allow_rename":0,"doctype":"DocType","editable_grid":1,"engine":"InnoDB","istable":1,
+ "field_order":["photo","preview_url","file_name","file_size","mime_type"],
+ "fields":[
+  {"fieldname":"photo","fieldtype":"Attach Image","label":"Photo","reqd":1,"in_list_view":1},
+  {"fieldname":"preview_url","fieldtype":"Data","label":"Preview URL","read_only":1},
+  {"fieldname":"file_name","fieldtype":"Data","label":"File Name","read_only":1},
+  {"fieldname":"file_size","fieldtype":"Int","label":"File Size","read_only":1},
+  {"fieldname":"mime_type","fieldtype":"Data","label":"MIME Type","read_only":1}
+ ],
+ "module":"QAS Custom","name":"Workshop Photo Item","permissions":[],"sort_field":"idx","sort_order":"ASC","states":[]
+}

@@ -1,0 +1,16 @@
+{
+ "actions":[],"allow_rename":0,"autoname":"WHW-.YYYY.-.#####","doctype":"DocType","engine":"InnoDB",
+ "field_order":["workshop_session","title","description","attachment","teacher","status","published_at"],
+ "fields":[
+  {"fieldname":"workshop_session","fieldtype":"Link","label":"Workshop Session","options":"Workshop Session","reqd":1,"in_list_view":1,"in_standard_filter":1},
+  {"fieldname":"title","fieldtype":"Data","label":"Title","reqd":1,"in_list_view":1},
+  {"fieldname":"description","fieldtype":"Text Editor","label":"Description"},
+  {"fieldname":"attachment","fieldtype":"Attach","label":"Attachment"},
+  {"fieldname":"teacher","fieldtype":"Link","label":"Teacher","options":"Teacher","reqd":1,"in_standard_filter":1},
+  {"fieldname":"status","fieldtype":"Select","label":"Status","options":"Draft\nPublished","default":"Draft","reqd":1,"in_list_view":1,"in_standard_filter":1},
+  {"fieldname":"published_at","fieldtype":"Datetime","label":"Published At","read_only":1}
+ ],
+ "index_web_pages_for_search":1,"links":[],"module":"QAS Custom","name":"Workshop Homework",
+ "permissions":[{"role":"System Manager","read":1,"write":1,"create":1,"delete":1,"report":1,"export":1},{"role":"School Admin","read":1,"write":1,"create":1,"delete":1,"report":1,"export":1}],
+ "sort_field":"modified","sort_order":"DESC","states":[],"track_changes":1
+}

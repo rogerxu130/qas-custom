@@ -1,0 +1,19 @@
+{
+ "actions": [], "allow_rename": 0, "autoname": "WSS-.YYYY.-.#####", "doctype":"DocType", "engine":"InnoDB",
+ "field_order":["workshop_offering","session_date","start_time","end_time","teacher","classroom","campus","workshop_session_index","workshop_session_count","status"],
+ "fields":[
+  {"fieldname":"workshop_offering","fieldtype":"Link","label":"Workshop Offering","options":"Workshop Offering","reqd":1,"in_list_view":1,"in_standard_filter":1},
+  {"fieldname":"session_date","fieldtype":"Date","label":"Session Date","reqd":1,"in_list_view":1,"in_standard_filter":1},
+  {"fieldname":"start_time","fieldtype":"Time","label":"Start Time","reqd":1},
+  {"fieldname":"end_time","fieldtype":"Time","label":"End Time","reqd":1},
+  {"fieldname":"teacher","fieldtype":"Link","label":"Teacher","options":"Teacher","in_list_view":1,"in_standard_filter":1},
+  {"fieldname":"classroom","fieldtype":"Link","label":"Classroom","options":"Classroom"},
+  {"fieldname":"campus","fieldtype":"Link","label":"Campus","options":"Campus","read_only":1,"in_standard_filter":1},
+  {"fieldname":"workshop_session_index","fieldtype":"Int","label":"Day Number","read_only":1},
+  {"fieldname":"workshop_session_count","fieldtype":"Int","label":"Total Days","read_only":1},
+  {"fieldname":"status","fieldtype":"Select","label":"Status","options":"Scheduled\nCompleted\nCancelled","default":"Scheduled","reqd":1,"in_list_view":1,"in_standard_filter":1}
+ ],
+ "index_web_pages_for_search":1,"links":[],"module":"QAS Custom","name":"Workshop Session",
+ "permissions":[{"role":"System Manager","read":1,"write":1,"create":1,"delete":1,"report":1,"export":1,"print":1},{"role":"School Admin","read":1,"write":1,"create":1,"delete":1,"report":1,"export":1}],
+ "sort_field":"session_date","sort_order":"DESC","states":[],"track_changes":1
+}

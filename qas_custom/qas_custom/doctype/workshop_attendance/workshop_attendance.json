@@ -1,0 +1,17 @@
+{
+ "actions":[],"allow_rename":0,"autoname":"WAT-.YYYY.-.#####","doctype":"DocType","engine":"InnoDB",
+ "field_order":["workshop_session","workshop_enrollment","student","status","comments","previous_status","marked_by","marked_at"],
+ "fields":[
+  {"fieldname":"workshop_session","fieldtype":"Link","label":"Workshop Session","options":"Workshop Session","reqd":1,"in_list_view":1,"in_standard_filter":1},
+  {"fieldname":"workshop_enrollment","fieldtype":"Link","label":"Workshop Enrollment","options":"Workshop Enrollment","reqd":1,"in_standard_filter":1},
+  {"fieldname":"student","fieldtype":"Link","label":"Student","options":"Student","reqd":1,"in_list_view":1,"in_standard_filter":1},
+  {"fieldname":"status","fieldtype":"Select","label":"Status","options":"Not Marked\nPresent\nAbsent\nLate\nCancelled","default":"Not Marked","reqd":1,"in_list_view":1,"in_standard_filter":1},
+  {"fieldname":"comments","fieldtype":"Small Text","label":"Comments"},
+  {"fieldname":"previous_status","fieldtype":"Data","label":"Previous Status","read_only":1},
+  {"fieldname":"marked_by","fieldtype":"Link","label":"Marked By","options":"User","read_only":1},
+  {"fieldname":"marked_at","fieldtype":"Datetime","label":"Marked At","read_only":1}
+ ],
+ "index_web_pages_for_search":1,"links":[],"module":"QAS Custom","name":"Workshop Attendance",
+ "permissions":[{"role":"System Manager","read":1,"write":1,"create":1,"delete":1,"report":1,"export":1},{"role":"School Admin","read":1,"write":1,"create":1,"delete":1,"report":1,"export":1}],
+ "sort_field":"modified","sort_order":"DESC","states":[],"track_changes":1
+}

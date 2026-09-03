@@ -1,0 +1,32 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "WSO-.YYYY.-.#####",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": ["title", "workshop_category", "participation_mode", "class_language", "campus", "status", "description", "minimum_age", "maximum_age", "standard_price", "capacity", "materials_or_preparation", "inclusions"],
+ "fields": [
+  {"fieldname":"title","fieldtype":"Data","label":"Title","reqd":1,"in_list_view":1},
+  {"fieldname":"workshop_category","fieldtype":"Select","label":"Category","options":"Holiday Camp\nGeneral Workshop","reqd":1,"in_list_view":1,"in_standard_filter":1},
+  {"fieldname":"participation_mode","fieldtype":"Select","label":"Participation Mode","options":"Individual\nParent and Child","default":"Individual","reqd":1},
+  {"fieldname":"class_language","fieldtype":"Select","label":"Language","options":"English\nChinese","reqd":1,"in_standard_filter":1},
+  {"fieldname":"campus","fieldtype":"Link","label":"Campus","options":"Campus","reqd":1,"in_list_view":1,"in_standard_filter":1},
+  {"fieldname":"status","fieldtype":"Select","label":"Status","options":"Draft\nOpen\nClosed\nCompleted\nCancelled","default":"Draft","reqd":1,"in_list_view":1,"in_standard_filter":1},
+  {"fieldname":"description","fieldtype":"Text Editor","label":"Description"},
+  {"fieldname":"minimum_age","fieldtype":"Int","label":"Minimum Age"},
+  {"fieldname":"maximum_age","fieldtype":"Int","label":"Maximum Age"},
+  {"fieldname":"standard_price","fieldtype":"Currency","label":"Standard Package Price","reqd":1},
+  {"fieldname":"capacity","fieldtype":"Int","label":"Package Capacity"},
+  {"fieldname":"materials_or_preparation","fieldtype":"Text Editor","label":"Materials or Preparation"},
+  {"fieldname":"inclusions","fieldtype":"Text Editor","label":"Inclusions"}
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "module": "QAS Custom",
+ "name": "Workshop Offering",
+ "permissions": [
+  {"role":"System Manager","read":1,"write":1,"create":1,"delete":1,"report":1,"export":1,"print":1,"email":1},
+  {"role":"School Admin","read":1,"write":1,"create":1,"delete":1,"report":1,"export":1,"print":1}
+ ],
+ "sort_field":"modified","sort_order":"DESC","states":[],"track_changes":1
+}

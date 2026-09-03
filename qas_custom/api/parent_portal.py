@@ -35,6 +35,11 @@ from qas_custom.services.password_reset import (
     request_password_reset,
     validate_password_reset_token,
 )
+from qas_custom.services.workshops import (
+    get_parent_workshops_data,
+    get_workshop_photo_content_data,
+    get_workshop_video_content_data,
+)
 
 
 @frappe.whitelist(allow_guest=True)
@@ -211,3 +216,28 @@ def parent_portal_complete_leave_and_keep_voucher(student=None, course_session=N
 @frappe.whitelist()
 def parent_portal_cancel_leave(voucher_id=None):
     return cancel_parent_leave_data(voucher_id=voucher_id)
+
+
+@frappe.whitelist()
+def parent_portal_get_workshops(student=None):
+    return get_parent_workshops_data(student=student)
+
+
+@frappe.whitelist()
+def parent_portal_get_workshop_photo_content(photo_post=None, photo_idx=None, support_token=None):
+    payload = get_workshop_photo_content_data(photo_post=photo_post, photo_idx=photo_idx, audience="parent")
+    frappe.local.response.filename = payload["filename"]
+    frappe.local.response.filecontent = payload["content"]
+    frappe.local.response.content_type = payload["content_type"]
+    frappe.local.response.display_content_as = "inline"
+    frappe.local.response.type = "download"
+
+
+@frappe.whitelist()
+def parent_portal_get_workshop_video_content(video_post=None, download=0, support_token=None):
+    payload = get_workshop_video_content_data(video_post=video_post, audience="parent", download=download)
+    frappe.local.response.filename = payload["filename"]
+    frappe.local.response.filecontent = payload["content"]
+    frappe.local.response.content_type = payload["content_type"]
+    frappe.local.response.display_content_as = payload["display_content_as"]
+    frappe.local.response.type = "download"
