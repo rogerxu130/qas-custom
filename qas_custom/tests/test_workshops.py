@@ -21,9 +21,55 @@ from qas_custom.services.workshops import (
 	_workshop_invoice_item,
 	_update_attendance,
 )
+from qas_custom.services.school_admin import _get_family_workshop_enrollment_rows
 
 
 class TestWorkshops(TestCase):
+	@patch("qas_custom.services.school_admin._doctype_available", return_value=True)
+	@patch("qas_custom.services.school_admin.frappe")
+	def test_family_workshop_enrollments_include_all_statuses_and_display_context(self, school_admin_frappe, _doctype):
+		school_admin_frappe.get_all.side_effect = [
+			[
+				frappe._dict(name="WEN-2", workshop_offering="WSO-1", student="STU-2", parent="PAR-1", status="Cancelled", standard_price_snapshot=180, invoice="SINV-2", invoice_status="Cancelled", invoice_amount=180, modified="2026-09-03 10:00:00"),
+				frappe._dict(name="WEN-4", workshop_offering="WSO-1", student="STU-2", parent="PAR-1", status="Completed", standard_price_snapshot=180, modified="2026-09-03 09:00:00"),
+				frappe._dict(name="WEN-3", workshop_offering="WSO-1", student="STU-1", parent="PAR-1", status="Planned", standard_price_snapshot=180, modified="2026-09-03 08:00:00"),
+				frappe._dict(name="WEN-1", workshop_offering="WSO-1", student="STU-1", parent="PAR-1", status="Active", standard_price_snapshot=180, invoice="SINV-1", invoice_status="Draft", invoice_amount=180, modified="2026-09-02 10:00:00"),
+			],
+			[frappe._dict(name="WSO-1", title="Spring Painting", workshop_category="Holiday Camp", campus="Indooroopilly")],
+			[
+				frappe._dict(name="WSS-2", workshop_offering="WSO-1", session_date="2026-09-23", start_time="09:00:00"),
+				frappe._dict(name="WSS-1", workshop_offering="WSO-1", session_date="2026-09-22", start_time="09:00:00"),
+			],
+		]
+
+		result = _get_family_workshop_enrollment_rows(
+			parent="PAR-1",
+			students=["STU-1", "STU-2"],
+			student_rows=[
+				frappe._dict(name="STU-1", student_display="Amy (STU-1)"),
+				frappe._dict(name="STU-2", student_name="Ben"),
+			],
+		)
+
+		self.assertEqual([row["name"] for row in result], ["WEN-2", "WEN-4", "WEN-3", "WEN-1"])
+		self.assertEqual({row["status"] for row in result}, {"Planned", "Active", "Completed", "Cancelled"})
+		self.assertEqual(result[0]["student_display"], "Ben")
+		self.assertEqual(result[3]["student_display"], "Amy (STU-1)")
+		self.assertEqual(result[0]["workshop_title"], "Spring Painting")
+		self.assertEqual(result[0]["session_dates"], ["2026-09-22", "2026-09-23"])
+		first_call = school_admin_frappe.get_all.call_args_list[0]
+		self.assertEqual(first_call.kwargs["filters"], {"parent": "PAR-1", "student": ["in", ["STU-1", "STU-2"]]})
+		self.assertNotIn("status", first_call.kwargs["filters"])
+		self.assertEqual(first_call.kwargs["order_by"], "modified desc, name desc")
+
+	@patch("qas_custom.services.school_admin._doctype_available", return_value=False)
+	@patch("qas_custom.services.school_admin.frappe")
+	def test_family_workshop_enrollments_are_empty_during_staged_schema_deployment(self, school_admin_frappe, _doctype):
+		result = _get_family_workshop_enrollment_rows(parent="PAR-1", students=["STU-1"])
+
+		self.assertEqual(result, [])
+		school_admin_frappe.get_all.assert_not_called()
+
 	@patch("qas_custom.services.workshops.has_field", return_value=True)
 	@patch("qas_custom.services.workshops.frappe")
 	def test_find_draft_workshop_invoice_uses_family_customer_and_type(self, workshop_frappe, _has_field):

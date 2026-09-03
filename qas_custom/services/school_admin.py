@@ -322,6 +322,12 @@ def get_school_admin_family_data(parent=None, student=None, customer=None, email
 		"students": students,
 		"store_credit": get_store_credit_summary(parent=parent_id, customer=customer_id, limit=20) if customer_id else None,
 		"enrollments": _get_enrollment_rows(parent=parent_id, students=student_ids, limit=80),
+		"workshop_enrollments": _get_family_workshop_enrollment_rows(
+			parent=parent_id,
+			students=student_ids,
+			student_rows=students,
+			limit=80,
+		),
 		"inquiries": _get_family_inquiry_rows(parent=parent_id, students=student_ids, email=email, limit=80),
 		"invoices": _get_invoice_rows(customer=customer_id, parent=parent_id, students=student_ids, limit=80),
 		"vouchers": _get_family_voucher_rows(students=student_ids, limit=80),
@@ -7443,6 +7449,70 @@ def _get_enrollment_rows(parent=None, students=None, filters=None, limit=80):
 		limit=limit,
 	)
 	return _attach_course_labels([_normalize_row_payload("Enrollment", row) for row in rows])
+
+
+def _get_family_workshop_enrollment_rows(parent=None, students=None, student_rows=None, limit=80):
+	student_ids = [student for student in (students or []) if student]
+	if not parent or not student_ids:
+		return []
+	if not _doctype_available("Workshop Enrollment") or not _doctype_available("Workshop Offering"):
+		return []
+
+	rows = frappe.get_all(
+		"Workshop Enrollment",
+		filters={"parent": parent, "student": ["in", student_ids]},
+		fields=[
+			"name", "workshop_offering", "student", "parent", "status", "enrollment_date",
+			"standard_price_snapshot", "adult_participant_name", "invoice", "invoice_status",
+			"invoice_amount", "modified",
+		],
+		order_by="modified desc, name desc",
+		limit=limit,
+	)
+	if not rows:
+		return []
+
+	offering_ids = sorted({row.get("workshop_offering") for row in rows if row.get("workshop_offering")})
+	offerings = frappe.get_all(
+		"Workshop Offering",
+		filters={"name": ["in", offering_ids]},
+		fields=["name", "title", "workshop_category", "campus"],
+		limit_page_length=0,
+	) if offering_ids else []
+	offering_map = {row.get("name"): row for row in offerings if row.get("name")}
+
+	session_dates = {}
+	if offering_ids and _doctype_available("Workshop Session"):
+		sessions = frappe.get_all(
+			"Workshop Session",
+			filters={"workshop_offering": ["in", offering_ids], "status": ["!=", "Cancelled"]},
+			fields=["name", "workshop_offering", "session_date", "start_time"],
+			order_by="workshop_offering asc, session_date asc, start_time asc, name asc",
+			limit_page_length=0,
+		)
+		for session in sessions:
+			date = str(session.get("session_date") or "")
+			dates = session_dates.setdefault(session.get("workshop_offering"), [])
+			if date and date not in dates:
+				dates.append(date)
+		for dates in session_dates.values():
+			dates.sort()
+
+	student_map = {row.get("name"): row for row in (student_rows or []) if row.get("name")}
+	result = []
+	for row in rows:
+		item = dict(row)
+		offering = offering_map.get(row.get("workshop_offering")) or {}
+		student = student_map.get(row.get("student")) or {}
+		item.update({
+			"student_display": student.get("student_display") or student.get("student_name") or row.get("student"),
+			"workshop_title": offering.get("title") or row.get("workshop_offering"),
+			"workshop_category": offering.get("workshop_category") or "",
+			"campus": offering.get("campus") or "",
+			"session_dates": session_dates.get(row.get("workshop_offering"), []),
+		})
+		result.append(item)
+	return result
 
 
 def _get_attendance_candidate_enrollment_names(parent=None, students=None, term=None):
