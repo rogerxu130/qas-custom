@@ -1,0 +1,27 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "IDT-.#####",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": ["template_name", "description", "discount_type", "discount_value", "status"],
+ "fields": [
+  {"fieldname":"template_name","fieldtype":"Data","label":"Template Name","reqd":1,"unique":1,"in_list_view":1},
+  {"fieldname":"description","fieldtype":"Data","label":"Parent-facing Description","reqd":1},
+  {"fieldname":"discount_type","fieldtype":"Select","label":"Discount Type","options":"Fixed Amount\nPercentage","default":"Fixed Amount","reqd":1,"in_list_view":1,"in_standard_filter":1},
+  {"fieldname":"discount_value","fieldtype":"Float","label":"Discount Value","reqd":1,"in_list_view":1},
+  {"fieldname":"status","fieldtype":"Select","label":"Status","options":"Active\nInactive","default":"Active","reqd":1,"in_list_view":1,"in_standard_filter":1}
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "module": "QAS Custom",
+ "name": "Invoice Discount Template",
+ "permissions": [
+  {"role":"System Manager","read":1,"write":1,"create":1,"report":1,"export":1,"print":1},
+  {"role":"School Admin","read":1,"write":1,"create":1,"report":1,"export":1,"print":1}
+ ],
+ "sort_field":"modified",
+ "sort_order":"DESC",
+ "states":[],
+ "track_changes":1
+}

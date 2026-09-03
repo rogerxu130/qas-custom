@@ -5,11 +5,16 @@ from qas_custom.services.workshops import (
 	cancel_school_admin_workshop_enrollment_data,
 	create_school_admin_workshop_enrollment_data,
 	create_school_admin_workshop_invoice_data,
+	duplicate_school_admin_workshop_offering_data,
 	get_school_admin_workshop_offering_data,
 	get_school_admin_workshop_offerings_data,
 	get_school_admin_workshop_session_data,
 	save_school_admin_workshop_offering_data,
 	update_school_admin_workshop_attendance_data,
+)
+from qas_custom.services.invoice_discount_templates import (
+	get_school_admin_invoice_discount_templates_data,
+	save_school_admin_invoice_discount_template_data,
 )
 
 from qas_custom.services.parent_classroom_messages import get_school_admin_parent_classroom_messages_data
@@ -1383,6 +1388,24 @@ def school_admin_get_workshop_offering(workshop_offering=None):
 @frappe.whitelist()
 def school_admin_save_workshop_offering(workshop_offering=None, payload=None):
 	return save_school_admin_workshop_offering_data(workshop_offering=workshop_offering, payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_duplicate_workshop_offering(workshop_offering=None):
+	return duplicate_school_admin_workshop_offering_data(workshop_offering=workshop_offering)
+
+
+@frappe.whitelist()
+def school_admin_get_invoice_discount_templates(include_inactive=0):
+	return get_school_admin_invoice_discount_templates_data(include_inactive=include_inactive)
+
+
+@frappe.whitelist()
+def school_admin_save_invoice_discount_template(discount_template=None, payload=None):
+	return save_school_admin_invoice_discount_template_data(
+		discount_template=discount_template,
+		payload=payload,
+	)
 
 
 @frappe.whitelist()

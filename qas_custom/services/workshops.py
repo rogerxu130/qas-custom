@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import re
 from urllib.parse import urlencode
 
 import frappe
@@ -82,6 +83,43 @@ def save_school_admin_workshop_offering_data(workshop_offering=None, payload=Non
 	_sync_session_positions(doc.name)
 	frappe.db.commit()
 	return {"offering": _build_offering_detail(doc)}
+
+
+def duplicate_school_admin_workshop_offering_data(workshop_offering=None):
+	_require_school_admin()
+	source = _required_doc("Workshop Offering", workshop_offering)
+	savepoint = "duplicate_workshop_offering"
+	frappe.db.savepoint(savepoint)
+	try:
+		copy = frappe.new_doc("Workshop Offering")
+		for field in (
+			"workshop_category", "participation_mode", "class_language", "campus", "description",
+			"minimum_age", "maximum_age", "standard_price", "capacity", "materials_or_preparation", "inclusions",
+		):
+			copy.set(field, source.get(field))
+		copy.title = _("Copy of {0}").format(source.title)
+		copy.status = "Draft"
+		copy.insert(ignore_permissions=True)
+
+		sessions = frappe.get_all(
+			"Workshop Session",
+			filters={"workshop_offering": source.name},
+			fields=["session_date", "start_time", "end_time", "teacher", "classroom", "status"],
+			order_by="session_date asc, start_time asc, name asc",
+		)
+		for values in sessions:
+			session = frappe.new_doc("Workshop Session")
+			session.workshop_offering = copy.name
+			for field in ("session_date", "start_time", "end_time", "teacher", "classroom", "status"):
+				session.set(field, values.get(field))
+			session.insert(ignore_permissions=True)
+
+		_sync_session_positions(copy.name)
+		frappe.db.commit()
+		return {"source": source.name, "offering": _build_offering_detail(copy)}
+	except Exception:
+		frappe.db.rollback(save_point=savepoint)
+		raise
 
 
 def create_school_admin_workshop_enrollment_data(payload=None):
@@ -403,7 +441,20 @@ def _video_post_payload(doc, audience):
 
 
 def _session_payload(row):
-	return {"name":row.get("name"), "session_date":str(row.get("session_date") or ""), "start_time":str(row.get("start_time") or ""), "end_time":str(row.get("end_time") or ""), "teacher":row.get("teacher"), "classroom":row.get("classroom"), "campus":row.get("campus"), "workshop_session_index":row.get("workshop_session_index"), "workshop_session_count":row.get("workshop_session_count"), "status":row.get("status")}
+	return {"name":row.get("name"), "session_date":str(row.get("session_date") or ""), "start_time":_serialise_workshop_time(row.get("start_time")), "end_time":_serialise_workshop_time(row.get("end_time")), "teacher":row.get("teacher"), "classroom":row.get("classroom"), "campus":row.get("campus"), "workshop_session_index":row.get("workshop_session_index"), "workshop_session_count":row.get("workshop_session_count"), "status":row.get("status")}
+
+
+def _serialise_workshop_time(value):
+	if value in (None, ""):
+		return ""
+	if hasattr(value, "strftime"):
+		return value.strftime("%H:%M:%S")
+	text = str(value).strip()
+	match = re.fullmatch(r"(\d{1,2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?", text)
+	if not match:
+		return text
+	hour, minute, second = match.groups()
+	return f"{int(hour):02d}:{int(minute):02d}:{int(second or 0):02d}"
 
 
 def _enrollment_payload(row):
