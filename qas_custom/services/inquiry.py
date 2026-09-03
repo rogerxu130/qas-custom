@@ -302,8 +302,6 @@ def create_inquiry_core(payload: dict, source="Manual", actor=None, commit=True)
 	# consistent for reporting instead of relying on a checkbox or marketing field.
 	inquiry_doc.referral_source = "Referral" if is_referral else payload.get("referral_source")
 	inquiry_doc.referral_detail = payload.get("referral_detail")
-	if is_referral:
-		prepare_referral_review(inquiry_doc, resume_status=initial_status)
 	if session_context:
 		_apply_session_to_inquiry(inquiry_doc, session_context)
 	elif appointment_context:
@@ -314,7 +312,9 @@ def create_inquiry_core(payload: dict, source="Manual", actor=None, commit=True)
 		if current_date:
 			inquiry_doc.current_appointment_date = current_date
 			inquiry_doc.current_appointment_time = current_time
-		inquiry_doc.review_reason = review_reason
+			inquiry_doc.review_reason = review_reason
+	if is_referral:
+		prepare_referral_review(inquiry_doc, resume_status=initial_status)
 	inquiry_doc.confirmation_status = (
 		"Not Required"
 		if payload.get("skip_confirmation")
@@ -328,8 +328,8 @@ def create_inquiry_core(payload: dict, source="Manual", actor=None, commit=True)
 	_sync_student_special_needs(student, payload)
 	enqueue_trial_invoice_for_inquiry(inquiry_doc)
 
-	if review_reason:
-		_send_needs_review_alert(inquiry_doc, review_reason)
+	if inquiry_doc.review_reason:
+		_send_needs_review_alert(inquiry_doc, inquiry_doc.review_reason)
 
 	if commit:
 		frappe.db.commit()

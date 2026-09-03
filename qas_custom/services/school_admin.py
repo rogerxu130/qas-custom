@@ -1216,6 +1216,7 @@ def get_school_admin_inquiries_data(
 			"course_session",
 			"current_appointment_date",
 			"current_appointment_time",
+			"review_reason",
 			"converted_enrollment",
 			"converted_invoice",
 			"modified",

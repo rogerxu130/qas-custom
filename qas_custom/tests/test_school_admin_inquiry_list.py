@@ -37,6 +37,7 @@ class TestSchoolAdminInquiryList(TestCase):
 		self.assertEqual(count_call.kwargs["filters"]["status"], "Inactive")
 		self.assertEqual(count_call.kwargs["filters"]["inquiry_type"], "Trial Lesson")
 		self.assertEqual(page_call.kwargs["filters"], count_call.kwargs["filters"])
+		self.assertIn("review_reason", page_call.kwargs["fields"])
 		search_fields = {entry[1] for entry in page_call.kwargs["or_filters"]}
 		self.assertEqual(
 			search_fields,

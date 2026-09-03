@@ -14,6 +14,7 @@ REFERRAL_VERIFIED = "Verified"
 REFERRAL_NOT_VERIFIED = "Not Verified"
 REFERRAL_NOT_APPLICABLE = "Not Applicable"
 REFERRAL_REWARD_TYPE = "Referral Reward"
+REFERRAL_REVIEW_REASON = "Referral details require verification before the Trial Invoice can be issued."
 
 
 def is_referral_claim(inquiry_doc) -> bool:
@@ -50,7 +51,20 @@ def prepare_referral_review(inquiry_doc, *, resume_status: str | None = None):
 	_set_if_field(inquiry_doc, "referral_status", REFERRAL_PENDING)
 	if resume_status:
 		_set_if_field(inquiry_doc, "referral_resume_status", resume_status)
+	_set_if_field(
+		inquiry_doc,
+		"review_reason",
+		_append_review_reason(inquiry_doc.get("review_reason"), _(REFERRAL_REVIEW_REASON)),
+	)
 	return True
+
+
+def _append_review_reason(existing, reason):
+	existing = str(existing or "").strip()
+	reason = str(reason or "").strip()
+	if not reason or reason in existing:
+		return existing
+	return f"{existing} {reason}".strip()
 
 
 def trial_referral_discount_amount() -> float:
