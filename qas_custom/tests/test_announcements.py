@@ -126,6 +126,7 @@ class TestSingleStudentAnnouncements(TestCase):
 		apply_payload.assert_called_once_with(announcement, current_payload)
 		announcement.insert.assert_called_once_with(ignore_permissions=True)
 		announcement.save.assert_called_once_with(ignore_permissions=True)
+		self.assertEqual(announcement.send_email_on_publish, 0)
 		self.assertEqual(announcement.status, "Published")
 		self.assertEqual(result["status"], "Published")
 

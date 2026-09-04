@@ -1,0 +1,53 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "PEM-.YYYY.-.#####",
+ "doctype": "DocType",
+ "document_type": "Document",
+ "engine": "InnoDB",
+ "field_order": [
+  "subject", "status", "audience_section", "audience_mode", "term", "session_date", "teacher", "specific_parent",
+  "course_sessions_json", "content_section", "body", "preview_section", "preview_json", "preview_token", "previewed_at",
+  "delivery_section", "recipient_count", "selected_count", "queued_count", "sent_count", "skipped_count", "failed_count",
+  "created_by", "queued_at", "completed_at"
+ ],
+ "fields": [
+  {"fieldname": "subject", "fieldtype": "Data", "in_list_view": 1, "label": "Subject"},
+  {"default": "Draft", "fieldname": "status", "fieldtype": "Select", "in_list_view": 1, "in_standard_filter": 1, "label": "Status", "options": "Draft\nQueued\nSending\nCompleted\nPartially Failed\nFailed", "read_only": 1, "reqd": 1},
+  {"fieldname": "audience_section", "fieldtype": "Section Break", "label": "Audience"},
+  {"default": "Term", "fieldname": "audience_mode", "fieldtype": "Select", "in_standard_filter": 1, "label": "Audience Mode", "options": "Term\nDated Course Sessions\nDated Teacher Sessions\nSpecific Parent", "reqd": 1},
+  {"fieldname": "term", "fieldtype": "Link", "label": "Term", "options": "Term"},
+  {"fieldname": "session_date", "fieldtype": "Date", "label": "Session Date"},
+  {"fieldname": "teacher", "fieldtype": "Link", "label": "Teacher", "options": "Teacher"},
+  {"fieldname": "specific_parent", "fieldtype": "Link", "label": "Specific Parent", "options": "Parent"},
+  {"fieldname": "course_sessions_json", "fieldtype": "Long Text", "hidden": 1, "label": "Course Sessions JSON"},
+  {"fieldname": "content_section", "fieldtype": "Section Break", "label": "Content"},
+  {"fieldname": "body", "fieldtype": "Text Editor", "label": "Body"},
+  {"fieldname": "preview_section", "fieldtype": "Section Break", "label": "Recipient Preview"},
+  {"fieldname": "preview_json", "fieldtype": "Long Text", "hidden": 1, "label": "Preview JSON", "read_only": 1},
+  {"fieldname": "preview_token", "fieldtype": "Data", "hidden": 1, "label": "Preview Token", "read_only": 1},
+  {"fieldname": "previewed_at", "fieldtype": "Datetime", "label": "Previewed At", "read_only": 1},
+  {"fieldname": "delivery_section", "fieldtype": "Section Break", "label": "Delivery"},
+  {"default": "0", "fieldname": "recipient_count", "fieldtype": "Int", "label": "Recipient Count", "read_only": 1},
+  {"default": "0", "fieldname": "selected_count", "fieldtype": "Int", "label": "Selected Count", "read_only": 1},
+  {"default": "0", "fieldname": "queued_count", "fieldtype": "Int", "label": "Queued Count", "read_only": 1},
+  {"default": "0", "fieldname": "sent_count", "fieldtype": "Int", "label": "Sent Count", "read_only": 1},
+  {"default": "0", "fieldname": "skipped_count", "fieldtype": "Int", "label": "Skipped Count", "read_only": 1},
+  {"default": "0", "fieldname": "failed_count", "fieldtype": "Int", "label": "Failed Count", "read_only": 1},
+  {"fieldname": "created_by", "fieldtype": "Link", "label": "Created By", "options": "User", "read_only": 1},
+  {"fieldname": "queued_at", "fieldtype": "Datetime", "label": "Queued At", "read_only": 1},
+  {"fieldname": "completed_at", "fieldtype": "Datetime", "label": "Completed At", "read_only": 1}
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "module": "QAS Custom",
+ "name": "School Parent Email",
+ "permissions": [
+  {"create": 1, "delete": 1, "email": 1, "export": 1, "print": 1, "read": 1, "report": 1, "role": "System Manager", "share": 1, "write": 1},
+  {"create": 1, "delete": 1, "email": 1, "export": 1, "print": 1, "read": 1, "report": 1, "role": "School Admin", "share": 1, "write": 1}
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

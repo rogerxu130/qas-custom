@@ -1,0 +1,41 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "PER-.YYYY.-.#####",
+ "doctype": "DocType",
+ "document_type": "Document",
+ "engine": "InnoDB",
+ "field_order": [
+  "parent_email", "parent", "parent_name", "email", "students_json", "student_ids_json", "match_reasons_json",
+  "selected", "eligible", "delivery_section", "status", "sent_at", "error", "attempts", "last_attempt_at"
+ ],
+ "fields": [
+  {"fieldname": "parent_email", "fieldtype": "Link", "in_list_view": 1, "in_standard_filter": 1, "label": "Parent Email", "options": "School Parent Email", "reqd": 1},
+  {"fieldname": "parent", "fieldtype": "Link", "in_list_view": 1, "in_standard_filter": 1, "label": "Parent", "options": "Parent", "reqd": 1},
+  {"fieldname": "parent_name", "fieldtype": "Data", "label": "Parent Name", "read_only": 1},
+  {"fieldname": "email", "fieldtype": "Data", "in_list_view": 1, "label": "Email", "read_only": 1},
+  {"fieldname": "students_json", "fieldtype": "Long Text", "hidden": 1, "label": "Students JSON", "read_only": 1},
+  {"fieldname": "student_ids_json", "fieldtype": "Long Text", "hidden": 1, "label": "Student IDs JSON", "read_only": 1},
+  {"fieldname": "match_reasons_json", "fieldtype": "Long Text", "hidden": 1, "label": "Match Reasons JSON", "read_only": 1},
+  {"default": "0", "fieldname": "selected", "fieldtype": "Check", "label": "Selected", "read_only": 1},
+  {"default": "0", "fieldname": "eligible", "fieldtype": "Check", "label": "Eligible", "read_only": 1},
+  {"fieldname": "delivery_section", "fieldtype": "Section Break", "label": "Delivery"},
+  {"default": "Queued", "fieldname": "status", "fieldtype": "Select", "in_list_view": 1, "in_standard_filter": 1, "label": "Status", "options": "Queued\nSent\nSkipped\nFailed", "read_only": 1},
+  {"fieldname": "sent_at", "fieldtype": "Datetime", "label": "Sent At", "read_only": 1},
+  {"fieldname": "error", "fieldtype": "Small Text", "label": "Error", "read_only": 1},
+  {"default": "0", "fieldname": "attempts", "fieldtype": "Int", "label": "Attempts", "read_only": 1},
+  {"fieldname": "last_attempt_at", "fieldtype": "Datetime", "label": "Last Attempt At", "read_only": 1}
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "module": "QAS Custom",
+ "name": "School Parent Email Recipient",
+ "permissions": [
+  {"create": 1, "delete": 1, "email": 1, "export": 1, "print": 1, "read": 1, "report": 1, "role": "System Manager", "share": 1, "write": 1},
+  {"create": 1, "delete": 1, "email": 1, "export": 1, "print": 1, "read": 1, "report": 1, "role": "School Admin", "share": 1, "write": 1}
+ ],
+ "sort_field": "creation",
+ "sort_order": "ASC",
+ "states": [],
+ "track_changes": 1
+}

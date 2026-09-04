@@ -37,6 +37,16 @@ from qas_custom.services.announcements import (
 	upload_school_admin_announcement_inline_image_data,
 	upload_school_admin_announcement_image_data,
 )
+from qas_custom.services.parent_emails import (
+	get_school_admin_parent_email_audience_options_data,
+	get_school_admin_parent_email_data,
+	get_school_admin_parent_emails_data,
+	preview_school_admin_parent_email_recipients_data,
+	retry_school_admin_parent_email_failures_data,
+	save_school_admin_parent_email_data,
+	send_school_admin_parent_email_data,
+	upload_school_admin_parent_email_inline_image_data,
+)
 from qas_custom.services.teacher_training import (
 	delete_school_admin_training_article_data,
 	get_school_admin_training_article_data,
@@ -336,6 +346,50 @@ def school_admin_publish_announcement(announcement=None, payload=None):
 @frappe.whitelist()
 def school_admin_archive_announcement(announcement=None):
 	return archive_school_admin_announcement_data(announcement=announcement)
+
+
+@frappe.whitelist()
+def school_admin_get_parent_emails(status=None, limit=100):
+	return get_school_admin_parent_emails_data(status=status, limit=limit)
+
+
+@frappe.whitelist()
+def school_admin_get_parent_email(parent_email=None):
+	return get_school_admin_parent_email_data(parent_email=parent_email)
+
+
+@frappe.whitelist()
+def school_admin_save_parent_email(parent_email=None, payload=None):
+	return save_school_admin_parent_email_data(parent_email=parent_email, payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_upload_parent_email_inline_image(parent_email=None):
+	return upload_school_admin_parent_email_inline_image_data(parent_email=parent_email)
+
+
+@frappe.whitelist()
+def school_admin_get_parent_email_audience_options(session_date=None):
+	return get_school_admin_parent_email_audience_options_data(session_date=session_date)
+
+
+@frappe.whitelist()
+def school_admin_preview_parent_email_recipients(parent_email=None):
+	return preview_school_admin_parent_email_recipients_data(parent_email=parent_email)
+
+
+@frappe.whitelist()
+def school_admin_send_parent_email(parent_email=None, preview_token=None, selected_parents=None):
+	return send_school_admin_parent_email_data(
+		parent_email=parent_email,
+		preview_token=preview_token,
+		selected_parents=selected_parents,
+	)
+
+
+@frappe.whitelist()
+def school_admin_retry_parent_email_failures(parent_email=None):
+	return retry_school_admin_parent_email_failures_data(parent_email=parent_email)
 
 
 @frappe.whitelist()

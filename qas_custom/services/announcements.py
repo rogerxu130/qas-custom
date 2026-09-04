@@ -153,7 +153,11 @@ def publish_school_admin_announcement_data(announcement=None, payload=None):
 			frappe.throw(_("No parent recipients matched this announcement audience."))
 
 		_delete_existing_recipients(doc.name)
-		email_requested = bool(cint(doc.send_email_on_publish))
+		# Announcements are Parent Portal content only. Parent email delivery lives in
+		# the independent School Parent Email workflow and must never be triggered by
+		# publishing an announcement, including from an older cached frontend.
+		doc.send_email_on_publish = 0
+		email_requested = False
 		email_enabled = outbound_email_enabled()
 		unsubscribed_parent_names = _mass_email_unsubscribed_parent_names(
 			[recipient.get("parent") for recipient in recipients]
