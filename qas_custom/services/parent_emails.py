@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import csv
+import io
 import json
+import re
 from collections import defaultdict
 
 import frappe
@@ -23,6 +26,7 @@ PARENT_EMAIL_DOCTYPE = "School Parent Email"
 PARENT_EMAIL_RECIPIENT_DOCTYPE = "School Parent Email Recipient"
 NON_ATTENDING_STATUSES = {"Cancelled", "Leave"}
 AUDIENCE_MODES = {"Term", "Dated Course Sessions", "Dated Teacher Sessions", "Specific Parent"}
+CSV_FORMULA_PREFIXES = ("=", "+", "-", "@")
 
 
 def get_school_admin_parent_emails_data(status=None, limit=100):
@@ -142,6 +146,83 @@ def get_school_admin_parent_email_audience_options_data(session_date=None):
 			if name in teacher_names
 		],
 	}
+
+
+def get_school_admin_term_parent_email_export_summary_data(term=None):
+	_require_school_admin()
+	term = str(term or "").strip()
+	_validate_term_parent_email_export(term)
+	return {"eligible_parent_count": len(_eligible_term_parent_email_rows(term))}
+
+
+def export_school_admin_term_parent_emails_data(term=None):
+	_require_school_admin()
+	term = str(term or "").strip()
+	term_label = _validate_term_parent_email_export(term)
+	rows = _eligible_term_parent_email_rows(term)
+	if not rows:
+		frappe.throw(_("This Term has no eligible parent email addresses to export."))
+
+	frappe.local.response.filename = _term_parent_email_export_filename(term_label)
+	frappe.local.response.filecontent = _build_term_parent_email_csv(rows)
+	frappe.local.response.content_type = "text/csv; charset=utf-8"
+	frappe.local.response.display_content_as = "attachment"
+	frappe.local.response.type = "download"
+	return None
+
+
+def _validate_term_parent_email_export(term):
+	term = str(term or "").strip()
+	if not term:
+		frappe.throw(_("Term is required."))
+	if not frappe.db.exists("Term", term):
+		frappe.throw(_("Term was not found."))
+	return frappe.db.get_value("Term", term, "term_name") or term
+
+
+def _eligible_term_parent_email_rows(term):
+	return sorted(
+		(row for row in _term_recipients(term) if row.get("eligible")),
+		key=lambda row: (
+			str(row.get("parent_name") or row.get("parent") or "").casefold(),
+			str(row.get("email") or "").casefold(),
+		),
+	)
+
+
+def _build_term_parent_email_csv(rows):
+	buffer = io.StringIO(newline="")
+	buffer.write("\ufeff")
+	writer = csv.writer(buffer, lineterminator="\r\n")
+	writer.writerow(["Parent Name", "Email"])
+	for row in sorted(
+		rows,
+		key=lambda item: (
+			str(item.get("parent_name") or item.get("parent") or "").casefold(),
+			str(item.get("email") or "").casefold(),
+		),
+	):
+		writer.writerow(
+			[
+				_safe_csv_value(row.get("parent_name") or row.get("parent")),
+				_safe_csv_value(row.get("email")),
+			]
+		)
+	return buffer.getvalue().encode("utf-8")
+
+
+def _safe_csv_value(value):
+	text = str(value or "")
+	if text.lstrip().startswith(CSV_FORMULA_PREFIXES):
+		return f"'{text}"
+	return text
+
+
+def _term_parent_email_export_filename(term_label):
+	name = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', "_", str(term_label or ""))
+	name = re.sub(r"\s+", "_", name).strip(" ._")
+	name = re.sub(r"_+", "_", name)
+	return f"{name or 'term'}_parent_emails.csv"
 
 
 def preview_school_admin_parent_email_recipients_data(parent_email=None):

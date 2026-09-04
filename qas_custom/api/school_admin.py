@@ -38,9 +38,11 @@ from qas_custom.services.announcements import (
 	upload_school_admin_announcement_image_data,
 )
 from qas_custom.services.parent_emails import (
+	export_school_admin_term_parent_emails_data,
 	get_school_admin_parent_email_audience_options_data,
 	get_school_admin_parent_email_data,
 	get_school_admin_parent_emails_data,
+	get_school_admin_term_parent_email_export_summary_data,
 	preview_school_admin_parent_email_recipients_data,
 	retry_school_admin_parent_email_failures_data,
 	save_school_admin_parent_email_data,
@@ -595,6 +597,16 @@ def school_admin_get_operation_report(operation_report=None):
 @frappe.whitelist()
 def school_admin_get_reporting_snapshot(term=None):
 	return get_school_admin_reporting_snapshot_data(term=term)
+
+
+@frappe.whitelist()
+def school_admin_get_term_parent_email_export_summary(term=None):
+	return get_school_admin_term_parent_email_export_summary_data(term=term)
+
+
+@frappe.whitelist()
+def school_admin_export_term_parent_emails(term=None):
+	return export_school_admin_term_parent_emails_data(term=term)
 
 
 @frappe.whitelist()
