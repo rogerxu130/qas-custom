@@ -1237,14 +1237,38 @@ def _parent_map(parent_ids):
 		return {}
 	fields = _safe_fields(
 		"Parent",
-		["name", "parent_name", "email", "email_id", "contact_email", "mobile_number", "phone", "customer"],
+		["name", "parent_name", "email", "email_id", "contact_email", "linked_user", "mobile_number", "phone", "customer"],
+	)
+	parent_rows = [
+		dict(row)
+		for row in frappe.get_all(
+			"Parent",
+			filters={"name": ["in", parent_ids]},
+			fields=fields,
+			limit_page_length=0,
+		)
+	]
+	linked_users = sorted({row.get("linked_user") for row in parent_rows if row.get("linked_user")})
+	user_emails = (
+		{
+			row.get("name"): row.get("email") or row.get("name")
+			for row in frappe.get_all(
+				"User",
+				filters={"name": ["in", linked_users]},
+				fields=["name", "email"],
+				limit_page_length=0,
+			)
+		}
+		if linked_users
+		else {}
 	)
 	result = {}
-	for row in frappe.get_all("Parent", filters={"name": ["in", parent_ids]}, fields=fields, limit_page_length=0):
+	for row in parent_rows:
+		linked_user = row.get("linked_user") or ""
 		result[row.get("name")] = {
 			"name": row.get("name"),
 			"parent_name": row.get("parent_name") or row.get("name"),
-			"email": row.get("email") or row.get("email_id") or row.get("contact_email") or "",
+			"email": row.get("email") or row.get("email_id") or row.get("contact_email") or user_emails.get(linked_user) or linked_user,
 			"phone": row.get("mobile_number") or row.get("phone") or "",
 			"customer": row.get("customer"),
 		}

@@ -12,6 +12,7 @@ from qas_custom.services.school_admin_reporting import (
 	_attendance_counts,
 	_build_reporting_rows,
 	_invoice_summary,
+	_parent_map,
 	_session_end_datetime,
 	_session_in_completed_range,
 	_session_in_unmarked_window,
@@ -150,6 +151,21 @@ class TestSchoolAdminReportingTimeBoundaries(TestCase):
 
 
 class TestSchoolAdminReportingBuild(TestCase):
+	@patch("qas_custom.services.school_admin_reporting._safe_fields", side_effect=lambda _doctype, fields: fields)
+	@patch("qas_custom.services.school_admin_reporting.frappe.get_all")
+	def test_parent_map_uses_linked_user_email(self, mock_get_all, _mock_safe_fields):
+		mock_get_all.side_effect = [
+			[frappe._dict(name="PAR-1", parent_name="Pat Parent", linked_user="pat@example.com", mobile_number="0400")],
+			[frappe._dict(name="pat@example.com", email="pat@example.com")],
+		]
+
+		result = _parent_map(["PAR-1"])
+
+		self.assertEqual(result["PAR-1"]["email"], "pat@example.com")
+		self.assertEqual(result["PAR-1"]["phone"], "0400")
+		self.assertEqual(mock_get_all.call_args_list[1].args[0], "User")
+		self.assertEqual(mock_get_all.call_args_list[1].kwargs["filters"], {"name": ["in", ["pat@example.com"]]})
+
 	@patch("qas_custom.services.school_admin_reporting._safe_fields", side_effect=lambda _doctype, fields: fields)
 	@patch("qas_custom.services.school_admin_reporting._term_invoice_map")
 	@patch("qas_custom.services.school_admin_reporting._session_context")
