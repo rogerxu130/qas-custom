@@ -87,6 +87,7 @@ class TestCampusAdminInquiryAdvancedSearch(TestCase):
 		self.assertEqual(mock_search_names.call_args.args[2], "Jayden")
 		self.assertEqual(mock_get_all.call_args.kwargs["limit_page_length"], 201)
 		self.assertIn("current_appointment_time asc", mock_get_all.call_args.kwargs["order_by"])
+		self.assertIn("confirmation_status", mock_get_all.call_args.kwargs["fields"])
 
 	@patch("qas_custom.services.campus_admin._build_inquiry_list_item")
 	@patch("qas_custom.services.campus_admin._get_latest_note_map", return_value={"INQ-001": "Latest"})

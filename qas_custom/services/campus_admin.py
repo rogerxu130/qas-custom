@@ -478,6 +478,7 @@ def get_campus_admin_inquiries_data(
 			"name",
 			"inquiry_type",
 			"status",
+			"confirmation_status",
 			"campus",
 			"parent",
 			"student",

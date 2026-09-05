@@ -891,11 +891,21 @@ def school_admin_update_inquiry_status(inquiry=None, status=None):
 
 
 @frappe.whitelist()
-def school_admin_update_inquiry_confirmation(inquiry=None, confirmation_status=None, expected_course_session=None):
+def school_admin_update_inquiry_confirmation(
+	inquiry=None,
+	confirmation_status=None,
+	expected_course_session=None,
+	expected_campus=None,
+	expected_appointment_date=None,
+	expected_appointment_time=None,
+):
 	return update_school_admin_inquiry_confirmation_data(
 		inquiry=inquiry,
 		confirmation_status=confirmation_status,
 		expected_course_session=expected_course_session,
+		expected_campus=expected_campus,
+		expected_appointment_date=expected_appointment_date,
+		expected_appointment_time=expected_appointment_time,
 	)
 
 

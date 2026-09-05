@@ -22,6 +22,8 @@ class FakeInquiry:
 		confirmation_status="Pending",
 		contact_phone="0400000000",
 		campus="South Brisbane",
+		current_appointment_date="2026-09-07",
+		current_appointment_time="14:30:00",
 	):
 		self.name = "INQ-2026-00001"
 		self.inquiry_type = inquiry_type
@@ -30,6 +32,8 @@ class FakeInquiry:
 		self.confirmation_status = confirmation_status
 		self.contact_phone = contact_phone
 		self.campus = campus
+		self.current_appointment_date = current_appointment_date
+		self.current_appointment_time = current_appointment_time
 		self.save = Mock()
 		self.add_comment = Mock()
 
@@ -178,15 +182,52 @@ class TestInquiryCustomerConfirmation(TestCase):
 					expected_course_session="SESSION-001",
 				)
 
-	def test_school_visit_is_rejected(self):
-		doc = FakeInquiry(inquiry_type="School Visit")
+	def test_school_visit_can_be_customer_confirmed_without_course_session(self):
+		doc = FakeInquiry(inquiry_type="School Visit", course_session="")
+		fake_frappe = self._fake_frappe(doc)
+		with patch("qas_custom.services.inquiry.frappe", fake_frappe), patch(
+			"qas_custom.services.inquiry.build_inquiry_detail",
+			return_value={"inquiry": {"confirmation_status": "Customer Confirmed"}},
+		):
+			result = update_inquiry_confirmation_core(
+				inquiry=doc.name,
+				confirmation_status="Customer Confirmed",
+				expected_campus="South Brisbane",
+				expected_appointment_date="2026-09-07",
+				expected_appointment_time="14:30:00",
+			)
+
+		self.assertEqual(doc.confirmation_status, "Customer Confirmed")
+		self.assertEqual(result["inquiry"]["confirmation_status"], "Customer Confirmed")
+
+	def test_school_visit_can_record_text_message_sent(self):
+		doc = FakeInquiry(inquiry_type="School Visit", course_session="")
+		fake_frappe = self._fake_frappe(doc)
+		with patch("qas_custom.services.inquiry.frappe", fake_frappe), patch(
+			"qas_custom.services.inquiry.build_inquiry_detail",
+			return_value={"inquiry": {"confirmation_status": "Text Message Sent"}},
+		):
+			update_inquiry_confirmation_core(
+				inquiry=doc.name,
+				confirmation_status="Text Message Sent",
+				expected_campus="South Brisbane",
+				expected_appointment_date="2026-09-07",
+				expected_appointment_time="14:30:00",
+			)
+
+		self.assertEqual(doc.confirmation_status, "Text Message Sent")
+
+	def test_stale_school_visit_appointment_is_rejected(self):
+		doc = FakeInquiry(inquiry_type="School Visit", course_session="")
 		fake_frappe = self._fake_frappe(doc)
 		with patch("qas_custom.services.inquiry.frappe", fake_frappe):
-			with self.assertRaisesRegex(RuntimeError, "Trial Lesson"):
+			with self.assertRaisesRegex(RuntimeError, "appointment changed"):
 				update_inquiry_confirmation_core(
 					inquiry=doc.name,
 					confirmation_status="Customer Confirmed",
-					expected_course_session="SESSION-001",
+					expected_campus="South Brisbane",
+					expected_appointment_date="2026-09-08",
+					expected_appointment_time="14:30:00",
 				)
 
 	def test_customer_confirmed_requires_course_session(self):

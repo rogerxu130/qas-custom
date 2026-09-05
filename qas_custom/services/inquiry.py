@@ -126,6 +126,9 @@ def update_inquiry_confirmation_core(
 	inquiry=None,
 	confirmation_status=None,
 	expected_course_session=None,
+	expected_campus=None,
+	expected_appointment_date=None,
+	expected_appointment_time=None,
 	actor=None,
 ):
 	if not inquiry:
@@ -135,17 +138,33 @@ def update_inquiry_confirmation_core(
 		frappe.throw(_("Customer confirmation must be Pending, Text Message Sent, or Customer Confirmed."))
 
 	inquiry_doc = frappe.get_doc("Inquiry", inquiry)
-	if inquiry_doc.inquiry_type != "Trial Lesson":
-		frappe.throw(_("Customer confirmation is available only for Trial Lesson inquiries."))
+	if inquiry_doc.inquiry_type not in INQUIRY_TYPES:
+		frappe.throw(_("Customer confirmation is available only for Trial Lesson or School Visit inquiries."))
 	if inquiry_doc.status not in CUSTOMER_CONFIRMATION_MUTABLE_STATUSES:
 		frappe.throw(_("Customer confirmation can be changed only for Booked or Rescheduled inquiries."))
 
-	current_course_session = (inquiry_doc.get("course_session") or "").strip()
-	expected_course_session = (expected_course_session or "").strip()
-	if current_course_session != expected_course_session:
-		frappe.throw(_("The trial session changed after this Inquiry was opened. Refresh and try again."))
-	if confirmation_status in {"Text Message Sent", "Customer Confirmed"} and not current_course_session:
-		frappe.throw(_("A Course Session is required before customer contact can be recorded."))
+	if inquiry_doc.inquiry_type == "Trial Lesson":
+		current_course_session = (inquiry_doc.get("course_session") or "").strip()
+		expected_course_session = (expected_course_session or "").strip()
+		if current_course_session != expected_course_session:
+			frappe.throw(_("The trial session changed after this Inquiry was opened. Refresh and try again."))
+		if confirmation_status in {"Text Message Sent", "Customer Confirmed"} and not current_course_session:
+			frappe.throw(_("A Course Session is required before customer contact can be recorded."))
+	else:
+		current_appointment = (
+			_confirmation_appointment_value(inquiry_doc.get("campus")),
+			_confirmation_appointment_value(inquiry_doc.get("current_appointment_date")),
+			_confirmation_appointment_value(inquiry_doc.get("current_appointment_time")),
+		)
+		expected_appointment = (
+			_confirmation_appointment_value(expected_campus),
+			_confirmation_appointment_value(expected_appointment_date),
+			_confirmation_appointment_value(expected_appointment_time),
+		)
+		if current_appointment != expected_appointment:
+			frappe.throw(_("The School Visit appointment changed after this Inquiry was opened. Refresh and try again."))
+		if not all(current_appointment):
+			frappe.throw(_("Campus, appointment date, and appointment time are required before customer confirmation can be changed."))
 	if confirmation_status == "Text Message Sent":
 		if not (inquiry_doc.get("contact_phone") or "").strip():
 			frappe.throw(_("A parent contact phone is required before recording a text message."))
@@ -170,6 +189,10 @@ def update_inquiry_confirmation_core(
 	)
 	frappe.db.commit()
 	return build_inquiry_detail(inquiry_doc.name)
+
+
+def _confirmation_appointment_value(value):
+	return str(value or "").strip()
 
 
 def reschedule_inquiry_data(inquiry=None, payload=None):

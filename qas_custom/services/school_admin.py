@@ -1644,12 +1644,18 @@ def update_school_admin_inquiry_confirmation_data(
 	inquiry=None,
 	confirmation_status=None,
 	expected_course_session=None,
+	expected_campus=None,
+	expected_appointment_date=None,
+	expected_appointment_time=None,
 ):
 	_require_school_admin()
 	return update_inquiry_confirmation_core(
 		inquiry=inquiry,
 		confirmation_status=confirmation_status,
 		expected_course_session=expected_course_session,
+		expected_campus=expected_campus,
+		expected_appointment_date=expected_appointment_date,
+		expected_appointment_time=expected_appointment_time,
 		actor=frappe.session.user,
 	)
 
