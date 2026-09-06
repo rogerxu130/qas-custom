@@ -33,12 +33,24 @@
    "fieldtype": "Small Text",
    "label": "Homework"
   },
-	  {
-	   "fieldname": "photos",
-	   "fieldtype": "Attach Image",
-	   "label": "Photos"
-	  }
-	 ],
+  {
+   "fieldname": "photos",
+   "fieldtype": "Attach Image",
+   "label": "Photos"
+  },
+  {
+   "fieldname": "concentrated_makeup_enabled",
+   "fieldtype": "Check",
+   "label": "Open concentrated makeup booking",
+   "default": "0"
+  },
+  {
+   "fieldname": "concentrated_makeup_capacity",
+   "fieldtype": "Int",
+   "label": "Concentrated makeup places",
+   "default": "0"
+  }
+ ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],

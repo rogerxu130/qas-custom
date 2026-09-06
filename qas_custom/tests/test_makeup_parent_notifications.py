@@ -241,6 +241,18 @@ class TestMakeupParentEmailStateValidation(TestCase):
 
 
 class TestMakeupParentNotificationTriggers(TestCase):
+	def setUp(self):
+		# These tests isolate notification behavior; locking/capacity have dedicated tests.
+		for target in (
+			"qas_custom.services.concentrated_makeup.lock_booking",
+			"qas_custom.services.concentrated_makeup.validate_new_place",
+			"qas_custom.services.concentrated_makeup.validate_voucher_target",
+			"qas_custom.modules.makeup.commands._get_reusable_attendance_row_for_voucher",
+		):
+			patcher = patch(target, return_value=None)
+			patcher.start()
+			self.addCleanup(patcher.stop)
+
 	@patch("qas_custom.modules.makeup.commands.queue_makeup_voucher_issued_email")
 	@patch("qas_custom.modules.makeup.commands.sync_makeup_voucher_label")
 	@patch("qas_custom.modules.makeup.commands.today", return_value="2026-07-25")
@@ -297,9 +309,10 @@ class TestMakeupParentNotificationTriggers(TestCase):
 			status="Valid",
 			used_on_session=None,
 			student="STU-001",
+			course="Art",
 		)
 		mock_parent_queue.return_value = {"queued": True}
-		fake_frappe = SimpleNamespace(db=SimpleNamespace(has_column=Mock(return_value=False)))
+		fake_frappe = SimpleNamespace(db=SimpleNamespace(has_column=Mock(return_value=False), sql=Mock(return_value=[])), get_doc=Mock(return_value=mock_voucher.return_value))
 
 		with patch("qas_custom.modules.makeup.commands.frappe", fake_frappe):
 			result = redeem_parent_voucher_core(
@@ -343,8 +356,9 @@ class TestMakeupParentNotificationTriggers(TestCase):
 			status="Valid",
 			used_on_session=None,
 			student="STU-001",
+			course="Art",
 		)
-		fake_frappe = SimpleNamespace(db=SimpleNamespace(has_column=Mock(return_value=False)))
+		fake_frappe = SimpleNamespace(db=SimpleNamespace(has_column=Mock(return_value=False), sql=Mock(return_value=[])), get_doc=Mock(return_value=mock_voucher.return_value))
 
 		with patch("qas_custom.modules.makeup.commands.frappe", fake_frappe):
 			result = redeem_parent_voucher_core(
@@ -388,13 +402,18 @@ class TestMakeupParentNotificationTriggers(TestCase):
 			student="STU-001",
 		)
 
-		result = redeem_parent_voucher_core(
-			parent=FakeDoc(name="PAR-001"),
-			students=[{"name": "STU-001"}],
-			voucher_id="MV-001",
-			session_id="CS-001",
-			student="STU-001",
+		fake_frappe = SimpleNamespace(
+			get_doc=Mock(return_value=mock_voucher.return_value),
+			db=SimpleNamespace(sql=Mock(return_value=[SimpleNamespace(name="ATT-001")]))
 		)
+		with patch("qas_custom.modules.makeup.commands.frappe", fake_frappe):
+			result = redeem_parent_voucher_core(
+				parent=FakeDoc(name="PAR-001"),
+				students=[{"name": "STU-001"}],
+				voucher_id="MV-001",
+				session_id="CS-001",
+				student="STU-001",
+			)
 
 		mock_parent_queue.assert_not_called()
 		self.assertTrue(result["parent_notification"]["skipped"])

@@ -364,6 +364,7 @@ def redeem_parent_voucher_core(
 	allow_ordinary_cross_course: bool = False,
 	notify_staff: bool = True,
 	notify_parent: bool = True,
+	concentrated_only: bool = False,
 ):
 	if not session_id:
 		frappe.throw("Please select a makeup session.")
@@ -371,21 +372,25 @@ def redeem_parent_voucher_core(
 	voucher = _get_parent_makeup_voucher(voucher_id, parent.name)
 	selected_student = _get_redeem_student(student, voucher, students)
 
+	from qas_custom.services.concentrated_makeup import lock_booking
+	lock_booking(selected_student, voucher.name, session_id)
+	voucher = frappe.get_doc("Makeup Voucher", voucher.name, for_update=True)
+
 	if voucher.get("status") == "Used" and voucher.get("used_on_session") == session_id:
-		used_student = _get_voucher_used_by_student(voucher) or selected_student
-		existing = _get_attendance_entry_used_by_voucher(voucher, session_id, used_student)
-		attendance_entry = existing.get("name") if existing else create_makeup_attendance_entry(
-			voucher=voucher,
-			session_id=session_id,
-			student=used_student,
+		used_student = _get_voucher_used_by_student(voucher) or voucher.student
+		if used_student != selected_student:
+			frappe.throw("This voucher was already used for another student.")
+		rows = frappe.db.sql(
+			"""SELECT name FROM `tabClass Attendance Entry`
+			WHERE course_session=%s AND student=%s
+			AND ((source_doctype='Makeup Voucher' AND source_document=%s) OR makeup_voucher=%s)
+			AND status NOT IN ('Cancelled', 'Leave') FOR UPDATE""",
+			(session_id, used_student, voucher.name, voucher.name), as_dict=True,
 		)
-		notification = _queue_makeup_notification(
-			event="makeup_booked",
-			notify_staff=notify_staff,
-			course_session=session_id,
-			student=used_student,
-			voucher=voucher.name,
+		attendance_entry = rows[0].name if rows else create_makeup_attendance_entry(
+			voucher=voucher, session_id=session_id, student=used_student,
 		)
+		notification = {"skipped": True, "reason": "The makeup booking already exists."}
 		return {
 			"voucher": _build_makeup_voucher_payload(voucher),
 			"attendance_entry": attendance_entry,
@@ -400,6 +405,19 @@ def redeem_parent_voucher_core(
 			"booking_created": False,
 		}
 
+	if concentrated_only and not cint(frappe.db.get_value("Course Sessions", session_id, "concentrated_makeup_enabled", for_update=True)):
+		frappe.throw("Bookings for this makeup session are closed.")
+
+	# A current read is required: the request may have waited behind another
+	# voucher redemption for this student while its earlier snapshot stayed stale.
+	current_rows = frappe.db.sql(
+		"""SELECT status FROM `tabClass Attendance Entry`
+		WHERE course_session=%s AND student=%s FOR UPDATE""",
+		(session_id, selected_student), as_dict=True,
+	)
+	if any(row.status not in REDEEMABLE_EXISTING_ATTENDANCE_STATUSES for row in current_rows):
+		frappe.throw("This student is already listed for this session.")
+
 	_validate_voucher_available_for_redeem(voucher)
 	_validate_session_can_redeem_voucher(
 		voucher,
@@ -407,6 +425,11 @@ def redeem_parent_voucher_core(
 		selected_student,
 		allow_ordinary_cross_course=allow_ordinary_cross_course,
 	)
+
+	from qas_custom.services.concentrated_makeup import validate_new_place, validate_voucher_target
+	validate_voucher_target(session_id, voucher.course)
+	reusable = _get_reusable_attendance_row_for_voucher(selected_student, session_id)
+	validate_new_place(selected_student, session_id, "Makeup", reusable.get("name") if reusable else None)
 
 	attendance_entry = redeem_voucher_attendance_entry(
 		voucher=voucher,
