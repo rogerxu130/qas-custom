@@ -13,6 +13,7 @@ from urllib.parse import urlencode
 
 import frappe
 from frappe import _
+from frappe.model.rename_doc import rename_doc
 from frappe.sessions import clear_sessions
 from frappe.utils import add_days, cint, flt, get_time, getdate, now_datetime, nowdate, today, validate_email_address
 from frappe.utils.data import make_filter_tuple
@@ -896,7 +897,7 @@ def update_school_admin_course_data(course=None, payload=None):
 	# existing ID; a real rename is needed to update both the name and links.
 	saved_name = doc.name
 	if requested_name != saved_name:
-		saved_name = frappe.rename_doc(
+		saved_name = rename_doc(
 			"Course", saved_name, requested_name,
 			merge=False, ignore_permissions=True,
 		)

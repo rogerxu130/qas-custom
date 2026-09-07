@@ -1,9 +1,10 @@
 from contextlib import ExitStack
 from types import SimpleNamespace
 from unittest import TestCase
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, create_autospec, patch
 
 from frappe.model.base_document import BaseDocument
+from frappe.model.rename_doc import rename_doc as framework_rename_doc
 from qas_custom.services import school_admin as service
 
 
@@ -27,13 +28,19 @@ class FakeCourse:
 
 
 class TestSchoolAdminCourseRename(TestCase):
+    def test_rename_entrypoint_is_framework_function_with_permission_argument(self):
+        from inspect import signature
+        self.assertIs(service.rename_doc, framework_rename_doc)
+        signature(service.rename_doc).bind("Course", "Old course", "New course", merge=False, ignore_permissions=True)
+
     def run_update(self, payload, rename_error=None):
         doc = FakeCourse('Old course')
         db = SimpleNamespace(commit=Mock())
-        rename = Mock(return_value='New course', side_effect=rename_error)
-        fake = SimpleNamespace(get_doc=Mock(return_value=doc), db=db, rename_doc=rename)
+        rename = create_autospec(framework_rename_doc, return_value='New course', side_effect=rename_error)
+        fake = SimpleNamespace(get_doc=Mock(return_value=doc), db=db)
         with ExitStack() as stack:
             stack.enter_context(patch.object(service, 'frappe', fake))
+            stack.enter_context(patch.object(service, 'rename_doc', rename))
             stack.enter_context(patch.object(service, '_', side_effect=lambda s: s))
             for name in ['_require_school_admin', '_apply_course_makeup_acceptance', '_apply_course_pricing_defaults', '_apply_course_invoice_item_default', '_validate_required', '_add_comment']:
                 stack.enter_context(patch.object(service, name))
