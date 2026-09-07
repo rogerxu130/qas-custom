@@ -888,11 +888,21 @@ def update_school_admin_course_data(course=None, payload=None):
 	_apply_course_makeup_acceptance(doc, payload)
 	_apply_course_pricing_defaults(doc)
 	_apply_course_invoice_item_default(doc)
+	requested_name = str(doc.get("course_name") or "").strip()
+	doc.course_name = requested_name
 	_validate_required(doc, ["course_name"])
 	doc.save(ignore_permissions=True)
-	_add_comment("Course", doc.name, _("Course updated by School Admin."))
+	# Course uses field:course_name. Normal save restores this field to the
+	# existing ID; a real rename is needed to update both the name and links.
+	saved_name = doc.name
+	if requested_name != saved_name:
+		saved_name = frappe.rename_doc(
+			"Course", saved_name, requested_name,
+			merge=False, ignore_permissions=True,
+		)
+	_add_comment("Course", saved_name, _("Course updated by School Admin."))
 	frappe.db.commit()
-	return _get_course_payload(doc.name)
+	return _get_course_payload(saved_name)
 
 
 def _apply_course_pricing_defaults(doc):
