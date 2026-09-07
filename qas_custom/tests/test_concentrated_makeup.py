@@ -8,13 +8,12 @@ from qas_custom.services import concentrated_makeup as service
 
 
 class TestConcentratedMakeup(TestCase):
-    def test_quota_and_classroom_both_limit_places(self):
+    def test_makeup_limit_controls_remaining_places(self):
         rows = [dict(student='A', enrollment_type='Makeup'), dict(student='B', enrollment_type='Full Term')]
-        self.assertEqual(service.remaining_places(rows, 3, 2), 0)
-        self.assertEqual(service.remaining_places(rows, 1, 20), 0)
-        self.assertEqual(service.remaining_places(rows, 3, 4), 2)
-        self.assertEqual(service.remaining_places(rows + [rows[0]], 3, 4), 2)
-        self.assertEqual(service.remaining_places(rows, 0, 0), 0)
+        self.assertEqual(service.remaining_places(rows, 20), 19)
+        self.assertEqual(service.remaining_places(rows, 1), 0)
+        self.assertEqual(service.remaining_places(rows + [rows[0]], 3), 2)
+        self.assertEqual(service.remaining_places(rows, 0), 0)
 
     def test_adjacent_classes_allowed_but_overlap_blocked(self):
         self.assertFalse(service.overlaps('10:00', '11:00', '11:00', '12:00'))
@@ -53,8 +52,8 @@ class TestConcentratedMakeup(TestCase):
         with self.assertRaises(ValueError):
             self.guard(rows=[frappe._dict(student=s, enrollment_type='Makeup') for s in ['A','B']])
 
-    def test_closed_full_conflicting_and_unconfigured_classrooms_rejected(self):
-        for kwargs in [dict(enabled=0), dict(capacity=0), dict(conflict=True), dict(capacity=1, rows=[frappe._dict(student='A', enrollment_type='Full Term')])]:
+    def test_closed_or_conflicting_sessions_rejected(self):
+        for kwargs in [dict(enabled=0), dict(conflict=True)]:
             with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
                 self.guard(**kwargs)
 
@@ -76,9 +75,9 @@ class TestConcentratedMakeup(TestCase):
 
     def test_restored_regular_row_with_voucher_consumes_makeup_quota(self):
         rows = [dict(student='A', enrollment_type='Full Term', makeup_voucher='MV-1')]
-        self.assertEqual(service.remaining_places(rows, 1, 20), 0)
+        self.assertEqual(service.remaining_places(rows, 1), 0)
         rows = [dict(student='A', enrollment_type='Regular', source_doctype='Makeup Voucher')]
-        self.assertEqual(service.remaining_places(rows, 1, 20), 0)
+        self.assertEqual(service.remaining_places(rows, 1), 0)
 
     def test_same_course_voucher_still_requires_explicit_acceptance(self):
         course = frappe._dict(is_makeup_course=1, accepted_makeup_course=[frappe._dict(course='Other')])
@@ -139,3 +138,22 @@ class TestConcentratedMakeup(TestCase):
                 commands.redeem_parent_voucher_core(SimpleNamespace(name='P'),[],'MV','CS','S')
         create.assert_not_called()
         voucher.save.assert_not_called()
+
+    def test_makeup_can_exceed_classroom_capacity_but_not_booking_limit(self):
+        rows = [frappe._dict(student=str(i), enrollment_type='Makeup') for i in range(10)]
+        self.guard(quota=20, capacity=10, rows=rows)
+        self.guard(quota=20, capacity=0, rows=rows)
+        with self.assertRaises(ValueError):
+            self.guard(quota=10, capacity=10, rows=rows)
+
+    def test_configuration_allows_twenty_places_in_ten_seat_room(self):
+        session = Mock(name='session')
+        session.name = 'CS'
+        session.weekly_timeslot = 'WTS'
+        session.status = 'Scheduled'
+        session.get.side_effect = {'concentrated_makeup_enabled': 1, 'concentrated_makeup_capacity': 20}.get
+        session.get_doc_before_save.return_value = None
+        session.is_new.return_value = False
+        course = frappe._dict(is_makeup_course=1, accepted_makeup_course=[frappe._dict(course='Art')])
+        with patch.object(service.frappe, 'get_doc', side_effect=[frappe._dict(course='Makeup'), course]), patch.object(service, 'session_is_future', return_value=True), patch.object(service, 'classroom_capacity', return_value=10), patch.object(service, 'active_rows', return_value=[]):
+            service.validate_configuration(session)

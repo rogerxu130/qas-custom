@@ -32,11 +32,10 @@ def is_makeup_row(row):
     return row.get("enrollment_type") == "Makeup" or row.get("source_doctype") == "Makeup Voucher" or bool(row.get("makeup_voucher"))
 
 
-def remaining_places(rows, quota, classroom_capacity):
+def remaining_places(rows, quota):
     """Count children, not historical duplicate rows, as physical occupants."""
-    total = len({r["student"] for r in rows})
     makeup = len({r["student"] for r in rows if is_makeup_row(r)})
-    return max(0, min(cint(quota) - makeup, cint(classroom_capacity) - total))
+    return max(0, cint(quota) - makeup)
 
 
 def overlaps(start, end, other_start, other_end):
@@ -77,9 +76,8 @@ def validate_configuration(session):
     if not session_is_future(session, slot):
         frappe.throw("Only future scheduled sessions can open for makeup bookings.")
     quota = cint(session.get("concentrated_makeup_capacity"))
-    capacity = classroom_capacity(slot)
-    if quota <= 0 or capacity <= 0 or quota > capacity:
-        frappe.throw("Set a positive makeup quota no greater than the classroom capacity.")
+    if quota <= 0:
+        frappe.throw("Set a positive makeup booking limit.")
     rows = active_rows(session.name, lock=True) if not session.is_new() else []
     if len({r.student for r in rows if is_makeup_row(r)}) > quota:
         frappe.throw("The quota cannot be lower than the number of existing makeup bookings.")
@@ -108,14 +106,15 @@ def validate_new_place(student, session_id, enrollment_type="Makeup", exclude=No
         frappe.throw("This session is no longer available for booking.")
     if student_has_conflict(student, session, slot, exclude, lock=True):
         frappe.throw("This student already has a class at this time.")
-    capacity = classroom_capacity(slot, lock=True)
-    if capacity <= 0 or len({r.student for r in rows}) >= capacity:
-        frappe.throw("This classroom is full. Please choose another session.")
     if enrollment_type == "Makeup":
         if not cint(session.get("concentrated_makeup_enabled")):
             frappe.throw("Bookings for this makeup session are closed.")
-        if remaining_places(rows, session.concentrated_makeup_capacity, capacity) <= 0:
+        if remaining_places(rows, session.concentrated_makeup_capacity) <= 0:
             frappe.throw("This makeup session is full. Please choose another session.")
+    else:
+        capacity = classroom_capacity(slot, lock=True)
+        if capacity <= 0 or len({r.student for r in rows}) >= capacity:
+            frappe.throw("This classroom is full. Please choose another session.")
 
 
 def get_options(student=None):
@@ -157,7 +156,7 @@ def get_options(student=None):
                        if v["course"] in accepted and v.get("original_session") != sid]
         if not voucher_ids:
             continue
-        spots = remaining_places(active_rows(sid), session.get("concentrated_makeup_capacity"), classroom_capacity(slot))
+        spots = remaining_places(active_rows(sid), session.get("concentrated_makeup_capacity"))
         sessions[sid] = {**_build_redeem_session_payload(sid), "teacher": get_teacher_name_map([slot.teacher]).get(slot.teacher, slot.teacher) if slot.get("teacher") else None,
                          "spots_left": spots, "voucher_ids": voucher_ids}
     result["sessions"] = sorted(sessions.values(), key=lambda r: (str(r["session_date"]), str(r["start_time"]), r["session_id"]))
