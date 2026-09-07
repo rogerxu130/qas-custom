@@ -1,7 +1,7 @@
 {
  "actions": [],
  "allow_rename": 1,
- "autoname": "format:{weekly_timeslot}-{session_date}",
+ "autoname": "CS-.YYYY.-.#####",
  "doctype": "DocType",
  "engine": "InnoDB",
  "fields": [

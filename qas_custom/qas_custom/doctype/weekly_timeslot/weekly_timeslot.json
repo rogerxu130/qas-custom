@@ -2,7 +2,7 @@
  "actions": [],
  "allow_import": 1,
  "allow_rename": 1,
- "autoname": "format:{term}-{course}-{campus}-{day_of_week}-{start_time}-{teacher}",
+ "autoname": "WTS-.YYYY.-.#####",
  "doctype": "DocType",
  "engine": "InnoDB",
  "fields": [
