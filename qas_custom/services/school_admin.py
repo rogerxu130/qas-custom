@@ -3407,6 +3407,90 @@ def create_school_admin_enrollment_data(payload=None):
 	return _build_enrollment_payload(doc)
 
 
+def continue_school_admin_enrollment_to_term_data(enrollment=None, payload=None):
+	_require_school_admin()
+	if not enrollment:
+		frappe.throw(_("Enrollment is required."))
+	payload = _get_payload(payload)
+	target_term = payload.get("term")
+	target_timeslot = payload.get("weekly_timeslot")
+	if not target_term:
+		frappe.throw(_("Destination term is required."))
+	if not target_timeslot:
+		frappe.throw(_("Destination weekly timeslot is required."))
+
+	source = frappe.get_doc("Enrollment", enrollment)
+	if source.get("status") != "Active" or source.get("enrollment_type") != "Full-Term":
+		frappe.throw(_("Only active Full-Term enrollments can continue to another term."))
+	if not source.get("student") or not source.get("course") or not source.get("weekly_timeslot"):
+		frappe.throw(_("The source enrollment is missing its student, course, or weekly timeslot."))
+	if target_term == source.get("term"):
+		frappe.throw(_("Choose a different term. Use Transfer Class for a class change within the same term."))
+
+	term = frappe.db.get_value("Term", target_term, ["name", "status", "start_date"], as_dict=True)
+	if not term:
+		frappe.throw(_("Destination term was not found."))
+	if term.get("status") not in {"Upcoming", "Active"}:
+		frappe.throw(_("Destination term must be Upcoming or Active."))
+
+	timeslot = frappe.db.get_value(
+		"Weekly Timeslot",
+		target_timeslot,
+		["name", "term", "course", "status"],
+		as_dict=True,
+	)
+	if not timeslot:
+		frappe.throw(_("Destination weekly timeslot was not found."))
+	if timeslot.get("term") != target_term:
+		frappe.throw(_("Destination weekly timeslot does not belong to the selected term."))
+	if timeslot.get("status") != "Active":
+		frappe.throw(_("Destination weekly timeslot must be active."))
+	if timeslot.get("course") != source.get("course"):
+		frappe.throw(_("Destination weekly timeslot must use the same course as the source enrollment."))
+
+	# Serialize continuation attempts for the same student so repeated requests
+	# cannot create two open enrollments before either request sees the other.
+	frappe.db.sql("SELECT name FROM `tabStudent` WHERE name = %s FOR UPDATE", source.get("student"))
+	existing = _existing_target_enrollment(
+		source.get("student"),
+		target_term,
+		target_timeslot,
+		statuses=["Planned", "Active"],
+	)
+	if existing:
+		return {
+			"enrollment": _build_enrollment_payload(frappe.get_doc("Enrollment", existing)),
+			"created": False,
+			"source_enrollment": source.name,
+		}
+
+	doc = frappe.new_doc("Enrollment")
+	_apply_enrollment_payload(
+		doc,
+		{
+			"student": source.get("student"),
+			"parent": source.get("parent"),
+			"term": target_term,
+			"course": source.get("course"),
+			"weekly_timeslot": target_timeslot,
+			"enrollment_type": "Full-Term",
+			"status": "Planned",
+			"enrollment_date": term.get("start_date") or today(),
+		},
+	)
+	_validate_unique_open_enrollment(doc)
+	doc.insert(ignore_permissions=True)
+	_add_comment("Enrollment", source.name, _("Continued to planned Enrollment {0} in term {1}.").format(doc.name, target_term))
+	_add_comment("Enrollment", doc.name, _("Planned continuation created from Enrollment {0}.").format(source.name))
+	frappe.db.commit()
+	_refresh_ndis_friendly_capacity_alerts(target_timeslot)
+	return {
+		"enrollment": _build_enrollment_payload(doc),
+		"created": True,
+		"source_enrollment": source.name,
+	}
+
+
 def update_school_admin_enrollment_data(enrollment=None, payload=None):
 	_require_school_admin()
 	if not enrollment:
@@ -3767,6 +3851,7 @@ def get_school_admin_weekly_timeslots_data(
 			"status",
 			"ndis_friendly",
 			"ndis_public_listing_enabled",
+			"copied_from_weekly_timeslot",
 			"modified",
 		],
 	)
