@@ -1530,3 +1530,12 @@ def school_admin_get_workshop_session(workshop_session=None):
 @frappe.whitelist()
 def school_admin_update_workshop_attendance(workshop_session=None, updates=None):
 	return update_school_admin_workshop_attendance_data(workshop_session=workshop_session, updates=updates)
+
+
+@frappe.whitelist()
+def school_admin_get_term_enrollment_comparison(source_term=None, target_term=None, include_planned=1, include_inactive=0, enrollment_type="Full-Term"):
+	from qas_custom.services.term_enrollment_comparison import get_term_enrollment_comparison
+	return get_term_enrollment_comparison(
+		source_term=source_term, target_term=target_term, include_planned=include_planned,
+		include_inactive=include_inactive, enrollment_type=enrollment_type,
+	)
