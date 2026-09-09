@@ -71,6 +71,20 @@ def build_followups(rows, contacts):
     return sorted(items, key=lambda item: (str(item["session_date"]), str(item["start_time"]), item.get("student_name") or ""))
 
 
+def build_visit_followups(rows):
+    items = []
+    for row in rows:
+        if row.get("inquiry_status") not in {"Booked", "Rescheduled"}:
+            continue
+        item = dict(row, kind="visit", session_id=None)
+        item["key"] = contact_key(item)
+        item["contact_status"] = row.get("confirmation_status") or "Pending"
+        item["pending"] = item["contact_status"] not in COMPLETE
+        item["sms_ready"] = bool(item.get("contact_phone") and item.get("campus_address") and item.get("start_time"))
+        items.append(item)
+    return items
+
+
 def collect_followups(start_date, end_date):
     rows = frappe.db.sql("""
         SELECT a.name AS attendance, a.student, a.enrollment_type, a.status,
@@ -93,11 +107,30 @@ def collect_followups(start_date, end_date):
             AND a.status NOT IN ('Cancelled', 'Leave')
         ORDER BY s.session_date, w.start_time, a.idx, a.creation
     """, (str(start_date), str(end_date)), as_dict=True)
+    visits = build_visit_followups(frappe.db.sql("""
+        SELECT i.name AS reference, i.status AS inquiry_status, i.student,
+            COALESCE(NULLIF(student.student_name, ''), i.submitted_student_name) AS student_name,
+            i.contact_name, i.contact_phone, i.confirmation_status, i.campus,
+            campus.address AS campus_address,
+            i.current_appointment_date AS session_date,
+            i.current_appointment_time AS start_time
+        FROM `tabInquiry` i
+        LEFT JOIN `tabStudent` student ON student.name=i.student
+        LEFT JOIN `tabCampus` campus ON campus.name=i.campus
+        WHERE i.inquiry_type='School Visit' AND i.status IN ('Booked', 'Rescheduled')
+            AND i.current_appointment_date BETWEEN %s AND %s
+    """, (str(start_date), str(end_date)), as_dict=True))
     drafts = build_followups(rows, {})
-    if not drafts:
+    if not drafts and not visits:
         return []
-    contacts = frappe.get_all(CONTACT, filters={"name": ["in", [row["key"] for row in drafts]]}, fields=["name", "contact_status", "recorded_at", "recorded_by"], limit_page_length=0)
-    return build_followups(rows, {row["name"]: row for row in contacts})
+    contacts = frappe.get_all(CONTACT, filters={"name": ["in", [row["key"] for row in drafts + visits]]}, fields=["name", "contact_status", "recorded_at", "recorded_by"], limit_page_length=0)
+    contact_map = {row["name"]: row for row in contacts}
+    for item in visits:
+        contact = contact_map.get(item["key"]) or {}
+        item["recorded_at"] = contact.get("recorded_at")
+        item["recorded_by"] = contact.get("recorded_by")
+    return sorted(build_followups(rows, contact_map) + visits,
+                  key=lambda item: (str(item["session_date"]), str(item["start_time"]), item.get("student_name") or item.get("contact_name") or ""))
 
 
 def get_followups(target_date=None, upcoming=0):
@@ -118,9 +151,14 @@ def update_contact(key, target_date, contact_status):
         frappe.throw("This booking changed or no longer needs individual follow-up. Refresh the list.")
     if contact_status == "Text Message Sent" and not current["sms_ready"]:
         frappe.throw("A parent phone number and campus address are required before preparing an SMS.")
-    if current["kind"] == "trial":
+    if current["kind"] in {"trial", "visit"}:
         from qas_custom.services.inquiry import update_inquiry_confirmation_core
-        update_inquiry_confirmation_core(current["reference"], contact_status, expected_course_session=current["session_id"])
+        if current["kind"] == "visit":
+            update_inquiry_confirmation_core(current["reference"], contact_status,
+                expected_campus=current["campus"], expected_appointment_date=current["session_date"],
+                expected_appointment_time=current["start_time"])
+        else:
+            update_inquiry_confirmation_core(current["reference"], contact_status, expected_course_session=current["session_id"])
     with frappe.cache.lock("qas-followup-contact:" + key, timeout=30, blocking_timeout=10):
         doc = frappe.get_doc(CONTACT, key) if frappe.db.exists(CONTACT, key) else frappe.new_doc(CONTACT)
         doc.name = key
@@ -166,13 +204,14 @@ def digest_key(day, hour, recipient):
 
 def digest_message(day, hour, items, portal_url):
     trials = sum(row["kind"] == "trial" for row in items)
-    solo = len(items) - trials
+    visits = sum(row["kind"] == "visit" for row in items)
+    solo = sum(row["kind"] == "solo_makeup" for row in items)
     base = (portal_url or "https://portal.queenslandartschool.com").rstrip("/")
     if urlparse(base).scheme != "https":
         base = "https://portal.queenslandartschool.com"
     url = base + "/school-admin?" + urlencode({"tab": "followups", "date": str(day)})
     heading = "明日待联系" if hour == 10 else "明日仍有未完成的短信跟进"
-    return (f"<h2>{heading}</h2><p>{escape_html(str(day))}：还有 {trials} 位试课学生和 {solo} 位单人补课学生需要联系。</p>"
+    return (f"<h2>{heading}</h2><p>{escape_html(str(day))}：还有 {trials} 位试课学生、{visits} 个参观预约和 {solo} 位单人补课学生需要联系。</p>"
             f'<p><a href="{escape_html(url)}">打开手机管理页，逐个发送短信</a></p>'
             "<p>已记录 Message Sent 或 Customer Confirmed 的预约不再计入。发送操作仍由你在手机短信应用内完成。</p>")
 
@@ -193,7 +232,7 @@ def run_digest(now=None):
         if not items:
             return {"skipped": True, "reason": "No pending contacts"}
         result = sendmail_or_skip(action="admin_followup_digest", recipients=[settings.recipient],
-            subject=f"QAS 明日待联系：{len(items)} 位学生 ({day})",
+            subject=f"QAS 明日待联系：{len(items)} 个预约 ({day})",
             message=digest_message(day, now.hour, items, settings.portal_url), delayed=True)
         if result and result.get("skipped"):
             return result

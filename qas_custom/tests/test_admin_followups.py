@@ -79,7 +79,7 @@ class TestFollowupDigest(TestCase):
             self.assertTrue(service.run_digest(datetime(2026, 9, 9, 10))["skipped"])
         mail.assert_called_once()
         self.assertTrue(mail.call_args.kwargs["delayed"])
-        self.assertIn("0 位试课学生和 1 位单人补课学生", mail.call_args.kwargs["message"])
+        self.assertIn("0 位试课学生、0 个参观预约和 1 位单人补课学生", mail.call_args.kwargs["message"])
 
     def test_evening_rechecks_and_includes_new_bookings(self):
         fake = self.fake()
@@ -111,3 +111,47 @@ class TestFollowupDigest(TestCase):
         self.assertIn("tab=followups", body)
         self.assertIn("date=2026-09-10", body)
         self.assertIn("明日仍有未完成", body)
+
+
+class TestVisitFollowups(TestCase):
+    def visit(self, **changes):
+        return dict(reference="VISIT1", inquiry_status="Booked", student=None,
+                    contact_name="Sam", contact_phone="0400000000", campus="City",
+                    campus_address="1 Example Street", session_date="2026-09-10",
+                    start_time="10:00:00", confirmation_status="Pending", **changes)
+
+    def test_visit_without_student_or_attendance_is_collected(self):
+        fake = SimpleNamespace(db=SimpleNamespace(sql=Mock(side_effect=[[], [self.visit()]])), get_all=Mock(return_value=[]))
+        with patch.object(service, "frappe", fake):
+            items = service.collect_followups("2026-09-10", "2026-09-10")
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["kind"], "visit")
+        self.assertTrue(items[0]["pending"])
+        self.assertTrue(items[0]["sms_ready"])
+
+    def test_visit_status_and_changed_appointment(self):
+        row = self.visit()
+        original = service.build_visit_followups([row])[0]
+        for status in service.COMPLETE:
+            self.assertFalse(service.build_visit_followups([{**row, "confirmation_status": status}])[0]["pending"])
+        self.assertEqual(service.build_visit_followups([{**row, "inquiry_status": "Cancelled"}]), [])
+        changed = service.build_visit_followups([{**row, "session_date": "2026-09-11", "inquiry_status": "Rescheduled"}])[0]
+        self.assertNotEqual(original["key"], changed["key"])
+        self.assertTrue(changed["pending"])
+
+    def test_visit_record_validates_inquiry_appointment(self):
+        item = service.build_visit_followups([self.visit()])[0]
+        doc = Mock()
+        fake = SimpleNamespace(cache=SimpleNamespace(lock=Mock(return_value=nullcontext())),
+                               db=SimpleNamespace(exists=Mock(return_value=False), commit=Mock()),
+                               new_doc=Mock(return_value=doc), session=SimpleNamespace(user="admin"))
+        with patch.object(service, "frappe", fake), patch.object(service, "require_admin"), patch.object(service, "collect_followups", return_value=[item]), patch.object(service, "now_datetime", return_value=datetime(2026, 9, 9, 10)), patch('qas_custom.services.inquiry.update_inquiry_confirmation_core') as confirm:
+            result = service.update_contact(item["key"], item["session_date"], "Text Message Sent")
+        confirm.assert_called_once_with("VISIT1", "Text Message Sent", expected_campus="City", expected_appointment_date="2026-09-10", expected_appointment_time="10:00:00")
+        self.assertEqual(result["contact_status"], "Text Message Sent")
+
+    def test_visit_only_digest_is_queued_and_completed_visit_is_excluded(self):
+        fake = TestFollowupDigest().fake()
+        with patch.object(service, "frappe", fake), patch.object(service, "collect_followups", return_value=[{"kind": "visit", "pending": True}, {"kind": "visit", "pending": False}]), patch.object(service, "sendmail_or_skip", return_value=None) as mail:
+            self.assertEqual(service.run_digest(datetime(2026, 9, 9, 10)), {"queued": True, "count": 1})
+        self.assertIn("0 位试课学生、1 个参观预约和 0 位单人补课学生", mail.call_args.kwargs["message"])
