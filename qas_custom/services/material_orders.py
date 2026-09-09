@@ -86,7 +86,7 @@ def save_school_admin_store_product_data(product=None, payload=None):
 	doc.unit_price = flt(data.get("unit_price"))
 	doc.active = cint(data.get("active", 1))
 	doc.display_order = cint(data.get("display_order") or 0)
-	doc.primary_category = _valid_product_category(data.get("primary_category"))
+	_apply_product_categories(doc, data)
 	if not doc.product_name:
 		frappe.throw(_("Product name is required."))
 	if doc.unit_price < 0:
@@ -436,7 +436,9 @@ def _ensure_material_item(product):
 
 
 def _product_payload(doc, include_media=True):
-	category = _category_payload_for_product(doc.get("primary_category"))
+	category_ids = _product_category_names(doc)
+	categories = [category for name in category_ids if (category := _category_payload_for_product(name))]
+	category = categories[0] if categories else None
 	payload = {
 		"name": doc.name,
 		"product_name": doc.product_name or "",
@@ -447,6 +449,8 @@ def _product_payload(doc, include_media=True):
 		"item_code": doc.item_code or "",
 		"primary_category": doc.get("primary_category") or "",
 		"category": category,
+		"category_ids": category_ids,
+		"categories": categories,
 		"modified": doc.modified,
 	}
 	if include_media:
@@ -471,6 +475,7 @@ def _parent_product_payload(doc):
 		"unit_price": payload["unit_price"],
 		"primary_category": payload["primary_category"],
 		"category": payload["category"] if payload["category"] and payload["category"]["active"] else None,
+		"categories": [category for category in payload["categories"] if category["active"]],
 		"images": payload.get("images") or [],
 		"videos": payload.get("videos") or [],
 	}
@@ -490,6 +495,28 @@ def _category_payload_for_product(category):
 	if not category or not frappe.db.exists(PRODUCT_CATEGORY_DOCTYPE, category):
 		return None
 	return _category_payload(frappe.get_cached_doc(PRODUCT_CATEGORY_DOCTYPE, category))
+
+
+def _product_category_names(doc):
+	names = [row.get("category") for row in doc.get("categories") or [] if row.get("category")]
+	if not names and doc.get("primary_category"):
+		names = [doc.get("primary_category")]
+	return list(dict.fromkeys(names))
+
+
+def _apply_product_categories(doc, data):
+	if "category_ids" in data:
+		names = data["category_ids"]
+		if not isinstance(names, list) or any(not isinstance(name, str) for name in names):
+			frappe.throw(_("Product categories must be a list of category names."))
+	elif "primary_category" in data:
+		# Older clients may update the primary category without knowing the other memberships.
+		names = [data["primary_category"]] + [name for name in _product_category_names(doc) if name != doc.get("primary_category")]
+	else:
+		names = _product_category_names(doc)
+	validated = list(dict.fromkeys(category for name in names if (category := _valid_product_category(name))))
+	doc.set("categories", [{"category": name} for name in validated])
+	doc.primary_category = validated[0] if validated else None
 
 
 def _valid_product_category(category):

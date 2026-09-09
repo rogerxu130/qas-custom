@@ -1,0 +1,25 @@
+{
+ "actions": [],
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "category"
+ ],
+ "fields": [
+  {
+   "fieldname": "category",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Category",
+   "options": "Store Product Category",
+   "reqd": 1
+  }
+ ],
+ "istable": 1,
+ "module": "QAS Custom",
+ "name": "Store Product Category Link",
+ "permissions": [],
+ "sort_field": "idx",
+ "sort_order": "ASC"
+}
