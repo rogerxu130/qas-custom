@@ -1,0 +1,48 @@
+{
+ "doctype": "DocType",
+ "name": "Admin Followup Settings",
+ "module": "QAS Custom",
+ "engine": "InnoDB",
+ "fields": [
+  {
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Email reminders enabled",
+   "default": "1"
+  },
+  {
+   "fieldname": "recipient",
+   "fieldtype": "Data",
+   "label": "Reminder email",
+   "options": "Email",
+   "default": "queenslandartschool@gmail.com"
+  },
+  {
+   "fieldname": "portal_url",
+   "fieldtype": "Data",
+   "label": "Parent Portal URL",
+   "default": "https://portal.queenslandartschool.com"
+  }
+ ],
+ "field_order": [
+  "enabled",
+  "recipient",
+  "portal_url"
+ ],
+ "permissions": [
+  {
+   "role": "School Admin",
+   "read": 1,
+   "write": 1,
+   "create": 1
+  },
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1
+  }
+ ],
+ "track_changes": 1,
+ "issingle": 1
+}

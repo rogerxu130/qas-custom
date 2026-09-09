@@ -199,6 +199,7 @@ scheduler_events = {
 		],
 		"0 * * * *": [
 			"qas_custom.tasks.campus_admin_trial_digest.send_campus_admin_next_day_trial_digests",
+			"qas_custom.services.admin_followups.scheduled_digest",
 			"qas_custom.tasks.teacher_schedule_reminders.send_teacher_next_day_schedule_reminders",
 		],
 		"0 9 * * *": [

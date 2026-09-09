@@ -2,6 +2,7 @@
 from datetime import datetime
 
 import frappe
+from qas_custom.modules.makeup.eligibility import has_regular_or_trial_student
 from qas_custom.modules.course_schedule.queries import get_teacher_name_map
 from frappe.utils import add_days, cint, getdate, get_time, now_datetime, today
 
@@ -156,7 +157,10 @@ def get_options(student=None):
                        if v["course"] in accepted and v.get("original_session") != sid]
         if not voucher_ids:
             continue
-        spots = remaining_places(active_rows(sid), session.get("concentrated_makeup_capacity"))
+        rows = active_rows(sid)
+        if not has_regular_or_trial_student(rows):
+            continue
+        spots = remaining_places(rows, session.get("concentrated_makeup_capacity"))
         sessions[sid] = {**_build_redeem_session_payload(sid), "teacher": get_teacher_name_map([slot.teacher]).get(slot.teacher, slot.teacher) if slot.get("teacher") else None,
                          "spots_left": spots, "voucher_ids": voucher_ids}
     result["sessions"] = sorted(sessions.values(), key=lambda r: (str(r["session_date"]), str(r["start_time"]), r["session_id"]))

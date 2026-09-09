@@ -5,6 +5,7 @@ from datetime import datetime
 import frappe
 from frappe.utils import add_days, cint, get_time, getdate, now_datetime, today
 
+from qas_custom.modules.makeup.eligibility import sessions_with_regular_or_trial_students, validate_parent_session_roster
 from qas_custom.modules.course_schedule.queries import get_teacher_name_map, get_weekly_timeslot_map
 from qas_custom.modules.attendance.commands import update_attendance_status
 from qas_custom.modules.notifications.commands import enqueue_session_staff_notification
@@ -336,6 +337,7 @@ def get_parent_redeemable_sessions_core(
 	student: str | None = None,
 	*,
 	allow_ordinary_cross_course: bool = False,
+	allow_empty_sessions: bool = False,
 ):
 	voucher = _get_parent_makeup_voucher(voucher_id, parent.name)
 	_validate_voucher_available_for_redeem(voucher)
@@ -349,6 +351,7 @@ def get_parent_redeemable_sessions_core(
 			voucher,
 			selected_student,
 			allow_ordinary_cross_course=allow_ordinary_cross_course,
+			allow_empty_sessions=allow_empty_sessions,
 			excluded_session_ids={voucher.get("original_session")} if voucher.get("original_session") else None,
 		),
 	}
@@ -362,6 +365,7 @@ def redeem_parent_voucher_core(
 	student: str | None = None,
 	*,
 	allow_ordinary_cross_course: bool = False,
+	allow_empty_sessions: bool = False,
 	notify_staff: bool = True,
 	notify_parent: bool = True,
 	concentrated_only: bool = False,
@@ -387,6 +391,8 @@ def redeem_parent_voucher_core(
 			AND status NOT IN ('Cancelled', 'Leave') FOR UPDATE""",
 			(session_id, used_student, voucher.name, voucher.name), as_dict=True,
 		)
+		if not rows and not allow_empty_sessions:
+			validate_parent_session_roster(session_id)
 		attendance_entry = rows[0].name if rows else create_makeup_attendance_entry(
 			voucher=voucher, session_id=session_id, student=used_student,
 		)
@@ -424,6 +430,7 @@ def redeem_parent_voucher_core(
 		session_id,
 		selected_student,
 		allow_ordinary_cross_course=allow_ordinary_cross_course,
+		allow_empty_sessions=allow_empty_sessions,
 	)
 
 	from qas_custom.services.concentrated_makeup import validate_new_place, validate_voucher_target
@@ -646,6 +653,7 @@ def _get_redeemable_makeup_sessions(
 	student: str | None = None,
 	*,
 	allow_ordinary_cross_course: bool = False,
+	allow_empty_sessions: bool = False,
 	excluded_session_ids=None,
 ):
 	redeem_student = student or voucher.student
@@ -672,8 +680,11 @@ def _get_redeemable_makeup_sessions(
 		[row["teacher"] for row in timeslot_map.values() if row.get("teacher")]
 	)
 
+	occupied_sessions = sessions_with_regular_or_trial_students([row["name"] for row in session_rows])
 	sessions = []
 	for session in session_rows:
+		if not allow_empty_sessions and session["name"] not in occupied_sessions:
+			continue
 		if session.get("status") == "Cancelled":
 			continue
 		if session.get("name") in excluded_session_ids:
@@ -691,6 +702,7 @@ def _get_redeemable_makeup_sessions(
 		sessions.append(
 			{
 				"session_id": session["name"],
+				"has_regular_or_trial_students": session["name"] in occupied_sessions,
 				"course": timeslot.get("course"),
 				"session_date": session.get("session_date"),
 				"day_of_week": timeslot.get("day_of_week"),
@@ -711,13 +723,17 @@ def _validate_session_can_redeem_voucher(
 	student: str,
 	*,
 	allow_ordinary_cross_course: bool = False,
+	allow_empty_sessions: bool = False,
 ):
+	if not allow_empty_sessions:
+		validate_parent_session_roster(session_id)
 	available_session_ids = {
 		row["session_id"]
 		for row in _get_redeemable_makeup_sessions(
 			voucher,
 			student,
 			allow_ordinary_cross_course=allow_ordinary_cross_course,
+			allow_empty_sessions=allow_empty_sessions,
 			excluded_session_ids={voucher.get("original_session")} if voucher.get("original_session") else None,
 		)
 	}

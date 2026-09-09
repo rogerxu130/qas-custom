@@ -1539,3 +1539,27 @@ def school_admin_get_term_enrollment_comparison(source_term=None, target_term=No
 		source_term=source_term, target_term=target_term, include_planned=include_planned,
 		include_inactive=include_inactive, enrollment_type=enrollment_type,
 	)
+
+
+@frappe.whitelist()
+def school_admin_get_followups(target_date=None, upcoming=0):
+    from qas_custom.services.admin_followups import get_followups
+    return get_followups(target_date, upcoming)
+
+
+@frappe.whitelist(methods=["POST"])
+def school_admin_update_followup_contact(key, target_date, contact_status):
+    from qas_custom.services.admin_followups import update_contact
+    return update_contact(key, target_date, contact_status)
+
+
+@frappe.whitelist()
+def school_admin_get_followup_settings():
+    from qas_custom.services.admin_followups import get_settings
+    return get_settings()
+
+
+@frappe.whitelist(methods=["POST"])
+def school_admin_save_followup_settings(enabled=0, recipient=None):
+    from qas_custom.services.admin_followups import save_settings
+    return save_settings(enabled, recipient)

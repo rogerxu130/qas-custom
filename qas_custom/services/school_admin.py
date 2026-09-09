@@ -4785,6 +4785,7 @@ def get_school_admin_redeemable_sessions_data(parent=None, voucher_id=None, stud
         voucher_id=voucher.name,
         student=student,
         allow_ordinary_cross_course=True,
+        allow_empty_sessions=True,
     )
     available_sessions = result.get("available_sessions") or []
     for session in available_sessions:
@@ -4864,6 +4865,7 @@ def redeem_school_admin_voucher_data(parent=None, voucher_id=None, session_id=No
                 session_id=session_id,
                 student=student,
                 allow_ordinary_cross_course=True,
+                allow_empty_sessions=True,
                 notify_staff=False,
                 notify_parent=False,
             )

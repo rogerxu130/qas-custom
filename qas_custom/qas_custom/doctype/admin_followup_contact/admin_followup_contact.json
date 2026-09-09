@@ -1,0 +1,66 @@
+{
+ "doctype": "DocType",
+ "name": "Admin Followup Contact",
+ "module": "QAS Custom",
+ "engine": "InnoDB",
+ "fields": [
+  {
+   "fieldname": "reference",
+   "fieldtype": "Data",
+   "label": "Booking reference"
+  },
+  {
+   "fieldname": "course_session",
+   "fieldtype": "Link",
+   "label": "Course session",
+   "options": "Course Sessions"
+  },
+  {
+   "fieldname": "student",
+   "fieldtype": "Link",
+   "label": "Student",
+   "options": "Student"
+  },
+  {
+   "fieldname": "contact_status",
+   "fieldtype": "Select",
+   "label": "Contact status",
+   "options": "Pending\nText Message Sent\nCustomer Confirmed"
+  },
+  {
+   "fieldname": "recorded_by",
+   "fieldtype": "Link",
+   "label": "Recorded by",
+   "options": "User"
+  },
+  {
+   "fieldname": "recorded_at",
+   "fieldtype": "Datetime",
+   "label": "Recorded at"
+  }
+ ],
+ "field_order": [
+  "reference",
+  "course_session",
+  "student",
+  "contact_status",
+  "recorded_by",
+  "recorded_at"
+ ],
+ "permissions": [
+  {
+   "role": "School Admin",
+   "read": 1,
+   "write": 1,
+   "create": 1
+  },
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1
+  }
+ ],
+ "track_changes": 1,
+ "autoname": "hash"
+}

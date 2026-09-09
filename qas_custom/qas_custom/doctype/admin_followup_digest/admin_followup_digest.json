@@ -1,0 +1,58 @@
+{
+ "doctype": "DocType",
+ "name": "Admin Followup Digest",
+ "module": "QAS Custom",
+ "engine": "InnoDB",
+ "fields": [
+  {
+   "fieldname": "target_date",
+   "fieldtype": "Date",
+   "label": "Class date"
+  },
+  {
+   "fieldname": "send_window",
+   "fieldtype": "Int",
+   "label": "Reminder hour Brisbane"
+  },
+  {
+   "fieldname": "recipient",
+   "fieldtype": "Data",
+   "label": "Recipient",
+   "options": "Email"
+  },
+  {
+   "fieldname": "item_count",
+   "fieldtype": "Int",
+   "label": "Pending contacts"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Queued\nSkipped"
+  }
+ ],
+ "field_order": [
+  "target_date",
+  "send_window",
+  "recipient",
+  "item_count",
+  "status"
+ ],
+ "permissions": [
+  {
+   "role": "School Admin",
+   "read": 1,
+   "write": 1,
+   "create": 1
+  },
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1
+  }
+ ],
+ "track_changes": 1,
+ "autoname": "hash"
+}

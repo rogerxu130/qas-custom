@@ -95,6 +95,7 @@ class TestSchoolAdminMakeupCourseFilter(TestCase):
 			student=None,
 		)
 
+		self.assertTrue(redeemable_sessions.call_args.kwargs["allow_empty_sessions"])
 		self.assertEqual(result["voucher_course"], "Anime")
 		self.assertEqual(result["selected_course"], "Anime")
 		self.assertEqual([row["session_id"] for row in result["available_sessions"]], ["CS-001"])
