@@ -71,6 +71,7 @@ from qas_custom.services.material_orders import (
 	update_school_admin_store_order_status_data,
 	upload_school_admin_store_product_image_data,
 	upload_school_admin_store_product_video_data,
+	delete_school_admin_store_product_video_data,
 )
 from qas_custom.services.support_view import create_support_view_token, get_support_view_targets
 from qas_custom.services.school_admin_reporting import (
@@ -1569,3 +1570,8 @@ def school_admin_save_followup_settings(enabled=0, recipient=None):
 @frappe.whitelist(methods=["POST"])
 def school_admin_upload_store_product_video(product=None):
 	return upload_school_admin_store_product_video_data(product=product)
+
+
+@frappe.whitelist(methods=["POST"])
+def school_admin_delete_store_product_video(product=None, url=None, modified=None):
+	return delete_school_admin_store_product_video_data(product=product, url=url, modified=modified)

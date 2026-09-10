@@ -141,6 +141,30 @@ def upload_school_admin_store_product_video_data(product=None):
 	return _product_payload(doc, include_media=True)
 
 
+def delete_school_admin_store_product_video_data(product=None, url=None, modified=None):
+	_require_school_admin()
+	url = str(url or "").strip()
+	if not _is_uploaded_product_video(url):
+		frappe.throw(_("Only uploaded product MP4 files can be deleted here."))
+	frappe.db.get_value(PRODUCT_DOCTYPE, product, "name", for_update=True)
+	doc = _get_product(product)
+	if not modified or str(doc.modified) != str(modified):
+		frappe.throw(_("The product changed. Refresh it before deleting a video."))
+	if not any(row.url == url for row in doc.get("videos") or []):
+		frappe.throw(_("This video is no longer listed on the product. Refresh it first."))
+	files = frappe.get_all("File", filters={"file_url": url}, fields=["name", "attached_to_doctype", "attached_to_name", "is_private"])
+	if len(files) != 1 or files[0].attached_to_doctype != PRODUCT_DOCTYPE or files[0].attached_to_name != doc.name or cint(files[0].is_private):
+		frappe.throw(_("This file is missing or shared with another attachment. It cannot be deleted here."))
+	if frappe.db.exists("Store Product Video", {"url": url, "parent": ["!=", doc.name]}):
+		frappe.throw(_("Another product uses this video. Remove its reference before deleting the file."))
+	doc.set("videos", [row for row in doc.get("videos") or [] if row.url != url])
+	doc.save(ignore_permissions=True)
+	# Use Frappe's File lifecycle for physical storage deletion and attachment audit.
+	frappe.delete_doc("File", files[0].name, ignore_permissions=True)
+	frappe.db.commit()
+	return _product_payload(doc, include_media=True)
+
+
 def _validate_product_video(filename, content):
 	if not content or len(content) > MAX_VIDEO_BYTES:
 		frappe.throw(_("Videos must be non-empty and 50 MB or smaller."))

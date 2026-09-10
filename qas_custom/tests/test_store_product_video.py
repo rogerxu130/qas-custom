@@ -61,3 +61,25 @@ class TestStoreProductVideo(TestCase):
         for url in ['javascript:alert(1)', '/private/files/clip.mp4', '/files/../clip.mp4']:
             with self.subTest(url=url), self.assertRaises(ValueError):
                 service._apply_media(doc, {'videos': [{'label': 'Clip', 'url': url}]})
+
+    def test_delete_file_success_and_safety_checks(self):
+        for case in ['success', 'stale', 'shared', 'other_product', 'external', 'unauthorized']:
+            with self.subTest(case=case):
+                doc = Mock()
+                doc.name = 'P1'
+                doc.modified = 'version1'
+                doc.get.return_value = [frappe._dict(url='/files/clip.mp4')]
+                file = frappe._dict(name='F1', attached_to_doctype='Store Product', attached_to_name='P1', is_private=0)
+                db = SimpleNamespace(get_value=Mock(), exists=Mock(return_value=case=='other_product'), commit=Mock())
+                with patch.object(service, '_require_school_admin', side_effect=PermissionError if case=='unauthorized' else None), patch.object(service, '_get_product', return_value=doc), patch.object(service.frappe, 'db', db), patch.object(service.frappe, 'get_all', return_value=[file, file] if case=='shared' else [file]), patch.object(service.frappe, 'delete_doc') as delete, patch.object(service, '_product_payload', return_value={'name':'P1'}):
+                    args = dict(product='P1', url='https://example.com/video.mp4' if case=='external' else '/files/clip.mp4', modified='old' if case=='stale' else 'version1')
+                    if case=='success':
+                        self.assertEqual(service.delete_school_admin_store_product_video_data(**args), {'name':'P1'})
+                        doc.set.assert_called_once_with('videos', [])
+                        delete.assert_called_once_with('File','F1',ignore_permissions=True)
+                        db.commit.assert_called_once()
+                    else:
+                        with self.assertRaises((ValueError, PermissionError)):
+                            service.delete_school_admin_store_product_video_data(**args)
+                        delete.assert_not_called()
+                        doc.save.assert_not_called()
