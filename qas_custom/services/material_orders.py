@@ -16,6 +16,7 @@ ORDER_DOCTYPE = "Store Order"
 ADMIN_ROLES = {"School Admin", "System Manager"}
 IMAGE_FORMATS = {"jpeg": "jpg", "png": "png", "webp": "webp"}
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
+MAX_VIDEO_BYTES = 50 * 1024 * 1024
 
 
 def get_school_admin_store_products_data(active=None, query=None, limit=160):
@@ -120,6 +121,40 @@ def upload_school_admin_store_product_image_data(product=None):
 	doc.save(ignore_permissions=True)
 	frappe.db.commit()
 	return _product_payload(doc, include_media=True)
+
+
+def upload_school_admin_store_product_video_data(product=None):
+	_require_school_admin()
+	doc = _get_product(product)
+	upload = frappe.request.files.get("video") if frappe.request else None
+	if not upload:
+		frappe.throw(_("Choose an MP4 video to upload."))
+	content = upload.read(MAX_VIDEO_BYTES + 1)
+	_validate_product_video(upload.filename, content)
+	file_doc = save_file(
+		"product-video.mp4", content, PRODUCT_DOCTYPE, doc.name, is_private=0, df="videos"
+	)
+	next_order = max((_media_display_order(row, index) for index, row in enumerate(doc.get("videos") or [])), default=-1) + 1
+	doc.append("videos", {"label": f"{doc.product_name} video", "url": file_doc.file_url, "display_order": next_order})
+	doc.save(ignore_permissions=True)
+	frappe.db.commit()
+	return _product_payload(doc, include_media=True)
+
+
+def _validate_product_video(filename, content):
+	if not content or len(content) > MAX_VIDEO_BYTES:
+		frappe.throw(_("Videos must be non-empty and 50 MB or smaller."))
+	# ISO BMFF file-type box, with an MP4-compatible major or compatible brand.
+	box_size = int.from_bytes(content[:4], "big")
+	brands = [content[8:12]] + [content[i:i + 4] for i in range(16, min(box_size, len(content)), 4)]
+	if (not str(filename or "").lower().endswith(".mp4") or len(content) < 24
+		or content[4:8] != b"ftyp" or box_size < 16 or box_size > min(len(content), 4096)
+		or not set(brands).intersection({b"isom", b"iso2", b"mp41", b"mp42", b"avc1", b"M4V "})):
+		frappe.throw(_("Use an MP4 video. For browser playback, export with H.264 video and AAC audio."))
+
+
+def _is_uploaded_product_video(url):
+	return url.startswith("/files/") and url.lower().endswith(".mp4") and ".." not in url and "?" not in url and "#" not in url
 
 
 def get_school_admin_store_orders_data(status=None, query=None, limit=160):
@@ -460,7 +495,7 @@ def _product_payload(doc, include_media=True):
 			if row.image
 		]
 		payload["videos"] = [
-			{"label": row.label, "url": row.url, "display_order": _media_display_order(row, index)}
+			{"label": row.label, "url": row.url, "playback_type": "file" if _is_uploaded_product_video(row.url or "") else "external", "display_order": _media_display_order(row, index)}
 			for index, row in _ordered_media(doc.get("videos") or [])
 		]
 	return payload
@@ -603,8 +638,13 @@ def _apply_media(doc, data):
 			label, url = str(row.get("label") or "").strip(), str(row.get("url") or "").strip()
 			if not label and not url:
 				continue
-			if not label or not _safe_url(url):
-				frappe.throw(_("Each external video needs a label and a valid http or https URL."))
+			if _is_uploaded_product_video(url):
+				if not frappe.db.exists("File", {"file_url": url, "attached_to_doctype": PRODUCT_DOCTYPE, "attached_to_name": doc.name, "is_private": 0}):
+					frappe.throw(_("Uploaded video must belong to this product."))
+			elif not _safe_url(url):
+				frappe.throw(_("Use an uploaded MP4 or a valid http or https video URL."))
+			if not label:
+				frappe.throw(_("Each video needs a label."))
 			doc.append("videos", {"label": label, "url": url, "display_order": cint(row.get("display_order") or index)})
 
 
