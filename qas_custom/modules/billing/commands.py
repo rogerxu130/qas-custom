@@ -6,7 +6,7 @@ from frappe.utils import flt
 
 from qas_custom.modules.common import has_field, is_new_doc, set_if_field
 from qas_custom.modules.billing.presentation import build_course_invoice_description, invoice_item_schedule
-from qas_custom.modules.billing.invoice_settings import apply_default_invoice_dates, apply_invoice_payment_snapshot
+from qas_custom.modules.billing.invoice_settings import apply_default_invoice_dates, apply_invoice_payment_snapshot, apply_course_invoice_dates
 from qas_custom.modules.notifications.guard import disable_sales_invoice_auto_notifications
 from qas_custom.services.display_labels import (
 	get_course_session_snapshot_label,
@@ -67,7 +67,7 @@ def create_prorata_invoice(inquiry_doc, enrollment, course: str, term: str, star
 	set_if_field(item, "course_session", get_course_session_snapshot_label(start_session))
 	set_if_field(item, "session_count", remaining_session_count)
 	sync_invoice_student_summary(invoice)
-	normalize_course_invoice_dates(invoice)
+	normalize_course_invoice_dates(invoice, enrollment=enrollment, start_session=start_session)
 	apply_invoice_payment_snapshot(invoice)
 
 	if is_new_doc(invoice):
@@ -135,8 +135,8 @@ def get_or_create_course_invoice(customer: str, parent: str | None = None):
 	return invoice
 
 
-def normalize_course_invoice_dates(invoice):
-	apply_default_invoice_dates(invoice, force=True)
+def normalize_course_invoice_dates(invoice, *, enrollment=None, start_session=None):
+	apply_course_invoice_dates(invoice, enrollment=enrollment, start_session=start_session)
 
 
 def sync_invoice_student_summary(invoice):

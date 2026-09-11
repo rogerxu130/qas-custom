@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 
 import frappe
-from frappe.utils import add_days, cint, flt, nowdate
+from frappe.utils import add_days, cint, flt, getdate, nowdate
 
 from qas_custom.modules.common import has_field, set_if_field
 
@@ -193,3 +193,39 @@ def _normalize_store_credit_bonus_rule(row):
 		"applies_to": applies_to,
 		"label": (row.get("label") or "").strip(),
 	}
+
+
+def course_invoice_due_date(posting_date, first_class_date, *, mid_term=False):
+	"""Use calendar days, including weekends, for course payment deadlines."""
+	posting_date, first_class_date = getdate(posting_date), getdate(first_class_date)
+	return add_days(posting_date, 3) if mid_term or (first_class_date - posting_date).days < 7 else add_days(first_class_date, -7)
+
+
+def apply_course_invoice_dates(invoice, *, enrollment=None, start_session=None):
+	"""Set generated draft deadlines from each enrollment's actual first class."""
+	if cint(invoice.get("docstatus")) != 0:
+		return
+	posting_date = invoice.get("posting_date") or nowdate()
+	enrollments = {item.get("enrollment"): None for item in invoice.get("items", []) if item.get("enrollment")}
+	if enrollment is not None:
+		enrollments[enrollment.name] = enrollment
+	deadlines = []
+	for name, row in enrollments.items():
+		row = row if row is not None else frappe.get_doc("Enrollment", name)
+		session = start_session if enrollment is not None and name == enrollment.name else row.get("start_course_session")
+		term = frappe.get_doc("Term", row.get("term"))
+		first = frappe.get_all("Course Sessions", filters={
+			"weekly_timeslot": row.get("weekly_timeslot"),
+			"session_date": ["between", [term.start_date, term.end_date]],
+			"status": ["!=", "Cancelled"],
+		}, fields=["session_date"], order_by="session_date asc", limit=1)
+		first_date = frappe.db.get_value("Course Sessions", session, "session_date") if session else (first[0].session_date if first else None)
+		if not first_date or not first:
+			frappe.throw(frappe._("Cannot calculate course invoice due date: enrollment {0} has no first class date.").format(name))
+		deadlines.append(course_invoice_due_date(posting_date, first_date, mid_term=getdate(first_date) > getdate(first[0].session_date)))
+	if not deadlines:
+		return
+	invoice.posting_date = posting_date
+	invoice.due_date = min(deadlines, key=getdate)
+	for payment in invoice.get("payment_schedule", []):
+		payment.due_date = invoice.due_date

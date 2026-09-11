@@ -48,6 +48,7 @@ from qas_custom.modules.billing.store_credit import (
 from qas_custom.modules.billing.invoice_settings import (
 	SNAPSHOT_FIELD_MAP,
 	apply_default_invoice_dates,
+	apply_course_invoice_dates,
 	apply_invoice_payment_snapshot,
 	get_invoice_settings,
 	update_invoice_settings,
@@ -3238,6 +3239,7 @@ def _create_term_enrollment_invoice(enrollment, start_session):
 		amount=invoice_amount,
 	)
 	_sync_invoice_student_summary(invoice)
+	apply_course_invoice_dates(invoice, enrollment=enrollment, start_session=start_session)
 	apply_invoice_payment_snapshot(invoice)
 	if created:
 		_run_school_admin_invoice_mutation(lambda: invoice.insert(ignore_permissions=True))
