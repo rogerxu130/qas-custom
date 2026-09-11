@@ -157,3 +157,12 @@ class TestConcentratedMakeup(TestCase):
         course = frappe._dict(is_makeup_course=1, accepted_makeup_course=[frappe._dict(course='Art')])
         with patch.object(service.frappe, 'get_doc', side_effect=[frappe._dict(course='Makeup'), course]), patch.object(service, 'session_is_future', return_value=True), patch.object(service, 'classroom_capacity', return_value=10), patch.object(service, 'active_rows', return_value=[]):
             service.validate_configuration(session)
+
+    def test_concentrated_booking_allows_empty_roster_with_concentrated_guards(self):
+        from qas_custom.services import parent_portal_read as parents, support_view
+        from qas_custom.modules.makeup import commands
+        parent = SimpleNamespace(name='P')
+        students = [{'name': 'S'}]
+        with patch.object(support_view, 'reject_support_view_write'), patch.object(parents, '_require_parent', return_value=parent), patch.object(parents, '_get_parent_students', return_value=students), patch.object(commands, 'redeem_parent_voucher_core', return_value={'booking_created': True}) as redeem:
+            self.assertEqual(service.book('MV', 'CS', 'S'), {'booking_created': True})
+        redeem.assert_called_once_with(parent, students, 'MV', 'CS', 'S', concentrated_only=True, allow_empty_sessions=True)

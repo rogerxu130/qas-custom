@@ -2,7 +2,6 @@
 from datetime import datetime
 
 import frappe
-from qas_custom.modules.makeup.eligibility import has_regular_or_trial_student
 from qas_custom.modules.course_schedule.queries import get_teacher_name_map
 from frappe.utils import add_days, cint, getdate, get_time, now_datetime, today
 
@@ -158,8 +157,6 @@ def get_options(student=None):
         if not voucher_ids:
             continue
         rows = active_rows(sid)
-        if not has_regular_or_trial_student(rows):
-            continue
         spots = remaining_places(rows, session.get("concentrated_makeup_capacity"))
         sessions[sid] = {**_build_redeem_session_payload(sid), "teacher": get_teacher_name_map([slot.teacher]).get(slot.teacher, slot.teacher) if slot.get("teacher") else None,
                          "spots_left": spots, "voucher_ids": voucher_ids}
@@ -190,7 +187,7 @@ def book(voucher_id, session_id, student):
     from qas_custom.modules.makeup.commands import redeem_parent_voucher_core
     reject_support_view_write()
     parent = _require_parent()
-    return redeem_parent_voucher_core(parent, _get_parent_students(parent.name), voucher_id, session_id, student, concentrated_only=True)
+    return redeem_parent_voucher_core(parent, _get_parent_students(parent.name), voucher_id, session_id, student, concentrated_only=True, allow_empty_sessions=True)
 
 
 def get_settings(course_session):

@@ -70,13 +70,13 @@ class TestParentMakeupSessionRoster(TestCase):
             eligibility.validate_parent_session_roster("CS")
         fake.throw.assert_not_called()
 
-    def test_concentrated_parent_options_also_exclude_makeup_only_sessions(self):
+    def test_concentrated_parent_options_include_empty_and_makeup_only_sessions(self):
         import frappe
         from qas_custom.services import concentrated_makeup as service
         from qas_custom.services import parent_portal_read as parents
         voucher = frappe._dict(name="MV", student="S", status="Valid", course="Art")
         course = frappe._dict(is_makeup_course=1, accepted_makeup_course=[{"course": "Art"}])
-        fake = SimpleNamespace(get_all=Mock(side_effect=[["MV"], ["occupied", "makeup-only"]]), get_doc=Mock(side_effect=[voucher, course, course]))
+        fake = SimpleNamespace(get_all=Mock(side_effect=[["MV"], ["occupied", "makeup-only", "empty"]]), get_doc=Mock(side_effect=[voucher, course, course, course]))
         with ExitStack() as stack:
             stack.enter_context(patch.object(service, "frappe", fake))
             stack.enter_context(patch.object(service, "today", return_value="2026-09-09"))
@@ -87,6 +87,7 @@ class TestParentMakeupSessionRoster(TestCase):
             stack.enter_context(patch.object(service, "session_context", side_effect=lambda sid: (frappe._dict(name=sid, concentrated_makeup_capacity=5), frappe._dict(course="Makeup"))))
             stack.enter_context(patch.object(service, "session_is_future", return_value=True))
             stack.enter_context(patch.object(service, "student_has_conflict", return_value=False))
-            stack.enter_context(patch.object(service, "active_rows", side_effect=lambda sid: [self.row()] if sid == "occupied" else [{**self.row(), "enrollment_type": "Makeup"}]))
+            stack.enter_context(patch.object(service, "active_rows", side_effect=lambda sid: [] if sid == "empty" else ([self.row()] if sid == "occupied" else [{**self.row(), "enrollment_type": "Makeup"}])))
             result = service.get_options()
-        self.assertEqual([row["session_id"] for row in result["sessions"]], ["occupied"])
+        self.assertEqual([row["session_id"] for row in result["sessions"]], ["empty", "makeup-only", "occupied"])
+        self.assertEqual([row["spots_left"] for row in result["sessions"]], [5, 4, 5])
