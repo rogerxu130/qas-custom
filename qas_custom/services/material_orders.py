@@ -89,11 +89,33 @@ def delete_school_admin_store_product_data(product=None, modified=None):
 		frappe.throw(_("The product changed. Open it again before deleting it."))
 	if frappe.db.exists("Store Order Item", {"store_product": doc.name}):
 		frappe.throw(_("This product has been used in an order and cannot be deleted. Turn off Available to order instead."))
-	# Preserve reusable uploads and the ERP Item. Only remove the catalogue record.
-	frappe.db.set_value("File", {"attached_to_doctype": PRODUCT_DOCTYPE, "attached_to_name": doc.name},
-		{"attached_to_doctype": None, "attached_to_name": None, "attached_to_field": None}, update_modified=False)
+	# Frappe deletes owned attachments through its File lifecycle. Shared media
+	# is detached by StoreProduct.on_trash; the ERP Item remains unchanged.
 	frappe.delete_doc(PRODUCT_DOCTYPE, doc.name, ignore_permissions=True)
 	return {"deleted": doc.name}
+
+
+def preserve_shared_product_files(product):
+	"""Keep a File record when another product references its URL directly.
+
+	Frappe already preserves on-disk content shared by multiple File records;
+	product media tables and rich text can share a URL without another File.
+	"""
+	files = frappe.get_all("File", filters={"attached_to_doctype": PRODUCT_DOCTYPE, "attached_to_name": product}, fields=["name", "file_url"])
+	for file in files:
+		url = str(file.file_url or "")
+		if not url:
+			continue
+		# Saved media can use a relative URL or its absolute backend URL.
+		path = urlparse(url).path
+		urls = list({url, path, frappe.utils.get_url(path)})
+		shared = (
+			frappe.db.exists("Store Product Image", {"parent": ["!=", product], "image": ["in", urls]})
+			or frappe.db.exists("Store Product Video", {"parent": ["!=", product], "url": ["in", urls]})
+			or frappe.db.exists(PRODUCT_DOCTYPE, {"name": ["!=", product], "description": ["like", "%" + path + "%"]})
+		)
+		if shared:
+			frappe.db.set_value("File", file.name, {"attached_to_doctype": None, "attached_to_name": None, "attached_to_field": None}, update_modified=False)
 
 
 def save_school_admin_store_product_data(product=None, payload=None):
