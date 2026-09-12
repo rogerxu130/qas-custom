@@ -78,6 +78,24 @@ def get_school_admin_store_product_data(product=None):
 	return _product_payload(_get_product(product), include_media=True)
 
 
+def delete_school_admin_store_product_data(product=None, modified=None):
+	_require_school_admin()
+	if not product:
+		frappe.throw(_("Choose a product."))
+	if not frappe.db.get_value(PRODUCT_DOCTYPE, product, "name", for_update=True):
+		frappe.throw(_("This product no longer exists. Refresh the product list."))
+	doc = _get_product(product)
+	if not modified or str(doc.modified) != str(modified):
+		frappe.throw(_("The product changed. Open it again before deleting it."))
+	if frappe.db.exists("Store Order Item", {"store_product": doc.name}):
+		frappe.throw(_("This product has been used in an order and cannot be deleted. Turn off Available to order instead."))
+	# Preserve reusable uploads and the ERP Item. Only remove the catalogue record.
+	frappe.db.set_value("File", {"attached_to_doctype": PRODUCT_DOCTYPE, "attached_to_name": doc.name},
+		{"attached_to_doctype": None, "attached_to_name": None, "attached_to_field": None}, update_modified=False)
+	frappe.delete_doc(PRODUCT_DOCTYPE, doc.name, ignore_permissions=True)
+	return {"deleted": doc.name}
+
+
 def save_school_admin_store_product_data(product=None, payload=None):
 	_require_school_admin()
 	data = _payload(payload)
@@ -351,6 +369,11 @@ def _store_order_options(parent_doc, admin=False):
 def _store_order_items(rows):
 	if not isinstance(rows, list) or not rows:
 		frappe.throw(_("Add at least one material product."))
+	# Match the deletion lock; deterministic order prevents multi-product deadlocks.
+	product_names = sorted({str(row.get("store_product") or row.get("product") or "").strip() for row in rows if isinstance(row, dict)})
+	for name in product_names:
+		if name and not frappe.db.get_value(PRODUCT_DOCTYPE, name, "name", for_update=True):
+			frappe.throw(_("A product in this order is no longer available. Refresh the shop."))
 	items, seen = [], set()
 	for raw in rows:
 		if not isinstance(raw, dict):
