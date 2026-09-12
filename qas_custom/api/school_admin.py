@@ -69,6 +69,7 @@ from qas_custom.services.material_orders import (
 	save_school_admin_store_product_category_data,
 	save_school_admin_store_product_data,
 	update_school_admin_store_order_status_data,
+	retry_school_admin_store_order_notification_data,
 	upload_school_admin_store_product_image_data,
 	upload_school_admin_store_product_video_data,
 	delete_school_admin_store_product_video_data,
@@ -463,8 +464,8 @@ def school_admin_upload_store_product_image(product=None):
 
 
 @frappe.whitelist()
-def school_admin_get_store_orders(status=None, query=None, limit=160):
-	return get_school_admin_store_orders_data(status=status, query=query, limit=limit)
+def school_admin_get_store_orders(status=None, query=None, limit=160, campus=None, start=0):
+	return get_school_admin_store_orders_data(status=status, query=query, limit=limit, campus=campus, start=start)
 
 
 @frappe.whitelist()
@@ -1575,3 +1576,8 @@ def school_admin_upload_store_product_video(product=None):
 @frappe.whitelist(methods=["POST"])
 def school_admin_delete_store_product_video(product=None, url=None, modified=None):
 	return delete_school_admin_store_product_video_data(product=product, url=url, modified=modified)
+
+
+@frappe.whitelist()
+def school_admin_retry_store_order_notification(order=None):
+	return retry_school_admin_store_order_notification_data(order=order)

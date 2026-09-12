@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 
 import frappe
 from frappe import _
-from frappe.utils import add_days, cint, flt, now_datetime, nowdate
+from frappe.utils import cint, flt, now_datetime
 from frappe.utils.file_manager import save_file
 
 
@@ -181,26 +181,31 @@ def _is_uploaded_product_video(url):
 	return url.startswith("/files/") and url.lower().endswith(".mp4") and ".." not in url and "?" not in url and "#" not in url
 
 
-def get_school_admin_store_orders_data(status=None, query=None, limit=160):
+def get_school_admin_store_orders_data(status=None, query=None, limit=160, campus=None, start=0):
 	_require_school_admin()
-	filters = {}
+	conditions, values = [], {"limit": _limit(limit, 160, 400) + 1, "start": max(0, cint(start))}
 	if status:
-		filters["status"] = status
-	rows = frappe.get_all(
-		ORDER_DOCTYPE,
-		filters=filters,
-		fields=["name", "parent", "customer", "status", "invoice", "pickup_campus", "pickup_date", "pickup_time", "modified"],
-		order_by="modified desc",
-		limit_page_length=_limit(limit, 160, 400),
+		conditions.append("o.status = %(status)s")
+		values["status"] = status
+	if campus:
+		conditions.append("o.pickup_campus = %(campus)s")
+		values["campus"] = campus
+	if query and str(query).strip():
+		values["query"] = "%" + str(query).strip() + "%"
+		conditions.append("""(o.name LIKE %(query)s OR o.parent LIKE %(query)s
+			OR EXISTS (SELECT 1 FROM `tabParent` p WHERE p.name=o.parent AND p.parent_name LIKE %(query)s)
+			OR EXISTS (SELECT 1 FROM `tabStore Order Item` i WHERE i.parent=o.name AND i.parenttype='Store Order' AND i.product_name LIKE %(query)s))""")
+	where = " AND ".join(conditions) or "1=1"
+	rows = frappe.db.sql(
+		f"SELECT o.name FROM `tabStore Order` o WHERE {where} ORDER BY o.modified DESC, o.name DESC LIMIT %(limit)s OFFSET %(start)s",
+		values, as_dict=True,
 	)
-	items = []
-	needle = str(query or "").strip().lower()
-	for row in rows:
-		payload = _order_payload(frappe.get_doc(ORDER_DOCTYPE, row.name), include_items=True)
-		if needle and needle not in _order_search_text(payload):
-			continue
-		items.append(payload)
-	return {"items": items}
+	page_size = values["limit"] - 1
+	return {
+		"items": [_order_payload(frappe.get_doc(ORDER_DOCTYPE, row.name), include_items=True) for row in rows[:page_size]],
+		"has_more": len(rows) > page_size,
+		"campuses": frappe.get_all("Campus", pluck="name", order_by="name asc", limit_page_length=0),
+	}
 
 
 def get_school_admin_store_order_data(order=None):
@@ -211,14 +216,14 @@ def get_school_admin_store_order_data(order=None):
 def get_school_admin_store_order_options_data(parent=None):
 	_require_school_admin()
 	parent_doc = _get_parent(parent)
-	return {"parent": _parent_payload(parent_doc), "pickup_sessions": _pickup_sessions_for_parent(parent_doc.name)}
+	return _store_order_options(parent_doc, admin=True)
 
 
 def create_school_admin_store_order_data(payload=None):
 	_require_school_admin()
 	data = _payload(payload)
 	parent_doc = _get_parent(data.get("parent"))
-	return _create_store_order(parent_doc, data)
+	return _create_store_order(parent_doc, data, admin=True)
 
 
 def get_parent_store_products_data(limit=80):
@@ -246,7 +251,7 @@ def get_parent_store_products_data(limit=80):
 
 def get_parent_store_order_options_data():
 	parent_doc = _require_parent_shop_testing()
-	return {"parent": _parent_payload(parent_doc), "pickup_sessions": _pickup_sessions_for_parent(parent_doc.name)}
+	return _store_order_options(parent_doc)
 
 
 def get_parent_store_orders_data(limit=80):
@@ -274,115 +279,73 @@ def create_parent_store_order_data(payload=None):
 	return _create_store_order(parent_doc, _payload(payload))
 
 
-def _create_store_order(parent_doc, data):
-	customer = str(parent_doc.get("customer") or "").strip()
-	if not customer:
-		frappe.throw(_("This parent does not have a customer account. Open the family record and save it first."))
-	if not frappe.db.exists("Customer", customer):
-		frappe.throw(_("The parent customer account was not found."))
-	pickup = _validate_pickup_session(parent_doc.name, data.get("pickup_course_session"))
-	items = _store_order_items(data.get("items"))
-	order = frappe.get_doc(
-		{
+def _create_store_order(parent_doc, data, *, admin=False):
+	options = _store_order_options(parent_doc, admin=admin)
+	campus = str(data.get("pickup_campus") or "").strip()
+	if not campus or campus not in {row["name"] for row in options["pickup_campuses"]}:
+		frappe.throw(_("Choose an available pickup campus."))
+	order = frappe.get_doc({
 		"doctype": ORDER_DOCTYPE,
-			"parent": parent_doc.name,
-			"customer": customer,
-			"status": "Ordered",
-			"pickup_course_session": pickup["name"],
-			"pickup_campus": pickup.get("campus"),
-			"pickup_date": pickup.get("session_date"),
-			"pickup_time": pickup.get("start_time") or "",
-			"items": items,
-		}
-	)
+		"parent": parent_doc.name,
+		"status": "Ordered",
+		"pickup_campus": campus,
+		"items": _store_order_items(data.get("items")),
+	})
 	order.insert(ignore_permissions=True)
-	invoice = _create_and_submit_material_invoice(order, parent_doc)
-	order.invoice = invoice.name
-	order.save(ignore_permissions=True)
-	order.add_comment("Comment", _("Store order created by {0}. Invoice: {1}.").format(frappe.session.user, invoice.name))
-	frappe.db.commit()
+	order.add_comment("Comment", _("Store order created by {0}.").format(frappe.session.user))
 	return _order_payload(order, include_items=True)
+
+
+def _locked_order(order):
+	if not order:
+		frappe.throw(_("Choose an order."))
+	# Serialize transitions and notification retries so simultaneous clicks cannot duplicate mail.
+	frappe.db.sql("SELECT name FROM `tabStore Order` WHERE name=%s FOR UPDATE", (order,))
+	return _get_order(order)
 
 
 def update_school_admin_store_order_status_data(order=None, status=None, reason=None):
 	_require_school_admin()
-	doc = _get_order(order)
+	doc = _locked_order(order)
 	status = str(status or "").strip()
 	allowed = {
-		"Ordered": {"Ready for collection", "Cancelled"},
+		"Ordered": {"Ready for collection", "Collected", "Cancelled"},
 		"Ready for collection": {"Collected", "Cancelled"},
 	}
 	if status not in allowed.get(doc.status, set()):
 		frappe.throw(_("This order cannot be changed from {0} to {1}.").format(doc.status, status))
+	doc.status = status
+	prefix = {"Ready for collection": "ready", "Collected": "collected", "Cancelled": "cancelled"}[status]
+	setattr(doc, prefix + "_at", now_datetime())
+	setattr(doc, prefix + "_by", frappe.session.user)
 	if status == "Cancelled":
-		_cancel_order(doc, reason)
-	else:
-		doc.status = status
-		if status == "Ready for collection":
-			doc.ready_at = now_datetime()
-			doc.ready_by = frappe.session.user
-		elif status == "Collected":
-			doc.collected_at = now_datetime()
-			doc.collected_by = frappe.session.user
-		doc.save(ignore_permissions=True)
-		doc.add_comment("Comment", _("Store order marked {0} by {1}.").format(status, frappe.session.user))
-		frappe.db.commit()
+		doc.cancellation_reason = str(reason or "").strip()
+	doc.save(ignore_permissions=True)
+	doc.add_comment("Comment", _("Store order marked {0} by {1}.").format(status, frappe.session.user))
+	if status == "Ready for collection":
+		from qas_custom.modules.notifications.store_order_notifications import queue_ready_notification
+		queue_ready_notification(doc)
 	return _order_payload(doc, include_items=True)
 
 
-def _cancel_order(doc, reason=None):
-	reason = str(reason or "").strip()
-	invoice = frappe.get_doc("Sales Invoice", doc.invoice) if doc.invoice else None
-	if invoice and cint(invoice.docstatus) == 1 and flt(invoice.outstanding_amount) > 0.005:
-		from qas_custom.services.school_admin import cancel_school_admin_invoice_data
-
-		cancel_school_admin_invoice_data(
-			invoice=invoice.name,
-		reason=reason or "Store order cancelled",
-			allow_empty_reason=True,
-			send_notifications=True,
-		)
-	doc.status = "Cancelled"
-	doc.cancelled_at = now_datetime()
-	doc.cancelled_by = frappe.session.user
-	doc.cancellation_reason = reason
-	doc.save(ignore_permissions=True)
-	doc.add_comment(
-		"Comment",
-		_("Store order cancelled by {0}.{1}").format(frappe.session.user, f" Reason: {reason}" if reason else ""),
-	)
-	frappe.db.commit()
+def retry_school_admin_store_order_notification_data(order=None):
+	_require_school_admin()
+	doc = _locked_order(order)
+	if doc.status != "Ready for collection":
+		frappe.throw(_("Only orders ready for collection can send a pickup notification."))
+	from qas_custom.modules.notifications.store_order_notifications import queue_ready_notification
+	queue_ready_notification(doc, retry=True)
+	return _order_payload(doc, include_items=True)
 
 
-def _create_and_submit_material_invoice(order, parent_doc):
-	from qas_custom.services.school_admin import submit_school_admin_invoice_data
-
-	invoice = frappe.new_doc("Sales Invoice")
-	_set_if_field(invoice, "customer", order.customer)
-	_set_if_field(invoice, "due_date", nowdate())
-	_set_if_field(invoice, "parent", order.parent)
-	_set_if_field(invoice, "qas_invoice_type", "Store Order")
-	_set_if_field(invoice, "source_type", "Store Order")
-	_set_if_field(invoice, "source_doctype", ORDER_DOCTYPE)
-	_set_if_field(invoice, "source_document", order.name)
-	_set_if_field(invoice, "qas_is_manual_invoice", 0)
-	_set_if_field(invoice, "qas_apply_store_credit_on_submit", 0)
-	_set_if_field(invoice, "remarks", _("Store order {0}. Pickup: {1} {2} at {3}.").format(order.name, order.pickup_campus or "", order.pickup_date or "", order.pickup_time or ""))
-	for row in order.get("items") or []:
-		invoice.append(
-			"items",
-			{
-				"item_code": row.item_code,
-				"item_name": row.product_name,
-				"description": row.product_name,
-				"qty": cint(row.qty),
-				"rate": flt(row.unit_price),
-			},
-		)
-	invoice.insert(ignore_permissions=True)
-	frappe.db.commit()
-	submit_school_admin_invoice_data(invoice=invoice.name, enqueue_notification=True, send_notifications=True)
-	return frappe.get_doc("Sales Invoice", invoice.name)
+def _store_order_options(parent_doc, admin=False):
+	campuses = frappe.get_all("Campus", filters={"status": "Active"}, fields=["name", "address", "phone"], order_by="name asc", limit_page_length=0)
+	timeslots = frappe.get_all("Enrollment", filters={"parent": parent_doc.name, "status": ["in", ["Planned", "Active"]], "weekly_timeslot": ["is", "set"]}, pluck="weekly_timeslot", limit_page_length=0)
+	enrolled = set(frappe.get_all("Weekly Timeslot", filters={"name": ["in", timeslots]}, pluck="campus", limit_page_length=0)) if timeslots else set()
+	family_campuses = [row for row in campuses if row.name in enrolled]
+	choices = campuses if admin or not family_campuses else family_campuses
+	default = family_campuses[0].name if len(family_campuses) == 1 else (choices[0].name if len(choices) == 1 else "")
+	return {"parent": _parent_payload(parent_doc), "pickup_campuses": choices, "default_campus": default}
 
 
 def _store_order_items(rows):
@@ -393,7 +356,10 @@ def _store_order_items(rows):
 		if not isinstance(raw, dict):
 			continue
 		product_name = str(raw.get("store_product") or raw.get("product") or "").strip()
-		qty = cint(raw.get("qty"))
+		quantity = flt(raw.get("qty"))
+		qty = cint(quantity)
+		if quantity != qty or qty > 9999:
+			frappe.throw(_("Quantity must be a whole number between 1 and 9999."))
 		if not product_name or qty <= 0:
 			frappe.throw(_("Each material order line needs an active product and quantity greater than zero."))
 		if product_name in seen:
@@ -401,9 +367,7 @@ def _store_order_items(rows):
 		product = _get_product(product_name)
 		if not cint(product.active):
 			frappe.throw(_("Inactive product cannot be ordered: {0}.").format(product.product_name))
-		item_code = _ensure_material_item(product)
-		product.item_code = item_code
-		product.save(ignore_permissions=True)
+		item_code = product.get("item_code")
 		seen.add(product_name)
 		items.append(
 			{
@@ -418,59 +382,6 @@ def _store_order_items(rows):
 	if not items:
 		frappe.throw(_("Add at least one material product."))
 	return items
-
-
-def _pickup_sessions_for_parent(parent):
-	timeslots = frappe.get_all(
-		"Enrollment",
-		filters={"parent": parent, "status": ["in", ["Planned", "Active"]], "weekly_timeslot": ["is", "set"]},
-		pluck="weekly_timeslot",
-		limit_page_length=0,
-	)
-	if not timeslots:
-		return []
-	session_filters = {"weekly_timeslot": ["in", sorted(set(timeslots))], "session_date": [">=", nowdate()]}
-	if _has_field("Course Sessions", "status"):
-		session_filters["status"] = ["!=", "Cancelled"]
-	sessions = frappe.get_all(
-		"Course Sessions",
-		filters=session_filters,
-		fields=_safe_fields("Course Sessions", ["name", "weekly_timeslot", "session_date", "status"]),
-		order_by="session_date asc",
-		limit_page_length=0,
-	)
-	if not sessions:
-		return []
-	timeslot_data = {
-		row.name: row
-		for row in frappe.get_all(
-			"Weekly Timeslot",
-			filters={"name": ["in", list({row.weekly_timeslot for row in sessions})]},
-			fields=_safe_fields("Weekly Timeslot", ["name", "campus", "start_time", "course"]),
-			limit_page_length=0,
-		)
-	}
-	return [
-		{
-			"name": row.name,
-			"session_date": row.session_date,
-			"status": row.get("status"),
-			"weekly_timeslot": row.weekly_timeslot,
-			"campus": timeslot_data.get(row.weekly_timeslot, {}).get("campus"),
-			"start_time": str(timeslot_data.get(row.weekly_timeslot, {}).get("start_time") or ""),
-			"course": timeslot_data.get(row.weekly_timeslot, {}).get("course"),
-		}
-		for row in sessions
-	]
-
-
-def _validate_pickup_session(parent, course_session):
-	if not course_session:
-		frappe.throw(_("Choose a future class session for pickup."))
-	for row in _pickup_sessions_for_parent(parent):
-		if row["name"] == course_session:
-			return row
-	frappe.throw(_("Pickup session must be a future class session for this family."))
 
 
 def _ensure_material_item(product):
@@ -596,7 +507,8 @@ def _media_display_order(row, fallback):
 
 
 def _order_payload(doc, include_items=True):
-	invoice = _invoice_payment_payload(doc.invoice)
+	from qas_custom.modules.notifications.store_order_notifications import notification_status
+	notification = notification_status(doc)
 	payload = {
 		"name": doc.name,
 		"parent": doc.parent,
@@ -604,9 +516,10 @@ def _order_payload(doc, include_items=True):
 		"customer": doc.customer,
 		"status": doc.status,
 		"invoice": doc.invoice,
-		"invoice_payment_status": invoice["status"],
-		"invoice_outstanding_amount": invoice["outstanding_amount"],
-		"invoice_total": invoice["total"],
+		"order_total": sum(flt(row.amount) for row in doc.get("items") or []),
+		"pickup_address": frappe.db.get_value("Campus", doc.pickup_campus, "address") if doc.pickup_campus else "",
+		"ready_notification_status": notification["status"],
+		"ready_notification_error": notification["error"],
 		"pickup_course_session": doc.pickup_course_session,
 		"pickup_campus": doc.pickup_campus,
 		"pickup_date": doc.pickup_date,
@@ -630,21 +543,6 @@ def _order_payload(doc, include_items=True):
 			for row in doc.get("items") or []
 		]
 	return payload
-
-
-def _invoice_payment_payload(invoice_name):
-	if not invoice_name or not frappe.db.exists("Sales Invoice", invoice_name):
-		return {"status": "Not created", "outstanding_amount": 0, "total": 0}
-	invoice = frappe.get_doc("Sales Invoice", invoice_name)
-	if cint(invoice.docstatus) == 2:
-		return {"status": "Cancelled", "outstanding_amount": 0, "total": flt(invoice.grand_total)}
-	if cint(invoice.docstatus) == 0:
-		return {"status": "Draft", "outstanding_amount": flt(invoice.grand_total), "total": flt(invoice.grand_total)}
-	return {
-		"status": "Paid" if flt(invoice.outstanding_amount) <= 0.005 else "Unpaid",
-		"outstanding_amount": max(0, flt(invoice.outstanding_amount)),
-		"total": flt(invoice.grand_total),
-	}
 
 
 def _apply_media(doc, data):
@@ -704,7 +602,7 @@ def _order_search_text(payload):
 		[
 			str(payload.get("name") or ""),
 			str(payload.get("parent_name") or ""),
-			str(payload.get("invoice") or ""),
+			str(payload.get("pickup_campus") or ""),
 			*(str(row.get("product_name") or "") for row in payload.get("items") or []),
 		]
 	).lower()

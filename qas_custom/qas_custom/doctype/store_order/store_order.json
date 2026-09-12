@@ -5,35 +5,219 @@
  "doctype": "DocType",
  "document_type": "Document",
  "engine": "InnoDB",
- "field_order": ["parent", "customer", "status", "invoice", "pickup_section", "pickup_course_session", "pickup_campus", "pickup_date", "pickup_time", "items_section", "items", "activity_section", "ready_at", "ready_by", "collected_at", "collected_by", "cancelled_at", "cancelled_by", "cancellation_reason"],
+ "field_order": [
+  "parent",
+  "customer",
+  "status",
+  "invoice",
+  "pickup_section",
+  "pickup_course_session",
+  "pickup_campus",
+  "pickup_date",
+  "pickup_time",
+  "items_section",
+  "items",
+  "activity_section",
+  "ready_at",
+  "ready_by",
+  "collected_at",
+  "collected_by",
+  "cancelled_at",
+  "cancelled_by",
+  "cancellation_reason",
+  "ready_email_queue",
+  "ready_notification_error",
+  "ready_notification_skipped",
+  "ready_email_queued_at"
+ ],
  "fields": [
-  {"fieldname": "parent", "fieldtype": "Link", "in_list_view": 1, "label": "Parent", "options": "Parent", "reqd": 1},
-  {"fieldname": "customer", "fieldtype": "Link", "in_list_view": 1, "label": "Customer", "options": "Customer", "reqd": 1},
-  {"default": "Ordered", "fieldname": "status", "fieldtype": "Select", "in_list_view": 1, "label": "Status", "options": "Ordered\nReady for collection\nCollected\nCancelled", "reqd": 1},
-  {"fieldname": "invoice", "fieldtype": "Link", "in_list_view": 1, "label": "Store Invoice", "options": "Sales Invoice", "read_only": 1},
-  {"fieldname": "pickup_section", "fieldtype": "Section Break", "label": "Pickup appointment"},
-  {"fieldname": "pickup_course_session", "fieldtype": "Link", "label": "Pickup Course Session", "options": "Course Sessions", "reqd": 1},
-  {"fieldname": "pickup_campus", "fieldtype": "Link", "label": "Pickup Campus", "options": "Campus", "read_only": 1},
-  {"fieldname": "pickup_date", "fieldtype": "Date", "label": "Pickup Date", "read_only": 1},
-  {"fieldname": "pickup_time", "fieldtype": "Data", "label": "Pickup Time", "read_only": 1},
-  {"fieldname": "items_section", "fieldtype": "Section Break", "label": "Order items"},
-  {"fieldname": "items", "fieldtype": "Table", "label": "Items", "options": "Store Order Item", "reqd": 1},
-  {"fieldname": "activity_section", "fieldtype": "Section Break", "label": "Activity"},
-  {"fieldname": "ready_at", "fieldtype": "Datetime", "label": "Ready at", "read_only": 1},
-  {"fieldname": "ready_by", "fieldtype": "Link", "label": "Ready by", "options": "User", "read_only": 1},
-  {"fieldname": "collected_at", "fieldtype": "Datetime", "label": "Collected at", "read_only": 1},
-  {"fieldname": "collected_by", "fieldtype": "Link", "label": "Collected by", "options": "User", "read_only": 1},
-  {"fieldname": "cancelled_at", "fieldtype": "Datetime", "label": "Cancelled at", "read_only": 1},
-  {"fieldname": "cancelled_by", "fieldtype": "Link", "label": "Cancelled by", "options": "User", "read_only": 1},
-  {"fieldname": "cancellation_reason", "fieldtype": "Small Text", "label": "Cancellation reason", "read_only": 1}
+  {
+   "fieldname": "parent",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Parent",
+   "options": "Parent",
+   "reqd": 1
+  },
+  {
+   "fieldname": "customer",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Customer",
+   "options": "Customer",
+   "reqd": 0,
+   "hidden": 1
+  },
+  {
+   "default": "Ordered",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Status",
+   "options": "Ordered\nReady for collection\nCollected\nCancelled",
+   "reqd": 1
+  },
+  {
+   "fieldname": "invoice",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Store Invoice",
+   "options": "Sales Invoice",
+   "read_only": 1,
+   "hidden": 1
+  },
+  {
+   "fieldname": "pickup_section",
+   "fieldtype": "Section Break",
+   "label": "Pickup campus"
+  },
+  {
+   "fieldname": "pickup_course_session",
+   "fieldtype": "Link",
+   "label": "Pickup Course Session",
+   "options": "Course Sessions",
+   "reqd": 0,
+   "hidden": 1
+  },
+  {
+   "fieldname": "pickup_campus",
+   "fieldtype": "Link",
+   "label": "Pickup Campus",
+   "options": "Campus",
+   "read_only": 0,
+   "reqd": 1
+  },
+  {
+   "fieldname": "pickup_date",
+   "fieldtype": "Date",
+   "label": "Pickup Date",
+   "read_only": 1,
+   "hidden": 1
+  },
+  {
+   "fieldname": "pickup_time",
+   "fieldtype": "Data",
+   "label": "Pickup Time",
+   "read_only": 1,
+   "hidden": 1
+  },
+  {
+   "fieldname": "items_section",
+   "fieldtype": "Section Break",
+   "label": "Order items"
+  },
+  {
+   "fieldname": "items",
+   "fieldtype": "Table",
+   "label": "Items",
+   "options": "Store Order Item",
+   "reqd": 1
+  },
+  {
+   "fieldname": "activity_section",
+   "fieldtype": "Section Break",
+   "label": "Activity"
+  },
+  {
+   "fieldname": "ready_at",
+   "fieldtype": "Datetime",
+   "label": "Ready at",
+   "read_only": 1
+  },
+  {
+   "fieldname": "ready_by",
+   "fieldtype": "Link",
+   "label": "Ready by",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "collected_at",
+   "fieldtype": "Datetime",
+   "label": "Collected at",
+   "read_only": 1
+  },
+  {
+   "fieldname": "collected_by",
+   "fieldtype": "Link",
+   "label": "Collected by",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "cancelled_at",
+   "fieldtype": "Datetime",
+   "label": "Cancelled at",
+   "read_only": 1
+  },
+  {
+   "fieldname": "cancelled_by",
+   "fieldtype": "Link",
+   "label": "Cancelled by",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "cancellation_reason",
+   "fieldtype": "Small Text",
+   "label": "Cancellation reason",
+   "read_only": 1
+  },
+  {
+   "fieldname": "ready_email_queue",
+   "fieldtype": "Data",
+   "label": "Ready email queue",
+   "read_only": 1,
+   "description": "Email Queue ID retained for audit; delivery records may be purged independently."
+  },
+  {
+   "fieldname": "ready_notification_error",
+   "fieldtype": "Small Text",
+   "label": "Ready notification error",
+   "read_only": 1
+  },
+  {
+   "fieldname": "ready_notification_skipped",
+   "fieldtype": "Check",
+   "label": "Ready notification skipped",
+   "read_only": 1
+  },
+  {
+   "fieldname": "ready_email_queued_at",
+   "fieldtype": "Datetime",
+   "label": "Ready email queued at",
+   "read_only": 1
+  }
  ],
  "index_web_pages_for_search": 1,
  "links": [],
  "module": "QAS Custom",
  "name": "Store Order",
  "permissions": [
-  {"create": 1, "delete": 1, "email": 1, "export": 1, "print": 1, "read": 1, "report": 1, "role": "System Manager", "share": 1, "write": 1},
-  {"create": 1, "delete": 0, "email": 1, "export": 1, "print": 1, "read": 1, "report": 1, "role": "School Admin", "share": 1, "write": 1}
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "School Admin",
+   "share": 1,
+   "write": 1
+  }
  ],
  "sort_field": "modified",
  "sort_order": "DESC",
