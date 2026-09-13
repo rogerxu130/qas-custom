@@ -93,7 +93,7 @@ class StoreOrderPickupTests(TestCase):
 
  def test_parent_detail_enforces_ownership(self):
   doc=self.doc()
-  with patch.object(orders,'_require_parent_shop_testing',return_value=frappe._dict(name='OTHER')),patch.object(orders,'_get_order',return_value=doc),self.assertRaises(ValueError):orders.get_parent_store_order_data(doc.name)
+  with patch.object(orders,'_require_parent_shop',return_value=frappe._dict(name='OTHER')),patch.object(orders,'_get_order',return_value=doc),self.assertRaises(ValueError):orders.get_parent_store_order_data(doc.name)
 
  def test_parent_status_mutation_requires_admin(self):
   with patch.object(orders,'_require_school_admin',side_effect=PermissionError),patch.object(orders,'_locked_order') as lock,self.assertRaises(PermissionError):orders.update_school_admin_store_order_status_data('ORD','Collected')
@@ -164,3 +164,17 @@ class StoreOrderPickupTests(TestCase):
    mail.queue_ready_notification(doc,retry=True);send.assert_not_called()
   schema=json.loads((Path(orders.__file__).parents[1]/'qas_custom/doctype/store_order/store_order.json').read_text())
   self.assertEqual(next(f for f in schema['fields'] if f['fieldname']=='ready_email_queue')['fieldtype'],'Data')
+
+ def test_shop_accepts_any_linked_parent(self):
+  frappe.session.user = 'ordinary-parent@example.com'
+  parent = frappe._dict(name='Family')
+  with patch.object(frappe, 'get_cached_doc', return_value=parent):
+   self.assertEqual(orders._require_parent_shop(), parent)
+  self.db.get_value.assert_called_with('Parent', {'linked_user': 'ordinary-parent@example.com'}, 'name')
+
+ def test_shop_rejects_guest_and_unlinked_account(self):
+  for user in ['Guest', 'unlinked@example.com']:
+   frappe.session.user = user
+   self.db.get_value.return_value = None
+   with self.assertRaises(ValueError):
+    orders._require_parent_shop()

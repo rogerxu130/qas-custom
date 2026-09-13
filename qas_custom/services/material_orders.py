@@ -286,7 +286,7 @@ def create_school_admin_store_order_data(payload=None):
 
 
 def get_parent_store_products_data(limit=80):
-	parent_doc = _require_parent_shop_testing()
+	parent_doc = _require_parent_shop()
 	rows = frappe.get_all(
 		PRODUCT_DOCTYPE,
 		filters={"active": 1},
@@ -309,12 +309,12 @@ def get_parent_store_products_data(limit=80):
 
 
 def get_parent_store_order_options_data():
-	parent_doc = _require_parent_shop_testing()
+	parent_doc = _require_parent_shop()
 	return _store_order_options(parent_doc)
 
 
 def get_parent_store_orders_data(limit=80):
-	parent_doc = _require_parent_shop_testing()
+	parent_doc = _require_parent_shop()
 	rows = frappe.get_all(
 		ORDER_DOCTYPE,
 		filters={"parent": parent_doc.name},
@@ -326,7 +326,7 @@ def get_parent_store_orders_data(limit=80):
 
 
 def get_parent_store_order_data(order=None):
-	parent_doc = _require_parent_shop_testing()
+	parent_doc = _require_parent_shop()
 	doc = _get_order(order)
 	if doc.parent != parent_doc.name:
 		frappe.throw(_("This order does not belong to your family."), frappe.PermissionError)
@@ -334,7 +334,7 @@ def get_parent_store_order_data(order=None):
 
 
 def create_parent_store_order_data(payload=None):
-	parent_doc = _require_parent_shop_testing()
+	parent_doc = _require_parent_shop()
 	return _create_store_order(parent_doc, _payload(payload))
 
 
@@ -691,12 +691,9 @@ def _require_school_admin():
 		frappe.throw(_("School Admin access is required."), frappe.PermissionError)
 
 
-def _require_parent_shop_testing():
-	from qas_custom.config.shop_testing import require_parent_shop_testing
-
+def _require_parent_shop():
 	if frappe.session.user == "Guest":
 		frappe.throw(_("Login required."), frappe.PermissionError)
-	require_parent_shop_testing()
 	parent_name = frappe.db.get_value("Parent", {"linked_user": frappe.session.user}, "name")
 	if not parent_name:
 		frappe.throw(_("No parent record is linked to this account."), frappe.PermissionError)
