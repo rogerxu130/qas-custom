@@ -2,7 +2,7 @@
 from urllib.parse import quote
 
 import frappe
-from frappe.utils import escape_html, now_datetime, flt, get_url
+from frappe.utils import escape_html, now_datetime, flt
 
 from qas_custom.modules.notifications.makeup_parent_notifications import _parent_portal_url, _parent_recipient
 from qas_custom.utils.environment import email_block_reason, outbound_email_enabled, sendmail_or_skip
@@ -89,7 +89,7 @@ def new_order_email_content(doc):
 		for row in doc.get("items") or []
 	)
 	total = sum(flt(row.amount) for row in doc.get("items") or [])
-	url = get_url("/app/store-order/" + quote(doc.name, safe=""))
+	url = _parent_portal_url("/school-admin?tab=materials&order=" + quote(doc.name, safe=""))
 	return f"""<h2>New Shop order</h2>
 <p><strong>Order:</strong> {escape_html(doc.name)}<br>
 <strong>Parent:</strong> {escape_html(parent_name)}<br>
@@ -118,6 +118,20 @@ def queue_new_order_admin_notification(doc):
 		)
 		if not (isinstance(queue, dict) and queue.get("skipped")) and not getattr(queue, "name", None):
 			raise ValueError("New order email could not be queued.")
+		if getattr(queue, "name", None):
+			try:
+				frappe.enqueue(
+					"qas_custom.modules.notifications.store_order_notifications.send_new_order_email_queue",
+					queue="short", enqueue_after_commit=True, queue_name=queue.name,
+				)
+			except Exception:
+				# The durable Email Queue remains available to the scheduled sender.
+				frappe.log_error(title="Store order immediate email scheduling failed", message=frappe.get_traceback())
 	except Exception:
 		frappe.db.rollback(save_point="store_new_order_email")
 		frappe.log_error(title="Store order School Admin email failed", message=frappe.get_traceback())
+
+
+def send_new_order_email_queue(queue_name):
+	if outbound_email_enabled():
+		frappe.get_doc("Email Queue", queue_name).send()
