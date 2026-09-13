@@ -1,3 +1,4 @@
+from itertools import product
 from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import Mock, call, patch
@@ -48,16 +49,25 @@ class TestInvoiceAccountMutation(TestCase):
 
 		self.assertEqual(session.user, "campus@example.com")
 
-	def test_prorata_invoice_insert_and_update_use_protected_mutation(self):
-		for is_new in (True, False):
-			with self.subTest(is_new=is_new):
+	@patch("frappe.get_system_settings", return_value="Commercial Rounding")
+	@patch("qas_custom.modules.billing.commands._", side_effect=lambda text: text)
+	def test_prorata_invoice_insert_and_update_use_protected_mutation(self, _translate, _settings):
+		for is_new, (session_count, expected_amount) in product(
+			(True, False), ((9, 690), (8, 613.33), (1, 76.67), (10, 690))
+		):
+			with self.subTest(is_new=is_new, session_count=session_count):
 				invoice = Mock()
 				invoice.append.return_value = Mock()
 				inquiry = SimpleNamespace(name="INQ-001", parent="PARENT-001", student="STUDENT-001")
 				enrollment = SimpleNamespace(name="ENROLL-001", weekly_timeslot="TS-001")
 				with patch(
-					"qas_custom.modules.billing.commands.get_prorata_invoice_context",
-					return_value={"customer": "CUSTOMER-001", "item_code": "ITEM-001", "unit_rate": 50},
+					"qas_custom.modules.billing.commands.get_course_money", return_value=690,
+				), patch(
+					"qas_custom.modules.billing.commands.get_course_number", return_value=9,
+				), patch(
+					"qas_custom.modules.billing.commands.get_invoice_customer", return_value="CUSTOMER-001",
+				), patch(
+					"qas_custom.modules.billing.commands.get_invoice_item", return_value="ITEM-001",
 				), patch(
 					"qas_custom.modules.billing.commands.get_or_create_course_invoice",
 					return_value=invoice,
@@ -92,9 +102,15 @@ class TestInvoiceAccountMutation(TestCase):
 						course="Anime Art",
 						term="TERM-001",
 						start_session="SESSION-001",
-						remaining_session_count=5,
+						remaining_session_count=session_count,
 					)
 
+				line = invoice.append.call_args.args[1]
+				self.assertEqual(line["qty"], 1)
+				self.assertEqual(line["rate"], expected_amount)
+				self.assertTrue(line["description"].endswith(
+					f"{session_count} session" + ("s" if session_count != 1 else "")
+				))
 				self.assertIs(result, invoice)
 				run_mutation.assert_called_once()
 				if is_new:

@@ -54,6 +54,7 @@ from qas_custom.modules.billing.invoice_settings import (
 	update_invoice_settings,
 )
 from qas_custom.modules.billing.commands import (
+	enrollment_invoice_amount as _enrollment_invoice_amount,
 	get_course_money,
 	get_course_number,
 	get_invoice_customer,
@@ -3301,17 +3302,6 @@ def _invoice_has_enrollment_item(invoice, enrollment_name):
 	if not enrollment_name:
 		return False
 	return any(item.get("enrollment") == enrollment_name for item in invoice.get("items", []))
-
-
-def _enrollment_invoice_amount(full_term_fee, total_sessions, session_count):
-	full_term_fee = flt(full_term_fee)
-	total_sessions = flt(total_sessions)
-	session_count = flt(session_count)
-	if total_sessions <= 0 or session_count <= 0:
-		return 0
-	if session_count >= total_sessions:
-		return flt(full_term_fee, 2)
-	return flt(full_term_fee * session_count / total_sessions, 2)
 
 
 def _append_enrollment_invoice_item(invoice, *, enrollment, start_session, item_code, course, session_count, amount):

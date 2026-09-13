@@ -27,6 +27,17 @@ def run_invoice_mutation_as_administrator(callback):
 		frappe.set_user(original_user)
 
 
+def enrollment_invoice_amount(full_term_fee, total_sessions, session_count):
+	full_term_fee = flt(full_term_fee)
+	total_sessions = flt(total_sessions)
+	session_count = flt(session_count)
+	if total_sessions <= 0 or session_count <= 0:
+		return 0
+	if session_count >= total_sessions:
+		return flt(full_term_fee, 2)
+	return flt(full_term_fee * session_count / total_sessions, 2)
+
+
 def create_prorata_invoice(inquiry_doc, enrollment, course: str, term: str, start_session: str, remaining_session_count: int):
 	context = get_prorata_invoice_context(
 		inquiry_doc=inquiry_doc,
@@ -35,7 +46,7 @@ def create_prorata_invoice(inquiry_doc, enrollment, course: str, term: str, star
 	)
 	customer = context["customer"]
 	item_code = context["item_code"]
-	unit_rate = context["unit_rate"]
+	invoice_amount = context["invoice_amount"]
 
 	invoice = get_or_create_course_invoice(customer, inquiry_doc.parent)
 	set_if_field(invoice, "parent", inquiry_doc.parent)
@@ -53,8 +64,8 @@ def create_prorata_invoice(inquiry_doc, enrollment, course: str, term: str, star
 			"item_code": item_code,
 			"item_name": course,
 			"description": description,
-			"qty": remaining_session_count,
-			"rate": unit_rate,
+			"qty": 1,
+			"rate": invoice_amount,
 		},
 	)
 	set_if_field(item, "qas_line_type", "Course Fee")
@@ -88,6 +99,7 @@ def get_prorata_invoice_context(inquiry_doc, course: str, remaining_session_coun
 		"customer": get_invoice_customer(inquiry_doc.parent),
 		"item_code": get_invoice_item(course),
 		"unit_rate": flt(full_term_fee) / flt(total_sessions),
+		"invoice_amount": enrollment_invoice_amount(full_term_fee, total_sessions, remaining_session_count),
 		"remaining_session_count": remaining_session_count,
 	}
 
