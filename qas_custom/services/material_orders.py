@@ -128,6 +128,7 @@ def preserve_shared_product_files(product):
 		shared = (
 			frappe.db.exists("Store Product Image", {"parent": ["!=", product], "image": ["in", urls]})
 			or frappe.db.exists("Store Product Video", {"parent": ["!=", product], "url": ["in", urls]})
+			or frappe.db.exists("Store Product Video", {"parent": ["!=", product], "poster": ["in", urls]})
 			or frappe.db.exists(PRODUCT_DOCTYPE, {"name": ["!=", product], "description": ["like", "%" + path + "%"]})
 		)
 		if shared:
@@ -156,13 +157,13 @@ def save_school_admin_store_product_data(product=None, payload=None):
 	return _product_payload(doc, include_media=True)
 
 
-def upload_school_admin_store_product_image_data(product=None):
+def upload_school_admin_store_product_image_data(product=None, purpose=None):
 	_require_school_admin()
 	doc = _get_product(product)
 	upload = frappe.request.files.get("image") if frappe.request else None
 	if not upload:
 		frappe.throw(_("Choose an image to upload."))
-	content = upload.read()
+	content = upload.read(MAX_IMAGE_BYTES + 1)
 	if not content or len(content) > MAX_IMAGE_BYTES:
 		frappe.throw(_("Images must be 8 MB or smaller."))
 	image_type = imghdr.what(None, h=content)
@@ -172,6 +173,8 @@ def upload_school_admin_store_product_image_data(product=None):
 	file_doc = save_file(
 		f"{base_name}.{IMAGE_FORMATS[image_type]}", content, PRODUCT_DOCTYPE, doc.name, is_private=0, df="images"
 	)
+	if purpose == "video_cover":
+		return {"image": file_doc.file_url}
 	next_order = max((_media_display_order(row, index) for index, row in enumerate(doc.get("images") or [])), default=-1) + 1
 	doc.append("images", {"image": file_doc.file_url, "display_order": next_order})
 	doc.save(ignore_permissions=True)
@@ -491,7 +494,7 @@ def _product_payload(doc, include_media=True):
 			if row.image
 		]
 		payload["videos"] = [
-			{"label": row.label, "url": row.url, "playback_type": "file" if _is_uploaded_product_video(row.url or "") else "external", "display_order": _media_display_order(row, index)}
+			{"label": row.label, "url": row.url, "poster": row.get("poster") or "", "playback_type": "file" if _is_uploaded_product_video(row.url or "") else "external", "display_order": _media_display_order(row, index)}
 			for index, row in _ordered_media(doc.get("videos") or [])
 		]
 	return payload
@@ -628,7 +631,10 @@ def _apply_media(doc, data):
 				frappe.throw(_("Use an uploaded MP4 or a valid http or https video URL."))
 			if not label:
 				frappe.throw(_("Each video needs a label."))
-			doc.append("videos", {"label": label, "url": url, "display_order": cint(row.get("display_order") or index)})
+			poster = str(row.get("poster") or "").strip()
+			if poster and not frappe.db.exists("File", {"file_url": poster, "attached_to_doctype": PRODUCT_DOCTYPE, "attached_to_name": doc.name, "is_private": 0}):
+				frappe.throw(_("Video cover must be an image uploaded to this product."))
+			doc.append("videos", {"label": label, "url": url, "poster": poster, "display_order": cint(row.get("display_order") or index)})
 
 
 def _safe_url(value):

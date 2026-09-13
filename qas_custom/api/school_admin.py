@@ -466,8 +466,8 @@ def school_admin_save_store_product_category(category=None, payload=None):
 
 
 @frappe.whitelist()
-def school_admin_upload_store_product_image(product=None):
-	return upload_school_admin_store_product_image_data(product=product)
+def school_admin_upload_store_product_image(product=None, purpose=None):
+	return upload_school_admin_store_product_image_data(product=product, purpose=purpose)
 
 
 @frappe.whitelist()

@@ -69,7 +69,7 @@ class TestStoreProductDelete(TestCase):
         files = [frappe._dict(name="image", file_url="/files/image.png"), frappe._dict(name="video", file_url="/files/video.mp4"), frappe._dict(name="owned", file_url="/files/owned.png")]
         def exists(doctype, filters):
             return ((doctype == "Store Product Image" and "/files/image.png" in filters["image"][1]) or
-                    (doctype == "Store Product Video" and "/files/video.mp4" in filters["url"][1]))
+                    (doctype == "Store Product Video" and "/files/video.mp4" in filters.get("url", ["in", []])[1]))
         self.db.exists.side_effect = exists
         with patch.object(frappe, "get_all", return_value=files), patch("frappe.utils.get_url", side_effect=lambda path: "https://system.example" + path):
             service.preserve_shared_product_files("P1")
@@ -87,3 +87,9 @@ class TestStoreProductDelete(TestCase):
         with patch.object(service, "preserve_shared_product_files") as preserve:
             StoreProduct.on_trash(self.doc)
         preserve.assert_called_once_with("P1")
+
+    def test_shared_video_cover_is_preserved(self):
+        self.db.exists.side_effect = lambda doctype, filters: doctype == "Store Product Video" and "poster" in filters
+        with patch.object(frappe, "get_all", return_value=[frappe._dict(name="cover", file_url="/files/cover.png")]), patch("frappe.utils.get_url", side_effect=lambda path: path):
+            service.preserve_shared_product_files("P1")
+        self.assertEqual(self.db.set_value.call_args.args[1], "cover")

@@ -83,3 +83,25 @@ class TestStoreProductVideo(TestCase):
                             service.delete_school_admin_store_product_video_data(**args)
                         delete.assert_not_called()
                         doc.save.assert_not_called()
+
+    def test_cover_upload_attaches_file_without_adding_gallery_image(self):
+        doc = Mock()
+        doc.name = 'P1'
+        upload = BytesIO(b'valid-image')
+        upload.filename = 'cover.png'
+        with patch.object(service, '_require_school_admin'), patch.object(service, '_get_product', return_value=doc), patch.object(frappe, 'request', SimpleNamespace(files={'image': upload})), patch.object(service.imghdr, 'what', return_value='png'), patch.object(service, 'save_file', return_value=SimpleNamespace(file_url='/files/cover.png')):
+            self.assertEqual(service.upload_school_admin_store_product_image_data('P1', 'video_cover'), {'image': '/files/cover.png'})
+        doc.append.assert_not_called()
+        doc.save.assert_not_called()
+
+    def test_cover_survives_save_and_unowned_cover_is_rejected(self):
+        doc = Mock()
+        doc.name = 'P1'
+        data = {'videos': [{'label': 'Demo', 'url': 'https://youtube.com/watch?v=example', 'poster': '/files/cover.png'}]}
+        with patch.object(frappe, 'db', SimpleNamespace(exists=Mock(return_value=True))):
+            service._apply_media(doc, data)
+        self.assertEqual(doc.append.call_args.args[1]['poster'], '/files/cover.png')
+        doc.append.reset_mock()
+        with patch.object(frappe, 'db', SimpleNamespace(exists=Mock(return_value=False))), self.assertRaises(ValueError):
+            service._apply_media(doc, data)
+        doc.append.assert_not_called()
