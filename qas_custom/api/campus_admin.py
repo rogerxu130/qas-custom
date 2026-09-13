@@ -280,3 +280,31 @@ def campus_admin_reschedule_inquiry(inquiry=None, payload=None):
 @frappe.whitelist()
 def campus_admin_assign_inquiry_course_session(inquiry=None, course_session=None):
 	frappe.throw("Trial lesson scheduling is managed by School Admin.", frappe.PermissionError)
+
+
+@frappe.whitelist()
+def campus_admin_get_store_orders(status=None, query=None, limit=160, campus=None, start=0):
+	from qas_custom.services.material_orders import get_school_admin_store_orders_data
+	return get_school_admin_store_orders_data(status, query, limit, campus, start, campus_admin=True)
+
+
+@frappe.whitelist()
+def campus_admin_get_store_order(order=None):
+	from qas_custom.services.material_orders import get_school_admin_store_order_data
+	return get_school_admin_store_order_data(order, campus_admin=True)
+
+
+@frappe.whitelist()
+def campus_admin_update_store_order_status(order=None, status=None, reason=None):
+	from qas_custom.services.support_view import reject_support_view_write
+	reject_support_view_write()
+	from qas_custom.services.material_orders import update_school_admin_store_order_status_data
+	return update_school_admin_store_order_status_data(order, status, reason, campus_admin=True)
+
+
+@frappe.whitelist()
+def campus_admin_retry_store_order_notification(order=None):
+	from qas_custom.services.support_view import reject_support_view_write
+	reject_support_view_write()
+	from qas_custom.services.material_orders import retry_school_admin_store_order_notification_data
+	return retry_school_admin_store_order_notification_data(order, campus_admin=True)

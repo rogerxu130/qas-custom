@@ -82,14 +82,15 @@ def school_admin_order_recipients():
 	return sorted({email.strip().lower() for email in emails if email and email.strip()})
 
 
-def new_order_email_content(doc):
+def new_order_email_content(doc, *, campus_admin=False):
 	parent_name = frappe.db.get_value("Parent", doc.parent, "parent_name") or doc.parent
 	rows = "".join(
 		f"<tr><td>{escape_html(row.product_name)}</td><td>{flt(row.qty):g}</td><td>A${flt(row.amount):.2f}</td></tr>"
 		for row in doc.get("items") or []
 	)
 	total = sum(flt(row.amount) for row in doc.get("items") or [])
-	url = _parent_portal_url("/school-admin?tab=materials&order=" + quote(doc.name, safe=""))
+	path = "/campus-admin?tab=orders&order=" if campus_admin else "/school-admin?tab=materials&order="
+	url = _parent_portal_url(path + quote(doc.name, safe=""))
 	return f"""<h2>New Shop order</h2>
 <p><strong>Order:</strong> {escape_html(doc.name)}<br>
 <strong>Parent:</strong> {escape_html(parent_name)}<br>
@@ -100,19 +101,39 @@ def new_order_email_content(doc):
 <p><a href="{escape_html(url)}">View order</a></p>"""
 
 
+def campus_admin_order_recipients(campus):
+	if not campus:
+		return []
+	rows = frappe.db.sql("""
+		SELECT DISTINCT u.email FROM `tabCampus Admin Profile` p
+		JOIN `tabCampus Admin Profile Campus` c ON c.parent = p.name
+		  AND c.parenttype = 'Campus Admin Profile' AND c.parentfield = 'campuses'
+		JOIN `tabUser` u ON u.name = p.user
+		WHERE p.active = 1 AND u.enabled = 1 AND c.campus = %(campus)s
+	""", {"campus": campus}, as_dict=True)
+	return sorted({row.email.strip().lower() for row in rows if row.email and row.email.strip()})
+
+
 def queue_new_order_admin_notification(doc):
+	_queue_new_order_admin_notification(doc)
+	_queue_new_order_admin_notification(doc, campus_admin=True)
+
+
+def _queue_new_order_admin_notification(doc, *, campus_admin=False):
 	"""Insert once with the order transaction; transport runs after commit.
 
 	Preparation failures are logged without undoing a customer's order.
 	"""
 	frappe.db.savepoint("store_new_order_email")
 	try:
-		recipients = school_admin_order_recipients()
+		recipients = campus_admin_order_recipients(doc.pickup_campus) if campus_admin else school_admin_order_recipients()
+		if campus_admin and not recipients:
+			return
 		if not recipients:
 			raise ValueError("No enabled School Admin user has an email address.")
 		queue = sendmail_or_skip(
 			action="store_order_created", recipients=recipients,
-			subject=f"New Shop order: {doc.name}", message=new_order_email_content(doc),
+			subject=f"New Shop order: {doc.name}", message=new_order_email_content(doc, campus_admin=True) if campus_admin else new_order_email_content(doc),
 			reference_doctype="Store Order", reference_name=doc.name,
 			now=False, delayed=True,
 		)
@@ -129,7 +150,7 @@ def queue_new_order_admin_notification(doc):
 				frappe.log_error(title="Store order immediate email scheduling failed", message=frappe.get_traceback())
 	except Exception:
 		frappe.db.rollback(save_point="store_new_order_email")
-		frappe.log_error(title="Store order School Admin email failed", message=frappe.get_traceback())
+		frappe.log_error(title="Store order admin email failed", message=frappe.get_traceback())
 
 
 def send_new_order_email_queue(queue_name):

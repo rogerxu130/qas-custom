@@ -178,3 +178,42 @@ class StoreOrderPickupTests(TestCase):
    self.db.get_value.return_value = None
    with self.assertRaises(ValueError):
     orders._require_parent_shop()
+
+ def test_campus_list_restricts_both_assigned_campuses_even_with_foreign_filter(self):
+  self.db.sql.return_value = []
+  with patch.object(orders, '_order_admin_campuses', return_value=['North', 'South']):
+   data = orders.get_school_admin_store_orders_data(campus='Other', campus_admin=True)
+  sql, values = self.db.sql.call_args.args
+  self.assertIn('o.pickup_campus IN %(allowed_campuses)s', sql)
+  self.assertEqual(values['allowed_campuses'], ('North', 'South'))
+  self.assertEqual(values['campus'], 'Other')
+  self.assertEqual(data['campuses'], ['North', 'South'])
+
+ def test_campus_cannot_read_mutate_or_notify_foreign_order(self):
+  doc = self.doc()
+  with patch.object(orders, '_order_admin_campuses', return_value=['South']), patch.object(orders, '_get_order', return_value=doc), patch.object(orders, '_locked_order', return_value=doc), patch.object(mail, 'queue_ready_notification') as notify:
+   for call in [lambda: orders.get_school_admin_store_order_data(doc.name, campus_admin=True), lambda: orders.update_school_admin_store_order_status_data(doc.name, 'Collected', campus_admin=True), lambda: orders.retry_school_admin_store_order_notification_data(doc.name, campus_admin=True)]:
+    with self.assertRaises(ValueError): call()
+   doc.save.assert_not_called()
+   notify.assert_not_called()
+
+ def test_campus_can_collect_order_in_either_assigned_campus(self):
+  for campus in ['North', 'South']:
+   doc = self.doc(); doc.pickup_campus = campus
+   with patch.object(orders, '_order_admin_campuses', return_value=['North', 'South']), patch.object(orders, '_locked_order', return_value=doc), patch.object(orders, '_order_payload', return_value={}):
+    orders.update_school_admin_store_order_status_data(doc.name, 'Collected', campus_admin=True)
+   self.assertEqual(doc.status, 'Collected'); doc.save.assert_called_once()
+
+ def test_campus_notification_recipients_query_uses_active_assignment(self):
+  self.db.sql.return_value = [frappe._dict(email='Admin@example.com'), frappe._dict(email='admin@example.com')]
+  self.assertEqual(mail.campus_admin_order_recipients('South'), ['admin@example.com'])
+  sql, values = self.db.sql.call_args.args
+  self.assertEqual(values, {'campus':'South'})
+  for condition in ['p.active = 1', 'u.enabled = 1', 'c.campus = %(campus)s']:
+   self.assertIn(condition, sql)
+
+ def test_campus_email_targets_campus_portal_order(self):
+  with patch.object(mail, '_parent_portal_url', side_effect=lambda path:'https://portal.example'+path):
+   html = mail.new_order_email_content(self.doc(), campus_admin=True)
+  self.assertIn('/campus-admin?tab=orders&amp;order=', html)
+  self.assertNotIn('/school-admin', html)

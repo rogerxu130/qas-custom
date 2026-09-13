@@ -240,9 +240,12 @@ def _is_uploaded_product_video(url):
 	return url.startswith("/files/") and url.lower().endswith(".mp4") and ".." not in url and "?" not in url and "#" not in url
 
 
-def get_school_admin_store_orders_data(status=None, query=None, limit=160, campus=None, start=0):
-	_require_school_admin()
+def get_school_admin_store_orders_data(status=None, query=None, limit=160, campus=None, start=0, *, campus_admin=False):
+	allowed_campuses = _order_admin_campuses(campus_admin)
 	conditions, values = [], {"limit": _limit(limit, 160, 400) + 1, "start": max(0, cint(start))}
+	if allowed_campuses is not None:
+		conditions.append("o.pickup_campus IN %(allowed_campuses)s")
+		values["allowed_campuses"] = tuple(allowed_campuses)
 	if status:
 		conditions.append("o.status = %(status)s")
 		values["status"] = status
@@ -263,13 +266,15 @@ def get_school_admin_store_orders_data(status=None, query=None, limit=160, campu
 	return {
 		"items": [_order_payload(frappe.get_doc(ORDER_DOCTYPE, row.name), include_items=True) for row in rows[:page_size]],
 		"has_more": len(rows) > page_size,
-		"campuses": frappe.get_all("Campus", pluck="name", order_by="name asc", limit_page_length=0),
+		"campuses": allowed_campuses if allowed_campuses is not None else frappe.get_all("Campus", pluck="name", order_by="name asc", limit_page_length=0),
 	}
 
 
-def get_school_admin_store_order_data(order=None):
-	_require_school_admin()
-	return _order_payload(_get_order(order), include_items=True)
+def get_school_admin_store_order_data(order=None, *, campus_admin=False):
+	allowed = _order_admin_campuses(campus_admin)
+	doc = _get_order(order)
+	_check_order_campus(doc, allowed)
+	return _order_payload(doc, include_items=True)
 
 
 def get_school_admin_store_order_options_data(parent=None):
@@ -363,9 +368,10 @@ def _locked_order(order):
 	return _get_order(order)
 
 
-def update_school_admin_store_order_status_data(order=None, status=None, reason=None):
-	_require_school_admin()
+def update_school_admin_store_order_status_data(order=None, status=None, reason=None, *, campus_admin=False):
+	allowed = _order_admin_campuses(campus_admin)
 	doc = _locked_order(order)
+	_check_order_campus(doc, allowed)
 	status = str(status or "").strip()
 	allowed = {
 		"Ordered": {"Ready for collection", "Collected", "Cancelled"},
@@ -387,9 +393,10 @@ def update_school_admin_store_order_status_data(order=None, status=None, reason=
 	return _order_payload(doc, include_items=True)
 
 
-def retry_school_admin_store_order_notification_data(order=None):
-	_require_school_admin()
+def retry_school_admin_store_order_notification_data(order=None, *, campus_admin=False):
+	allowed = _order_admin_campuses(campus_admin)
 	doc = _locked_order(order)
+	_check_order_campus(doc, allowed)
 	if doc.status != "Ready for collection":
 		frappe.throw(_("Only orders ready for collection can send a pickup notification."))
 	from qas_custom.modules.notifications.store_order_notifications import queue_ready_notification
@@ -715,3 +722,16 @@ def _set_if_field(doc, fieldname, value):
 
 def _limit(value, default, maximum):
 	return max(1, min(cint(value or default), maximum))
+
+
+def _order_admin_campuses(campus_admin=False):
+	if not campus_admin:
+		_require_school_admin()
+		return None
+	from qas_custom.services.campus_admin import _require_campus_admin_profile
+	return _require_campus_admin_profile()["campuses"]
+
+
+def _check_order_campus(doc, allowed):
+	if allowed is not None and doc.pickup_campus not in allowed:
+		frappe.throw(_("You do not have access to this order."), frappe.PermissionError)
