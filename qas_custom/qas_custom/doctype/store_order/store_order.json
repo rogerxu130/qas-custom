@@ -1,7 +1,7 @@
 {
  "actions": [],
  "allow_rename": 0,
- "autoname": "STORE-ORD-.YYYY.-.#####",
+ "autoname": "OD-.YY.-.####",
  "doctype": "DocType",
  "document_type": "Document",
  "engine": "InnoDB",
