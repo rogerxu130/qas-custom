@@ -73,6 +73,22 @@ def save_school_admin_store_product_category_data(category=None, payload=None):
 	return _category_payload(doc)
 
 
+def delete_school_admin_store_product_category_data(category=None, modified=None):
+	_require_school_admin()
+	if not category:
+		frappe.throw(_("Choose a category."))
+	version = frappe.db.get_value(PRODUCT_CATEGORY_DOCTYPE, category, "modified", for_update=True)
+	if not version:
+		frappe.throw(_("This category no longer exists. Refresh the category list."))
+	if not modified or str(version) != str(modified):
+		frappe.throw(_("The category changed. Refresh the category list before deleting it."))
+	if (frappe.db.exists("Store Product Category Link", {"category": category})
+		or frappe.db.exists(PRODUCT_DOCTYPE, {"primary_category": category})):
+		frappe.throw(_("This category is used by products. Remove it from those products before deleting it."))
+	frappe.delete_doc(PRODUCT_CATEGORY_DOCTYPE, category, ignore_permissions=True)
+	return {"deleted": category}
+
+
 def get_school_admin_store_product_data(product=None):
 	_require_school_admin()
 	return _product_payload(_get_product(product), include_media=True)
@@ -536,7 +552,7 @@ def _apply_product_categories(doc, data):
 
 def _valid_product_category(category):
 	category = str(category or "").strip()
-	if category and not frappe.db.exists(PRODUCT_CATEGORY_DOCTYPE, category):
+	if category and not frappe.db.get_value(PRODUCT_CATEGORY_DOCTYPE, category, "name", for_update=True):
 		frappe.throw(_("Product category was not found."))
 	return category or None
 
