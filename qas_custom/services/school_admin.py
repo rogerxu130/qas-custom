@@ -2634,26 +2634,7 @@ def delete_school_admin_term_data(term=None):
 	if not term:
 		frappe.throw(_("Term is required."))
 	_assert_safe_delete("Term", term)
-	frappe.db.savepoint("delete_school_admin_term")
-	try:
-		if _doctype_available("QAS Admin Report Snapshot"):
-			snapshots = frappe.get_all(
-				"QAS Admin Report Snapshot",
-				filters={"term": term},
-				fields=["name", "status"],
-				limit_page_length=0,
-			)
-			if any(row.status in ("Queued", "Running") for row in snapshots):
-				frappe.throw(_("A report is queued or running for this term. Wait for it to finish before deleting."))
-			for snapshot in snapshots:
-				if _doctype_available("QAS Admin Report Row"):
-					frappe.db.delete("QAS Admin Report Row", {"snapshot": snapshot.name})
-				frappe.delete_doc("QAS Admin Report Snapshot", snapshot.name, ignore_permissions=True)
-		# Keep Frappe's link checks: any remaining business reference must block deletion.
-		frappe.delete_doc("Term", term, ignore_permissions=True)
-	except Exception:
-		frappe.db.rollback(save_point="delete_school_admin_term")
-		raise
+	frappe.delete_doc("Term", term, ignore_permissions=True)
 	frappe.db.commit()
 	return {"deleted": term}
 
