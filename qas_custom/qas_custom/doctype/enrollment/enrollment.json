@@ -51,7 +51,8 @@
    "in_standard_filter": 1,
    "label": "Term",
    "mandatory_depends_on": "eval:doc.enrollment_type=='Full-Term'",
-   "options": "Term"
+   "options": "Term",
+   "search_index": 1
   },
   {
    "description": "Required for Full-Term enrollments. Pay-as-you-go students can book multiple courses and should not be locked to one course here.",

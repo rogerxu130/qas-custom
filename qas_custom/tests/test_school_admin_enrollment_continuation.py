@@ -20,6 +20,13 @@ class FakeDocument:
 
 
 class TestSchoolAdminEnrollmentContinuation(TestCase):
+	def setUp(self):
+		# These existing scenarios use an open source term. Closure behavior is
+		# tested separately in test_term_lifecycle.
+		patcher = patch("qas_custom.services.term_lifecycle.lock_term", return_value=frappe._dict(status="Active"))
+		patcher.start()
+		self.addCleanup(patcher.stop)
+
 	def source(self):
 		return FakeDocument(
 			"ENR-SOURCE",

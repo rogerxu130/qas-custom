@@ -135,7 +135,11 @@ def reconcile_attendance_links():
 
 def _get_students_with_active_business():
 	students = set()
-	students.update(_pluck_students("Enrollment", {"status": "Active"}))
+	from qas_custom.services.term_lifecycle import open_enrollment_or_filters
+	students.update(frappe.get_all(
+		"Enrollment", filters={"status": ["in", ["Active", "Planned"]]},
+		or_filters=open_enrollment_or_filters(), pluck="student", limit_page_length=0,
+	))
 	students.update(_pluck_students("Inquiry", {"status": ["in", ACTIVE_INQUIRY_STATUSES]}))
 	students.update(_pluck_students("Adhoc Booking", {"status": ["in", ACTIVE_ADHOC_BOOKING_STATUSES]}))
 	students.update(_get_students_with_future_attendance())

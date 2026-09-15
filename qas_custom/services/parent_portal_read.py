@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime
+from qas_custom.services.term_lifecycle import open_enrollment_or_filters
 import frappe
 from frappe.utils import getdate, get_time, now_datetime, today
 
@@ -160,6 +161,7 @@ def _filter_parent_visible_attendance_rows(attendance_rows):
         active_enrollments = set(frappe.get_all(
             "Enrollment",
             filters={"name": ["in", enrollment_names], "status": "Active"},
+            or_filters=open_enrollment_or_filters(),
             pluck="name",
             limit_page_length=0,
         ))
@@ -185,6 +187,7 @@ def _active_enrollment_pairs(student_names, weekly_timeslots):
             "weekly_timeslot": ["in", weekly_timeslots],
             "status": "Active",
         },
+        or_filters=open_enrollment_or_filters(),
         fields=["student", "weekly_timeslot"],
         limit_page_length=0,
     )

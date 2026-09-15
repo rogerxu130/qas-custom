@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from qas_custom.services.term_lifecycle import require_open_term, open_enrollment_or_filters
+
 from collections import defaultdict
 from contextlib import contextmanager
 from datetime import datetime, timedelta
@@ -324,7 +326,7 @@ def get_school_admin_family_data(parent=None, student=None, customer=None, email
 		"customer": _get_customer_payload(customer_id) if customer_id else None,
 		"students": students,
 		"store_credit": get_store_credit_summary(parent=parent_id, customer=customer_id, limit=20) if customer_id else None,
-		"enrollments": _get_enrollment_rows(parent=parent_id, students=student_ids, limit=80),
+		"enrollments": _get_enrollment_rows(parent=parent_id, students=student_ids, filters={"status": ["in", ["Active", "Planned"]]}, open_terms_only=True, limit=80),
 		"workshop_enrollments": _get_family_workshop_enrollment_rows(
 			parent=parent_id,
 			students=student_ids,
@@ -2714,6 +2716,7 @@ def create_school_admin_term_from_copy_data(payload=None):
 
 def copy_school_admin_term_enrollments_data(term=None):
 	_require_school_admin()
+	require_open_term(term)
 	_require_term_copy_mapping_fields()
 	if not term:
 		frappe.throw(_("Target term is required."))
@@ -2751,6 +2754,7 @@ def copy_school_admin_term_enrollments_data(term=None):
 
 def populate_school_admin_term_data(term=None):
 	_require_school_admin()
+	require_open_term(term)
 	if not term:
 		frappe.throw(_("Term is required."))
 	if not frappe.db.exists("Term", term):
@@ -2760,6 +2764,7 @@ def populate_school_admin_term_data(term=None):
 
 def populate_school_admin_term_sessions_data(term=None):
 	_require_school_admin()
+	require_open_term(term)
 	if not term:
 		frappe.throw(_("Term is required."))
 	if not frappe.db.exists("Term", term):
@@ -2776,6 +2781,7 @@ def populate_school_admin_term_sessions_data(term=None):
 
 def create_school_admin_term_attendance_data(term=None, payload=None):
 	_require_school_admin()
+	require_open_term(term)
 	if not term:
 		frappe.throw(_("Term is required."))
 	if not frappe.db.exists("Term", term):
@@ -3075,6 +3081,7 @@ def _populate_planned_enrollments_for_term(term):
 
 
 def _activate_planned_enrollment(enrollment, term_doc, start_session=None):
+	require_open_term(enrollment.get("term"))
 	if enrollment.get("status") != "Planned":
 		return {"enrollment": enrollment.name, "invoice": enrollment.get("invoice")}
 	if not enrollment.get("weekly_timeslot"):
@@ -3188,6 +3195,7 @@ def _first_course_session_for_timeslot(weekly_timeslot, term_doc):
 
 
 def _create_term_enrollment_invoice(enrollment, start_session):
+	require_open_term(enrollment.get("term"))
 	parent = enrollment.get("parent")
 	course = enrollment.get("course")
 	if not parent or not course:
@@ -3374,8 +3382,7 @@ def get_school_admin_enrollments_data(
 		filters["status"] = ["in", status_values]
 	else:
 		filters["status"] = ["in", ["Planned", "Active"]]
-	_apply_active_term_filter(filters, term=term, include_inactive_terms=include_inactive_terms)
-	return {"items": _get_enrollment_rows(filters=filters, limit=_limit(limit, default=80, max_value=200))}
+	return {"items": _get_enrollment_rows(filters=filters, open_terms_only=not term and not _is_truthy(include_inactive_terms), limit=_limit(limit, default=80, max_value=200))}
 
 
 def get_school_admin_enrollment_data(enrollment=None):
@@ -3412,6 +3419,7 @@ def continue_school_admin_enrollment_to_term_data(enrollment=None, payload=None)
 		frappe.throw(_("Destination weekly timeslot is required."))
 
 	source = frappe.get_doc("Enrollment", enrollment)
+	require_open_term(source.get("term"))
 	if source.get("status") != "Active" or source.get("enrollment_type") != "Full-Term":
 		frappe.throw(_("Only active Full-Term enrollments can continue to another term."))
 	if not source.get("student") or not source.get("course") or not source.get("weekly_timeslot"):
@@ -3536,6 +3544,7 @@ def create_school_admin_enrollment_attendance_data(enrollment=None, payload=None
 		frappe.throw(_("Enrollment is required."))
 	payload = _get_payload(payload)
 	doc = frappe.get_doc("Enrollment", enrollment)
+	require_open_term(doc.get("term"))
 	if doc.get("status") == "Planned":
 		payload.pop("status", None)
 		_apply_enrollment_payload(doc, payload)
@@ -3584,6 +3593,7 @@ def create_school_admin_enrollment_invoice_data(enrollment=None, payload=None):
 		frappe.throw(_("Enrollment is required."))
 	payload = _get_payload(payload)
 	doc = frappe.get_doc("Enrollment", enrollment)
+	require_open_term(doc.get("term"))
 	if doc.get("status") != "Active":
 		frappe.throw(_("Set the enrollment to Active before creating a draft invoice."))
 	existing_invoice = _existing_invoice_for_enrollment(doc)
@@ -3660,6 +3670,7 @@ def create_school_admin_family_invoice_data(parent=None, customer=None, payload=
 
 def create_school_admin_term_invoices_data(term=None, payload=None):
 	_require_school_admin()
+	require_open_term(term)
 	if not term:
 		frappe.throw(_("Term is required."))
 	if not frappe.db.exists("Term", term):
@@ -7509,7 +7520,7 @@ def _create_payment_entry_for_invoice(doc, amount, mode_of_payment=None, referen
 		frappe.set_user(original_user)
 
 
-def _get_enrollment_rows(parent=None, students=None, filters=None, limit=80):
+def _get_enrollment_rows(parent=None, students=None, filters=None, limit=80, open_terms_only=False, start=0):
 	if not _doctype_available("Enrollment"):
 		return []
 	filters = dict(filters or {})
@@ -7540,8 +7551,10 @@ def _get_enrollment_rows(parent=None, students=None, filters=None, limit=80):
 	rows = frappe.get_all(
 		"Enrollment",
 		filters=filters,
+		or_filters=open_enrollment_or_filters() if open_terms_only else None,
 		fields=fields,
-		order_by="modified desc",
+		order_by="modified desc, name desc",
+		start=start,
 		limit=limit,
 	)
 	return _attach_course_labels([_normalize_row_payload("Enrollment", row) for row in rows])
@@ -7629,6 +7642,7 @@ def _get_attendance_candidate_enrollment_names(parent=None, students=None, term=
 	return frappe.get_all(
 		"Enrollment",
 		filters=filters,
+		or_filters=open_enrollment_or_filters(),
 		pluck="name",
 		order_by="weekly_timeslot asc, student asc",
 		limit_page_length=0,
@@ -7653,6 +7667,7 @@ def _get_invoice_candidate_enrollment_names(parent=None, students=None, term=Non
 	return frappe.get_all(
 		"Enrollment",
 		filters=filters,
+		or_filters=open_enrollment_or_filters(),
 		pluck="name",
 		order_by="parent asc, term asc, weekly_timeslot asc, student asc",
 		limit_page_length=0,
@@ -7990,6 +8005,7 @@ def _create_enrollment_transfer_difference_invoice(doc, *, preview, source_times
 
 
 def _build_enrollment_transfer_preview(doc, target_timeslot, effective_date):
+	require_open_term(doc.get("term"))
 	if doc.get("status") != "Active":
 		frappe.throw(_("Only active enrollments can be transferred."))
 	if doc.get("enrollment_type") != "Full-Term":

@@ -16,6 +16,13 @@ from qas_custom.services.school_admin import (
 
 
 class TestSchoolAdminEnrollmentTransfer(TestCase):
+	def setUp(self):
+		# These existing scenarios use an open source term. Closure behavior is
+		# tested separately in test_term_lifecycle.
+		patcher = patch("qas_custom.services.term_lifecycle.lock_term", return_value=frappe._dict(status="Active"))
+		patcher.start()
+		self.addCleanup(patcher.stop)
+
 	def test_transfer_financial_summary_handles_positive_zero_and_negative_difference(self):
 		self.assertEqual(
 			_transfer_financial_summary(100, 150),

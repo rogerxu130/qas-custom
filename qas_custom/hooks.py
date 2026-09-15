@@ -140,6 +140,9 @@ after_migrate = "qas_custom.services.teacher_training.ensure_teacher_training_st
 # Hook on document methods and events
 
 doc_events = {
+	"Enrollment": {"validate": "qas_custom.services.term_lifecycle.validate_term_child"},
+	"Course Sessions": {"validate": "qas_custom.services.term_lifecycle.validate_term_child"},
+	"Class Attendance Entry": {"validate": "qas_custom.services.term_lifecycle.validate_term_child"},
 	"Email Queue": {
 		"before_insert": "qas_custom.modules.notifications.guard.suppress_legacy_invoice_email_queue",
 	},
@@ -174,7 +177,7 @@ doc_events = {
 		"on_update": "qas_custom.modules.makeup.commands.sync_makeup_voucher_attendance_after_save",
 	},
 	"Weekly Timeslot": {
-		"validate": "qas_custom.services.school_admin.validate_weekly_timeslot_document",
+		"validate": ["qas_custom.services.term_lifecycle.validate_term_child", "qas_custom.services.school_admin.validate_weekly_timeslot_document"],
 	},
 	"Session Homework": {
 		"validate": "qas_custom.services.session_homework.validate_session_homework",

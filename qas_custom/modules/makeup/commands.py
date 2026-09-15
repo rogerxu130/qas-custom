@@ -680,9 +680,17 @@ def _get_redeemable_makeup_sessions(
 		[row["teacher"] for row in timeslot_map.values() if row.get("teacher")]
 	)
 
+	from qas_custom.services.term_lifecycle import OPEN_STATUSES
+	open_terms = frappe.get_all("Term", filters={"status": ["in", OPEN_STATUSES]}, pluck="name", limit_page_length=0)
+	open_timeslots = set(frappe.get_all("Weekly Timeslot", filters={
+		"name": ["in", list(timeslot_map) or ["__none__"]], "status": "Active",
+		"term": ["in", open_terms or ["__none__"]],
+	}, pluck="name", limit_page_length=0))
 	occupied_sessions = sessions_with_regular_or_trial_students([row["name"] for row in session_rows])
 	sessions = []
 	for session in session_rows:
+		if session.get("weekly_timeslot") not in open_timeslots:
+			continue
 		if not allow_empty_sessions and session["name"] not in occupied_sessions:
 			continue
 		if session.get("status") == "Cancelled":

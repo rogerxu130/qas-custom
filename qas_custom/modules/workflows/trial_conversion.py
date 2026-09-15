@@ -267,6 +267,8 @@ def link_existing_enrollment_core(
 		frappe.throw(_("Parent is required before converting a Trial Lesson Inquiry."))
 
 	enrollment_doc = frappe.get_doc("Enrollment", enrollment)
+	from qas_custom.services.term_lifecycle import require_open_term
+	require_open_term(enrollment_doc.get("term"))
 	if enrollment_doc.get("status") not in LINKABLE_ENROLLMENT_STATUSES:
 		frappe.throw(_("The existing Enrollment must be Planned or Active."))
 	if enrollment_doc.get("student") != inquiry_doc.student:

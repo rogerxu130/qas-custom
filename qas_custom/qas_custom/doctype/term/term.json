@@ -12,7 +12,10 @@
   "status",
   "notes",
   "copy_source_section",
-  "copied_from_term"
+  "copied_from_term",
+  "closed_from_status",
+  "closed_at",
+  "closed_by"
  ],
  "fields": [
   {
@@ -66,6 +69,25 @@
    "label": "Copied From Term",
    "options": "Term",
    "read_only": 1
+  },
+  {
+   "fieldname": "closed_from_status",
+   "label": "Status before closing",
+   "fieldtype": "Data",
+   "read_only": 1
+  },
+  {
+   "fieldname": "closed_at",
+   "label": "Last closed at",
+   "fieldtype": "Datetime",
+   "read_only": 1
+  },
+  {
+   "fieldname": "closed_by",
+   "label": "Last closed by",
+   "fieldtype": "Link",
+   "read_only": 1,
+   "options": "User"
   }
  ],
  "grid_page_length": 50,

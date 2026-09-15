@@ -11,7 +11,8 @@
    "in_list_view": 1,
    "label": "Timeslot",
    "options": "Weekly Timeslot",
-   "reqd": 1
+   "reqd": 1,
+   "search_index": 1
   },
   {
    "fieldname": "session_date",

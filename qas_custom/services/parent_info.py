@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from qas_custom.services.term_lifecycle import open_enrollment_or_filters
 import frappe
 
 from qas_custom.modules.billing.store_credit import get_store_credit_balance
@@ -35,6 +36,7 @@ def get_parent_info_data():
         enrollments = frappe.get_all(
             "Enrollment",
             filters={"student": ["in", student_names], "status": "Active"},
+            or_filters=open_enrollment_or_filters(),
             fields=["name", "student", "course", "enrollment_type"],
             order_by="modified desc",
         )
