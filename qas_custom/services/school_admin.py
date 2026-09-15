@@ -6919,12 +6919,14 @@ def _invoice_names_for_students(students):
 
 
 def _build_invoice_payload(doc):
+	from qas_custom.services.stripe_trial_payments import payment_url
 	from qas_custom.services.payment_collection_requests import get_invoice_payment_request_summary
 
 	doc = frappe.get_doc("Sales Invoice", doc) if isinstance(doc, str) else doc
 	payload = _document_payload(doc)
 	payload["docstatus"] = cint(doc.docstatus)
 	payload["status_label"] = _invoice_status_label(doc)
+	payload["online_payment_url"] = payment_url(doc)
 	payload["items"] = [_child_payload(row) for row in doc.get("items", [])]
 	payload["adjustments"] = [_invoice_adjustment_payload(row) for row in _invoice_adjustment_rows(doc)]
 	payload.update(_invoice_edit_totals(doc))

@@ -1,0 +1,107 @@
+{
+ "doctype": "DocType",
+ "name": "QAS Stripe Settings",
+ "module": "QAS Custom",
+ "engine": "InnoDB",
+ "field_order": [
+  "enabled",
+  "pilot_notice",
+  "mode",
+  "test_secret_key",
+  "test_webhook_secret",
+  "live_secret_key",
+  "live_webhook_secret",
+  "signing_secret",
+  "company",
+  "clearing_account",
+  "mode_of_payment",
+  "webhook_url",
+  "test_notice"
+ ],
+ "fields": [
+  {
+   "fieldname": "enabled",
+   "label": "Enable trial payment pilot",
+   "fieldtype": "Check",
+   "default": "0"
+  },
+  {
+   "fieldname": "pilot_notice",
+   "fieldtype": "HTML",
+   "options": "<p>Restricted to rogerxu130@gmail.com. This release cannot enable payments for other parents.</p>"
+  },
+  {
+   "fieldname": "mode",
+   "label": "Mode",
+   "fieldtype": "Select",
+   "options": "Test\nLive",
+   "default": "Test",
+   "reqd": 1
+  },
+  {
+   "fieldname": "test_secret_key",
+   "label": "Test Secret Key",
+   "fieldtype": "Password"
+  },
+  {
+   "fieldname": "test_webhook_secret",
+   "label": "Test Webhook Signing Secret",
+   "fieldtype": "Password"
+  },
+  {
+   "fieldname": "live_secret_key",
+   "label": "Live Secret Key",
+   "fieldtype": "Password"
+  },
+  {
+   "fieldname": "live_webhook_secret",
+   "label": "Live Webhook Signing Secret",
+   "fieldtype": "Password"
+  },
+  {
+   "fieldname": "signing_secret",
+   "label": "Payment Link Signing Secret",
+   "fieldtype": "Password",
+   "hidden": 1
+  },
+  {
+   "fieldname": "company",
+   "label": "Company",
+   "fieldtype": "Link",
+   "options": "Company"
+  },
+  {
+   "fieldname": "clearing_account",
+   "label": "Stripe Clearing Account (AUD)",
+   "fieldtype": "Link",
+   "options": "Account"
+  },
+  {
+   "fieldname": "mode_of_payment",
+   "label": "Mode of Payment",
+   "fieldtype": "Link",
+   "options": "Mode of Payment"
+  },
+  {
+   "fieldname": "webhook_url",
+   "label": "Webhook URL",
+   "fieldtype": "Data",
+   "read_only": 1
+  },
+  {
+   "fieldname": "test_notice",
+   "fieldtype": "HTML",
+   "options": "<p>Test payments never settle real invoices. Switch to Live only when ready to collect real money from the pilot parent. Fees and payouts require separate reconciliation.</p>"
+  }
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1
+  }
+ ],
+ "track_changes": 1,
+ "issingle": 1
+}

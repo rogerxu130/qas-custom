@@ -55,6 +55,7 @@ def build_parent_invoice_context(
 	payment_context = get_invoice_payment_context(invoice_doc)
 	from qas_custom.modules.billing.payment_plans import payment_plan_payload
 	settings = get_invoice_settings()
+	from qas_custom.services.stripe_trial_payments import payment_url
 	items = [build_parent_invoice_item(row) for row in invoice_doc.get("items", [])]
 	adjustments = [
 		build_parent_invoice_adjustment(row)
@@ -63,6 +64,7 @@ def build_parent_invoice_context(
 	]
 	return {
 		"invoice": invoice_doc.name,
+		"online_payment_url": payment_url(invoice_doc) if payable > 0 else "",
 		"school_name": settings.get("school_name") or "Queensland Art School",
 		"legal_name": settings.get("legal_name") or "",
 		"abn": settings.get("abn") or "",

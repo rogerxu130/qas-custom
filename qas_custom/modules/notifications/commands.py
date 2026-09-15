@@ -1905,12 +1905,12 @@ def _invoice_cancellation_email_message(invoice_doc, reason=None):
 
 
 def _invoice_email_portal_action(context):
-	invoice_link = context.get("invoice_link")
-	if not invoice_link:
-		return ""
-	return '''<p style="margin:0 0 22px;">
-		<a href="{0}" style="display:inline-block;background:#e85f47;color:#ffffff;text-decoration:none;border-radius:10px;padding:12px 18px;font-weight:700;">View Invoice in Parent Portal</a>
-	</p>'''.format(escape_html(invoice_link))
+	buttons = []
+	if context.get("online_payment_url") and flt(context.get("payable_amount")) > 0:
+		buttons.append('<a href="{0}" style="display:inline-block;background:#e85f47;color:#fff;text-decoration:none;border-radius:10px;padding:12px 18px;font-weight:700;">Pay online</a>'.format(escape_html(context["online_payment_url"])))
+	if context.get("invoice_link"):
+		buttons.append('<a href="{0}" style="display:inline-block;margin:8px 0;padding:12px 18px;">View Invoice in Parent Portal</a>'.format(escape_html(context["invoice_link"])))
+	return '<p style="margin:0 0 22px;">' + " ".join(buttons) + '</p>' if buttons else ""
 
 
 def _invoice_portal_links_enabled():

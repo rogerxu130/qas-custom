@@ -1,0 +1,113 @@
+{
+ "doctype": "DocType",
+ "name": "QAS Stripe Payment",
+ "module": "QAS Custom",
+ "engine": "InnoDB",
+ "field_order": [
+  "invoice",
+  "mode",
+  "status",
+  "amount_cents",
+  "currency",
+  "checkout_session",
+  "checkout_url",
+  "payment_intent",
+  "payment_entry",
+  "last_event",
+  "last_error",
+  "receipt_queued"
+ ],
+ "fields": [
+  {
+   "fieldname": "invoice",
+   "label": "Invoice",
+   "fieldtype": "Link",
+   "read_only": 1,
+   "options": "Sales Invoice",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "mode",
+   "label": "Mode",
+   "fieldtype": "Select",
+   "read_only": 1,
+   "options": "Test\nLive",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "status",
+   "label": "Status",
+   "fieldtype": "Select",
+   "read_only": 1,
+   "options": "Pending\nOpen\nExpired\nTest Paid\nPaid\nNeeds Review\nRetry",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "amount_cents",
+   "label": "Amount (cents)",
+   "fieldtype": "Int",
+   "read_only": 1
+  },
+  {
+   "fieldname": "currency",
+   "label": "Currency",
+   "fieldtype": "Data",
+   "read_only": 1
+  },
+  {
+   "fieldname": "checkout_session",
+   "label": "Checkout Session",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "checkout_url",
+   "label": "Checkout URL",
+   "fieldtype": "Small Text",
+   "read_only": 1
+  },
+  {
+   "fieldname": "payment_intent",
+   "label": "Payment Intent",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "payment_entry",
+   "label": "Payment Entry",
+   "fieldtype": "Link",
+   "read_only": 1,
+   "options": "Payment Entry"
+  },
+  {
+   "fieldname": "last_event",
+   "label": "Last Stripe Event",
+   "fieldtype": "Data",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_error",
+   "label": "Reconciliation note",
+   "fieldtype": "Small Text",
+   "read_only": 1
+  },
+  {
+   "fieldname": "receipt_queued",
+   "label": "Receipt queued",
+   "fieldtype": "Check",
+   "read_only": 1
+  }
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1
+  }
+ ],
+ "track_changes": 1,
+ "autoname": "hash"
+}

@@ -321,6 +321,8 @@ def get_parent_invoices_data():
         order_by="posting_date desc, modified desc",
     )
 
+    from qas_custom.services.stripe_trial_payments import payment_url
+
     payload = []
     for invoice in invoices:
         doc = frappe.get_doc("Sales Invoice", invoice["name"])
@@ -335,6 +337,7 @@ def get_parent_invoices_data():
         payload.append(
             {
                 "invoice_id": doc.name,
+                "online_payment_url": payment_url(doc),
                 "posting_date": doc.posting_date,
                 "due_date": doc.due_date,
                 "grand_total": float(doc.grand_total or 0),
