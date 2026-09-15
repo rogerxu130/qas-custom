@@ -8,6 +8,7 @@ import frappe
 from frappe import _
 from frappe.utils import cint, flt, now_datetime
 from frappe.utils.file_manager import save_file
+from qas_custom.services.support_view import get_support_view_parent, reject_support_view_write
 
 
 PRODUCT_DOCTYPE = "Store Product"
@@ -339,6 +340,7 @@ def get_parent_store_order_data(order=None):
 
 
 def create_parent_store_order_data(payload=None):
+	reject_support_view_write()
 	parent_doc = _require_parent_shop()
 	return _create_store_order(parent_doc, _payload(payload))
 
@@ -699,6 +701,9 @@ def _require_school_admin():
 
 
 def _require_parent_shop():
+	support_parent = get_support_view_parent()
+	if support_parent:
+		return support_parent
 	if frappe.session.user == "Guest":
 		frappe.throw(_("Login required."), frappe.PermissionError)
 	parent_name = frappe.db.get_value("Parent", {"linked_user": frappe.session.user}, "name")

@@ -68,5 +68,5 @@ def get_parent_info_data():
         "store_credit": float(get_store_credit_balance(parent=parent.name, customer=parent.get("customer")) or 0),
         "students": payload_students,
         # Keep the existing response key for deployed Portal clients.
-        "shop_testing_enabled": not bool(support_parent),
+        "shop_testing_enabled": True,
     }
