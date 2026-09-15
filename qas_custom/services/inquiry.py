@@ -365,6 +365,8 @@ def reschedule_inquiry_core(inquiry: str | None, payload: dict, actor=None):
 
 	payload = _normalize_inquiry_payload(payload)
 	inquiry_doc = frappe.get_doc("Inquiry", inquiry)
+	if inquiry_doc.inquiry_type == "Direct Enrollment":
+		frappe.throw(_("Use the Direct Enrollment assignment action to choose the first class."))
 	if inquiry_doc.status in {"Cancelled", "Completed", "Converted", "Inactive"}:
 		frappe.throw(_("This inquiry cannot be rescheduled from its current status."))
 
@@ -417,6 +419,8 @@ def mark_inquiry_status_core(inquiry: str | None, status: str, actor=None):
 		frappe.throw(_("Unsupported inquiry status."))
 
 	inquiry_doc = frappe.get_doc("Inquiry", inquiry)
+	if inquiry_doc.inquiry_type == "Direct Enrollment" and status != "Cancelled":
+		frappe.throw(_("Direct Enrollment applications can only be assigned or cancelled."))
 	if inquiry_doc.status in {"Converted", "Inactive"}:
 		frappe.throw(_("This inquiry cannot be updated from its current status."))
 	if status == "Cancelled" and inquiry_doc.status in {"Completed", "Converted", "Inactive"}:
@@ -1594,6 +1598,7 @@ def _build_inquiry_payload(doc, include_campus_address=False):
 		"submitted_student_dob": _as_string(doc.submitted_student_dob),
 		"submitted_class_session": doc.submitted_class_session,
 		"submitted_trial_date": _as_string(doc.submitted_trial_date),
+		"requested_start_date": doc.get("requested_start_date"),
 		"special_needs": doc.get("special_needs") or "",
 		"referral_source": doc.referral_source,
 		"referral_detail": doc.referral_detail,

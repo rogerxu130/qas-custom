@@ -80,3 +80,10 @@ def inquiry_mark_inactive(inquiry=None, inactive_reason=None, payload=None):
 @frappe.whitelist()
 def inquiry_add_note(inquiry=None, note=None):
 	return add_inquiry_note_data(inquiry=inquiry, note=note)
+
+
+@frappe.whitelist(allow_guest=True, methods=["POST"])
+def enrollment_webhook_create(payload=None):
+	from qas_custom.services.direct_enrollment import create_webhook
+
+	return create_webhook(payload)

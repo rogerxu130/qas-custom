@@ -1593,3 +1593,24 @@ def school_admin_retry_store_order_notification(order=None):
 @frappe.whitelist(methods=["POST"])
 def school_admin_delete_store_product(product=None, modified=None):
 	return delete_school_admin_store_product_data(product=product, modified=modified)
+
+
+@frappe.whitelist()
+def school_admin_direct_enrollment_sessions(inquiry=None, start_date=None, course=None, campus=None):
+	from qas_custom.services.direct_enrollment import session_options
+
+	return session_options(inquiry, start_date, course, campus)
+
+
+@frappe.whitelist(methods=["POST"])
+def school_admin_preview_direct_enrollment(inquiry=None, payload=None):
+	from qas_custom.services.direct_enrollment import preview
+
+	return preview(inquiry, payload)
+
+
+@frappe.whitelist(methods=["POST"])
+def school_admin_complete_direct_enrollment(inquiry=None, payload=None):
+	from qas_custom.services.direct_enrollment import complete
+
+	return complete(inquiry, payload)
