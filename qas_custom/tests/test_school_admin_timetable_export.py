@@ -48,7 +48,7 @@ class TestTimetableExport(TestCase):
 		sessions = self.rows(data, "qas_session_table.csv")
 		self.assertEqual(tuple(sessions[0]), export.SESSION_HEADERS)
 		self.assertEqual(sessions[0], dict(course_id="COURSE-001", language="Chinese",
-			teacher_name="张老师, Alice", room="R1", start_time="09:30", campus="indooroopilly", weekday="mon"))
+			teacher_name="张老师, Alice", room="R1", start_time="09:30", campus="indooroopilly", weekday="mon", planned_active_student_count="0"))
 		self.assertEqual(self.rows(data, "qas_teachers.csv"), [{"teacher_name": "张老师, Alice"}])
 
 	def test_unassigned_and_referenced_inactive_records_are_preserved(self):
@@ -90,6 +90,14 @@ class TestTimetableExport(TestCase):
 			with self.subTest(flag=flag):
 				data = self.build(courses=[dict(self.course, is_makeup_course=flag)])
 				self.assertEqual(len(self.rows(data, "qas_course_true_meta.csv")), 1)
+
+	def test_student_counts_follow_weekly_class_and_default_to_zero(self):
+		data = self.build(sessions=[self.session, dict(self.session, name="WEEKLY-002"),
+			dict(self.session, name="WEEKLY-003")],
+			student_counts={self.session["name"]: 5, "WEEKLY-002": 2, "OTHER": 99})
+		rows = self.rows(data, "qas_session_table.csv")
+		self.assertEqual([row["planned_active_student_count"] for row in rows], ["5", "2", "0"])
+		self.assertEqual(tuple(rows[0]), ("course_id", "language", "teacher_name", "room", "start_time", "campus", "weekday", "planned_active_student_count"))
 
 	def test_large_export_and_no_deduplication_of_classes(self):
 		data = self.build(sessions=[dict(self.session, name=f"WEEKLY-{i}") for i in range(650)])
@@ -166,7 +174,8 @@ class TestTimetableExport(TestCase):
 		fake.db.exists.return_value = True
 		fake.db.get_value.return_value = "2026 Term 4"
 		records = {"Weekly Timeslot": [self.session], "Course": [self.course], "Teacher": [self.teacher],
-			"Classroom": [self.room], "Campus": [self.campus]}
+			"Classroom": [self.room], "Campus": [self.campus],
+			"Enrollment": [{"weekly_timeslot": self.session["name"], "student_count": 5}]}
 		fake.get_all.side_effect = lambda doctype, **kwargs: records[doctype]
 		with patch.object(export, "frappe", fake), patch.object(export, "_", lambda s: s), \
 			patch("qas_custom.modules.billing.commands.get_trial_class_fee_field", return_value="trial_fee"):
@@ -175,6 +184,14 @@ class TestTimetableExport(TestCase):
 		self.assertIn("is_makeup_course", calls[1].kwargs["fields"])
 		self.assertEqual(calls[0].kwargs["filters"], {"term": "TERM-4", "status": "Active"})
 		self.assertTrue(all(call.kwargs["limit_page_length"] == 0 for call in calls))
+		enrollment_query = next(call for call in calls if call.args[0] == "Enrollment")
+		self.assertEqual(enrollment_query.kwargs["filters"], {
+			"term": "TERM-4", "weekly_timeslot": ["in", [self.session["name"]]],
+			"status": ["in", ["Planned", "Active"]],
+		})
+		self.assertEqual(enrollment_query.kwargs["fields"], ["weekly_timeslot", "count(distinct student) as student_count"])
+		self.assertEqual(enrollment_query.kwargs["group_by"], "weekly_timeslot")
+		self.assertEqual(self.rows(fake.local.response.filecontent, "qas_session_table.csv")[0]["planned_active_student_count"], "5")
 		self.assertEqual(fake.local.response.filename, "2026_Term_4_timetable.zip")
 		self.assertEqual(fake.local.response.content_type, "application/zip")
 		self.assertEqual(len(self.rows(fake.local.response.filecontent, "qas_session_table.csv")), 1)

@@ -17,7 +17,7 @@ COURSE_HEADERS = (
 	"suitable_age_en", "suitable_age_zh", "session_length_hours", "session_length_minutes",
 	"sessions_per_term", "total_hours_per_term", "duration_summary_en", "trial_price_aud", "term_price_aud",
 )
-SESSION_HEADERS = ("course_id", "language", "teacher_name", "room", "start_time", "campus", "weekday")
+SESSION_HEADERS = ("course_id", "language", "teacher_name", "room", "start_time", "campus", "weekday", "planned_active_student_count")
 WEEKDAYS = {day: day[:3].lower() for day in (
 	"Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",
 )}
@@ -53,8 +53,16 @@ def export_school_admin_timetable_data(term=None):
 	teachers = frappe.get_all("Teacher", fields=["name", "teacher_name", "status"], limit_page_length=0)
 	rooms = frappe.get_all("Classroom", fields=["name", "classroom_name", "campus"], limit_page_length=0)
 	campuses = frappe.get_all("Campus", fields=["name", "campus_name"], limit_page_length=0)
+	enrollment_counts = frappe.get_all(
+		"Enrollment",
+		filters={"term": term, "weekly_timeslot": ["in", [row["name"] for row in sessions]],
+			"status": ["in", ["Planned", "Active"]]},
+		fields=["weekly_timeslot", "count(distinct student) as student_count"],
+		group_by="weekly_timeslot", limit_page_length=0,
+	)
+	student_counts = {row["weekly_timeslot"]: cint(row["student_count"]) for row in enrollment_counts}
 	try:
-		content = build_timetable_zip(sessions, courses, teachers, rooms, campuses, trial_field)
+		content = build_timetable_zip(sessions, courses, teachers, rooms, campuses, trial_field, student_counts)
 	except ValueError as error:
 		frappe.throw(str(error))
 	label = frappe.db.get_value("Term", term, "term_name") or term
@@ -66,7 +74,8 @@ def export_school_admin_timetable_data(term=None):
 	frappe.local.response.type = "download"
 
 
-def build_timetable_zip(sessions, courses, teachers, rooms, campuses, trial_field=None):
+def build_timetable_zip(sessions, courses, teachers, rooms, campuses, trial_field=None, student_counts=None):
+	student_counts = student_counts or {}
 	course_map = {row["name"]: row for row in courses}
 	teacher_map = {row["name"]: row for row in teachers}
 	room_map = {row["name"]: row for row in rooms}
@@ -102,6 +111,7 @@ def build_timetable_zip(sessions, courses, teachers, rooms, campuses, trial_fiel
 			"course_id": course["name"], "language": language, "teacher_name": teacher_name,
 			"room": _room_name(room["classroom_name"], label), "start_time": _start_time(session.get("start_time"), label),
 			"campus": CAMPUS_KEYS[campus_key], "weekday": weekday,
+			"planned_active_student_count": student_counts.get(session.get("name"), 0),
 		})
 	if not session_rows:
 		raise ValueError("This Term has no active weekly classes to export after excluding dedicated makeup courses.")
