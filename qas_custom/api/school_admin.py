@@ -1,5 +1,7 @@
 import frappe
 
+from qas_custom.services.school_admin_timetable_export import export_school_admin_timetable_data
+
 from qas_custom.services.workshops import (
 	activate_school_admin_workshop_enrollment_data,
 	cancel_school_admin_workshop_enrollment_data,
@@ -608,6 +610,11 @@ def school_admin_get_operation_report(operation_report=None):
 @frappe.whitelist()
 def school_admin_get_reporting_snapshot(term=None):
 	return get_school_admin_reporting_snapshot_data(term=term)
+
+
+@frappe.whitelist()
+def school_admin_export_timetable(term=None):
+	return export_school_admin_timetable_data(term=term)
 
 
 @frappe.whitelist()
