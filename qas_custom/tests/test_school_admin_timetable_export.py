@@ -69,6 +69,28 @@ class TestTimetableExport(TestCase):
 		self.assertEqual(len(self.rows(data, "qas_course_true_meta.csv")), 2)
 		self.assertEqual(len(self.rows(data, "qas_teachers.csv")), 2)
 
+	def test_makeup_courses_without_duration_are_excluded(self):
+		for flag in (1, "1"):
+			with self.subTest(flag=flag):
+				makeup = dict(self.course, name="MAKEUP", is_makeup_course=flag, duration_mins=0)
+				data = self.build(courses=[self.course, makeup])
+				self.assertEqual([r["course_id"] for r in self.rows(data, "qas_course_true_meta.csv")], [self.course["name"]])
+
+	def test_makeup_weekly_classes_are_excluded_before_validation(self):
+		makeup = dict(self.course, name="MAKEUP", is_makeup_course=1, duration_mins=None)
+		makeup_session = dict(self.session, course="MAKEUP", classroom="missing", teacher="missing")
+		data = self.build(courses=[self.course, makeup], sessions=[self.session, makeup_session])
+		self.assertEqual(len(self.rows(data, "qas_session_table.csv")), 1)
+		self.assertEqual(len(self.rows(data, "qas_course_true_meta.csv")), 1)
+		with self.assertRaisesRegex(ValueError, "after excluding dedicated makeup courses"):
+			self.build(courses=[makeup], sessions=[makeup_session])
+
+	def test_unchecked_makeup_flag_keeps_regular_courses(self):
+		for flag in (0, "0", None):
+			with self.subTest(flag=flag):
+				data = self.build(courses=[dict(self.course, is_makeup_course=flag)])
+				self.assertEqual(len(self.rows(data, "qas_course_true_meta.csv")), 1)
+
 	def test_large_export_and_no_deduplication_of_classes(self):
 		data = self.build(sessions=[dict(self.session, name=f"WEEKLY-{i}") for i in range(650)])
 		self.assertEqual(len(self.rows(data, "qas_session_table.csv")), 650)
@@ -150,6 +172,7 @@ class TestTimetableExport(TestCase):
 			patch("qas_custom.modules.billing.commands.get_trial_class_fee_field", return_value="trial_fee"):
 			export.export_school_admin_timetable_data("TERM-4")
 		calls = fake.get_all.call_args_list
+		self.assertIn("is_makeup_course", calls[1].kwargs["fields"])
 		self.assertEqual(calls[0].kwargs["filters"], {"term": "TERM-4", "status": "Active"})
 		self.assertTrue(all(call.kwargs["limit_page_length"] == 0 for call in calls))
 		self.assertEqual(fake.local.response.filename, "2026_Term_4_timetable.zip")

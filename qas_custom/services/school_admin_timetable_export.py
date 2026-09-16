@@ -9,6 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 import frappe
 from frappe import _
+from frappe.utils import cint
 
 
 COURSE_HEADERS = (
@@ -41,7 +42,7 @@ def export_school_admin_timetable_data(term=None):
 
 	course_fields = [
 		"name", "course_name", "course_name_zh", "status", "min_age", "max_age", "duration_mins",
-		"total_session_per_term", "full_term_fee",
+		"total_session_per_term", "full_term_fee", "is_makeup_course",
 	]
 	# Use the same precedence as billing; a configured zero must stay zero.
 	from qas_custom.modules.billing.commands import get_trial_class_fee_field
@@ -76,6 +77,8 @@ def build_timetable_zip(sessions, courses, teachers, rooms, campuses, trial_fiel
 	for session in sessions:
 		label = session.get("name", "Weekly class")
 		course = _reference(course_map, session.get("course"), label, "course")
+		if cint(course.get("is_makeup_course")):
+			continue
 		campus = _reference(campus_map, session.get("campus"), label, "campus")
 		campus_key = re.sub(r"[^a-z]", "", campus["campus_name"].lower())
 		if campus_key not in CAMPUS_KEYS:
@@ -100,11 +103,14 @@ def build_timetable_zip(sessions, courses, teachers, rooms, campuses, trial_fiel
 			"room": _room_name(room["classroom_name"], label), "start_time": _start_time(session.get("start_time"), label),
 			"campus": CAMPUS_KEYS[campus_key], "weekday": weekday,
 		})
+	if not session_rows:
+		raise ValueError("This Term has no active weekly classes to export after excluding dedicated makeup courses.")
 	day_order = {day: index for index, day in enumerate(WEEKDAYS.values())}
 	session_rows.sort(key=lambda row: (row["campus"], day_order[row["weekday"]], row["start_time"], row["room"], row["course_id"]))
 	course_rows = [
 		_course_row(course, trial_field) for course in sorted(courses, key=lambda row: row["name"])
-		if course.get("status") == "Active" or course["name"] in used_courses
+		if not cint(course.get("is_makeup_course"))
+		and (course.get("status") == "Active" or course["name"] in used_courses)
 	]
 	names = sorted({
 		_teacher_name(teacher) for teacher in teachers
