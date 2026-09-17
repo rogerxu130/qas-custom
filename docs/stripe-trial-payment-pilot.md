@@ -18,7 +18,7 @@ The migration changes the default series while retaining legacy series options f
 2. In Frappe Desk, search for **QAS Stripe Settings**. Only System Manager can read/write this settings document. Leave **Enable trial payment pilot** off while configuring.
 3. Set **Mode = Test**. Enter **Test Secret Key** (`sk_test_…`) from the existing Stripe account's test environment. Password fields are encrypted by Frappe and masked in the form; never paste secrets in chat, documents or git.
 4. In Stripe's test environment, create a webhook endpoint using the exact **Webhook URL** displayed in the Frappe form after saving. Select `checkout.session.completed` and `checkout.session.async_payment_succeeded`. Paste that endpoint's `whsec_…` into **Test Webhook Signing Secret**. Do not use a local CLI signing secret for the deployed endpoint.
-5. Select the QAS company, an active AUD bank/cash **Stripe Clearing Account**, and a valid **Mode of Payment**. This feature records gross receipts into the clearing account. Fees, bank payouts, refunds and disputes require separate reconciliation; they are not treated as a customer's outstanding debt.
+5. Run the `v2026_09_17_setup_stripe_accounts` migration. It creates/reuses the QAS AUD **Stripe Clearing** account and **Stripe** Bank payment mode, adds a company mapping when absent, and fills empty accounting references in **QAS Stripe Settings**. Existing references, payment-mode mappings, secrets, mode and enable switch remain unchanged. Verify the resulting account and payment mode in Desk. This feature records gross receipts into the clearing account. Fees, bank payouts, refunds and disputes require separate reconciliation; they are not treated as a customer's outstanding debt.
 6. Save, then enable the pilot. If the site is staging, the existing payment-mutation environment setting must explicitly allow testing. Do not disable global CSRF protection.
 7. Confirm Apple Pay is enabled/available in the Stripe account. Stripe-hosted Checkout presents Apple Pay only on supported devices/browsers with an eligible wallet; manual card entry remains available. No separate QAS portal-domain Apple Pay registration is needed for this hosted flow.
 
@@ -42,3 +42,13 @@ Only after the user confirms successful pilot testing and explicitly asks to ope
 ## Development verification
 
 Automated tests cover numeric naming and collision handling, signed links, pilot identity, disabled/support access, invoice eligibility, webhook signature/amount/mode validation, duplicate events, test-versus-live posting, uncertain Checkout retries and email button gating. Browser tests use mocked APIs for mobile/desktop layout, token and CSRF headers, failure states, test success, review states and missing links. These do not replace a deployed Frappe migration, real database ledger tests, Stripe test-account integration or Apple Pay device testing.
+
+## Accounting bootstrap recovery
+
+The migration requires a unique active asset Bank account group (or a uniquely named Bank Accounts group) for the configured company. It fails with an actionable error if the group is ambiguous or an existing account/payment mode is incompatible; it does not reclassify existing objects. Select a valid clearing account or resolve the group, then rerun migration. If the QAS company did not exist when migration ran, it leaves the site unchanged; after company creation run:
+
+```sh
+bench --site YOUR_SITE execute qas_custom.patches.v2026_09_17_setup_stripe_accounts.execute
+```
+
+The command is safe to rerun: existing records and administrator configuration are preserved. This migration does not enable the pilot or create payments. Stripe end-to-end testing is still required after deployment.
