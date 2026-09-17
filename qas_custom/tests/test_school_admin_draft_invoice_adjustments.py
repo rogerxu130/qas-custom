@@ -49,6 +49,35 @@ class _Invoice(frappe._dict):
 
 
 class TestSchoolAdminDraftInvoiceAdjustments(TestCase):
+	@patch("qas_custom.services.school_admin.apply_invoice_payment_snapshot", return_value=False)
+	def test_edited_due_date_survives_erpnext_save_and_submit_recalculation(self, _snapshot):
+		from erpnext.controllers.accounts_controller import AccountsController
+		invoice = _Invoice(name="2600001-1", amended_from="2600001", docstatus=0,
+			grand_total=68, items=[], taxes=[], due_date="2026-09-22",
+			payment_schedule=[_Child(due_date="2026-09-22", payment_amount=68)])
+		_apply_school_admin_draft_invoice_payload(invoice, {"due_date": "2026-09-30"})
+		AccountsController.set_due_date(invoice)
+		self.assertEqual(invoice.due_date, "2026-09-30")
+		self.assertEqual(invoice.payment_schedule[0].due_date, "2026-09-30")
+		AccountsController.set_due_date(invoice)
+		self.assertEqual(invoice.due_date, "2026-09-30")
+		self.assertEqual(invoice.payment_schedule[0].payment_amount, 68)
+
+	@patch("qas_custom.services.school_admin.apply_invoice_payment_snapshot", return_value=False)
+	def test_unrelated_edit_preserves_payment_schedule(self, _snapshot):
+		invoice = _Invoice(grand_total=68, items=[], taxes=[], due_date="2026-09-22",
+			payment_schedule=[_Child(due_date="2026-09-22")])
+		_apply_school_admin_draft_invoice_payload(invoice, {"remarks": "Updated"})
+		self.assertEqual(invoice.payment_schedule[0].due_date, "2026-09-22")
+
+	def test_date_edit_does_not_flatten_installments(self):
+		invoice = _Invoice(grand_total=68, items=[], taxes=[], due_date="2026-09-22",
+			payment_schedule=[_Child(due_date="2026-09-18"), _Child(due_date="2026-09-22")])
+		with patch("qas_custom.services.school_admin.frappe.throw", side_effect=frappe.ValidationError):
+			with self.assertRaises(frappe.ValidationError):
+				_apply_school_admin_draft_invoice_payload(invoice, {"due_date": "2026-09-30"})
+		self.assertEqual([r.due_date for r in invoice.payment_schedule], ["2026-09-18", "2026-09-22"])
+
 	def test_submit_uses_current_editor_payload_without_prior_draft_save(self):
 		invoice = _Invoice(name="SINV-0001", docstatus=0)
 		invoice.flags = SimpleNamespace(ignore_permissions=False)

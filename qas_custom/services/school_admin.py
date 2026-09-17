@@ -1937,6 +1937,16 @@ def _apply_school_admin_draft_invoice_payload(doc, payload):
 	fallback_cost_centers = _invoice_item_financial_values(doc, "cost_center")
 	is_manual_invoice = cint(doc.get("qas_is_manual_invoice")) or (doc.get("source_type") or "").strip().lower() == "manual"
 
+	if payload.get("due_date"):
+		payment_schedule = doc.get("payment_schedule") or []
+		if (len(payment_schedule) > 1 or cint(doc.get("qas_has_payment_plan"))) and (
+			not doc.get("due_date") or getdate(payload["due_date"]) != getdate(doc.due_date)
+		):
+			frappe.throw(_("This invoice has installments. Change the payment schedule dates instead of the invoice due date."))
+		if len(payment_schedule) == 1 and not cint(doc.get("qas_has_payment_plan")):
+			# ERPNext derives due_date from this row on save and submit.
+			payment_schedule[0].due_date = payload["due_date"]
+
 	for fieldname in ["customer", "due_date", "remarks"]:
 		if fieldname in payload:
 			doc.set(fieldname, payload.get(fieldname))
