@@ -1343,6 +1343,11 @@ def _customer_contact_email(customer):
 
 def _invoice_notification_event_key(invoice_doc, event):
 	base = f"invoice_{event}:{invoice_doc.name}"
+	if event == "approved":
+		from qas_custom.modules.billing.invoice_reopen import reopened_invoice_revision
+		revision = reopened_invoice_revision(invoice_doc.name)
+		if revision:
+			return f"{base}:revision:{revision}"
 	if event == "resent":
 		return f"{base}:{now_datetime().strftime('%Y%m%d%H%M%S%f')}"
 	return base
