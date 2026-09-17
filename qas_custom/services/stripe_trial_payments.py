@@ -358,7 +358,7 @@ def create_payment_entry(doc, attempt, config):
 			ensure_store_credit_journal_entry(doc, amount=credit)
 			doc.reload()
 		entry = get_payment_entry('Sales Invoice', doc.name, bank_account=clearing_account(config),
-			bank_amount=attempt.amount_cents / 100, ignore_permissions=True)
+			bank_amount=attempt.amount_cents / 100)
 		entry.mode_of_payment = config.mode_of_payment
 		entry.reference_no = attempt.payment_intent
 		entry.reference_date = now_datetime().date()

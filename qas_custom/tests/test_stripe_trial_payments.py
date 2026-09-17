@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 from types import SimpleNamespace
 from unittest import TestCase
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, create_autospec
 
 import frappe
 from qas_custom.services import stripe_trial_payments as p
@@ -246,14 +246,17 @@ class FullTestPaymentPostingTests(LivePaymentPostingTests):
 		from types import SimpleNamespace
 		entry = MagicMock()
 		entry.references = [frappe._dict(reference_name=self.invoice.name)]
-		provider = MagicMock(return_value=entry)
+		# Enforce the ERPNext call boundary: permissive MagicMock hid unsupported kwargs.
+		def get_payment_entry(dt, dn, *, bank_account=None, bank_amount=None):
+			return entry
+		provider = create_autospec(get_payment_entry, side_effect=get_payment_entry)
 		self.config.test_clearing_account = 'Stripe Test'
 		attempt = frappe._dict(amount_cents=3000, payment_intent='pi_test')
 		with ExitStack() as stack:
 			stack.enter_context(patch.dict(sys.modules, {'erpnext.accounts.doctype.payment_entry.payment_entry': SimpleNamespace(get_payment_entry=provider)}))
 			stack.enter_context(patch.object(p, 'validate_accounts'))
 			stack.enter_context(patch.object(p.frappe, 'session', SimpleNamespace(user='Guest')))
-			stack.enter_context(patch.object(p.frappe, 'set_user'))
+			set_user = stack.enter_context(patch.object(p.frappe, 'set_user'))
 			stack.enter_context(patch('qas_custom.modules.billing.store_credit.get_invoice_store_credit_applied', return_value=0))
 			stack.enter_context(patch('qas_custom.modules.billing.store_credit.sync_invoice_store_credit_snapshot'))
 			p.create_payment_entry(self.invoice, attempt, self.config)
@@ -263,3 +266,8 @@ class FullTestPaymentPostingTests(LivePaymentPostingTests):
 			self.assertIn('no real funds', entry.remarks)
 			entry.insert.assert_called_once()
 			entry.submit.assert_called_once()
+			self.assertEqual([call.args[0] for call in set_user.call_args_list], ['Administrator', 'Guest'])
+			provider.side_effect = RuntimeError('ERPNext validation failed')
+			with self.assertRaises(RuntimeError):
+				p.create_payment_entry(self.invoice, attempt, self.config)
+			set_user.assert_called_with('Guest')
