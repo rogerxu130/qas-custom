@@ -19,6 +19,7 @@ DEFAULT_INVOICE_SETTINGS = {
 	"school_website": "",
 	"school_address": "",
 	"payment_due_days": 7,
+	"overdue_reminder_interval_days": 4,
 	"invoice_message": "Thank you for learning with Queensland Art School. Please contact us if you have any questions about this invoice.",
 	"accepted_payment_methods": "Bank transfer, cash, or POS",
 	"bank_account_name": "",
@@ -70,6 +71,8 @@ def get_invoice_settings():
 		value = doc.get(fieldname)
 		if fieldname == "payment_due_days":
 			settings[fieldname] = _normalize_due_days(value)
+		elif fieldname == "overdue_reminder_interval_days":
+			settings[fieldname] = max(1, cint(value)) if value else 4
 		elif fieldname == "store_credit_bonus_enabled":
 			settings[fieldname] = 1 if cint(value) else 0
 		elif fieldname == "store_credit_bonus_rules":
@@ -90,6 +93,8 @@ def update_invoice_settings(payload):
 		if fieldname in payload:
 			if fieldname == "payment_due_days":
 				doc.set(fieldname, _normalize_due_days(payload.get(fieldname)))
+			elif fieldname == "overdue_reminder_interval_days":
+				doc.set(fieldname, validate_reminder_interval(payload.get(fieldname)))
 			elif fieldname == "store_credit_bonus_enabled":
 				doc.set(fieldname, 1 if cint(payload.get(fieldname)) else 0)
 			elif fieldname == "store_credit_bonus_rules":
@@ -229,3 +234,13 @@ def apply_course_invoice_dates(invoice, *, enrollment=None, start_session=None):
 	invoice.due_date = min(deadlines, key=getdate)
 	for payment in invoice.get("payment_schedule", []):
 		payment.due_date = invoice.due_date
+
+
+def validate_reminder_interval(value):
+	try:
+		days = float(value)
+		if not days.is_integer() or days < 1:
+			raise ValueError
+	except (TypeError, ValueError, OverflowError):
+		frappe.throw(frappe._("Overdue reminder interval must be a whole number of at least 1 day."))
+	return int(days)

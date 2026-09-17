@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import frappe
 from frappe import _
-from frappe.utils import cint, flt, format_time, formatdate
+from frappe.utils import cint, flt, format_time, formatdate, nowdate
 
+from qas_custom.modules.billing.invoice_settings import course_invoice_due_date
+from qas_custom.modules.billing.trial_invoice_dates import sync_trial_invoice_dates
 from qas_custom.modules.billing.commands import get_invoice_customer, get_invoice_item, get_trial_class_fee
 from qas_custom.services.display_labels import get_course_session_snapshot_label, get_student_display_code, get_student_parent_name
 from qas_custom.services.maintenance import _issue, _make_issue_key, record_data_issue, resolve_data_issue
@@ -65,6 +67,7 @@ def _create_trial_invoice(inquiry: str):
 		invoice_doc = frappe.get_doc("Sales Invoice", invoice_name)
 		if cint(invoice_doc.docstatus) == 2 or invoice_doc.get("status") == "Cancelled":
 			return _status_payload(doc, "skipped", _("The linked Trial Invoice is cancelled and will not be recreated."), invoice=invoice_name)
+		sync_trial_invoice_dates(invoice_doc, doc)
 		if cint(invoice_doc.docstatus) == 1:
 			_check_rescheduled_trial_fee(doc, invoice_doc)
 			resolve_data_issue(_trial_invoice_issue_key(doc.name))
@@ -272,6 +275,7 @@ def _create_draft_trial_invoice(inquiry_doc, context, replacement=False):
 
 
 def _trial_invoice_draft_payload(inquiry_doc, context, replacement=False):
+	posting_date = nowdate()
 	student_name = get_student_parent_name(inquiry_doc.student) or inquiry_doc.student
 	student_code = get_student_display_code(inquiry_doc.student) or inquiry_doc.student
 	session = context["session"]
@@ -285,6 +289,7 @@ def _trial_invoice_draft_payload(inquiry_doc, context, replacement=False):
 		context.get("campus") or _("Campus not set"),
 	)
 	return {
+		"due_date": course_invoice_due_date(posting_date, session.get("session_date")),
 		"customer": context["customer"],
 		"parent": inquiry_doc.parent,
 		"student": inquiry_doc.student,

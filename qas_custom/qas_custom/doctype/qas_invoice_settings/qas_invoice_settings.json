@@ -15,6 +15,7 @@
   "school_website",
   "school_address",
   "payment_due_days",
+  "overdue_reminder_interval_days",
   "invoice_message",
   "accepted_payment_methods",
   "bank_section",
@@ -77,6 +78,14 @@
    "fieldname": "payment_due_days",
    "fieldtype": "Int",
    "label": "Default Payment Due Days"
+  },
+  {
+   "fieldname": "overdue_reminder_interval_days",
+   "fieldtype": "Int",
+   "label": "Overdue Reminder Interval (Days)",
+   "default": "4",
+   "reqd": 1,
+   "description": "Days between overdue reminders for ordinary and trial invoices. Excludes payment plans. First reminder is eligible the day after the due date; maximum five attempts."
   },
   {
    "default": "Thank you for learning with Queensland Art School. Please contact us if you have any questions about this invoice.",

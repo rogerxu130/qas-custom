@@ -34,6 +34,11 @@ def invoice(**overrides):
 
 
 class TestOverdueReminderCadence(TestCase):
+	def setUp(self):
+		setting = patch("qas_custom.modules.notifications.invoice_overdue_reminders.get_invoice_settings", return_value={"overdue_reminder_interval_days": 4})
+		self.settings = setting.start()
+		self.addCleanup(setting.stop)
+
 	def test_first_reminder_is_due_one_day_after_due_date(self):
 		self.assertIsNone(next_reminder_sequence(invoice(due_date="2026-07-08"), [], date(2026, 7, 8)))
 		self.assertEqual(next_reminder_sequence(invoice(due_date="2026-07-08"), [], date(2026, 7, 9)), 1)
@@ -42,10 +47,13 @@ class TestOverdueReminderCadence(TestCase):
 		"qas_custom.modules.notifications.invoice_overdue_reminders._system_datetime_to_brisbane",
 		side_effect=lambda value: value,
 	)
-	def test_later_reminders_require_three_full_calendar_days(self, _mock_timezone):
+	def test_later_reminders_require_four_full_calendar_days(self, _mock_timezone):
 		attempts = [{"creation": datetime(2026, 7, 9, 9, 0)}]
-		self.assertIsNone(next_reminder_sequence(invoice(), attempts, date(2026, 7, 11)))
-		self.assertEqual(next_reminder_sequence(invoice(), attempts, date(2026, 7, 12)), 2)
+		self.assertIsNone(next_reminder_sequence(invoice(), attempts, date(2026, 7, 12)))
+		self.assertEqual(next_reminder_sequence(invoice(), attempts, date(2026, 7, 13)), 2)
+		self.settings.return_value = {"overdue_reminder_interval_days": 6}
+		self.assertIsNone(next_reminder_sequence(invoice(), attempts, date(2026, 7, 13)))
+		self.assertEqual(next_reminder_sequence(invoice(), attempts, date(2026, 7, 15)), 2)
 
 	@patch(
 		"qas_custom.modules.notifications.invoice_overdue_reminders._system_datetime_to_brisbane",
@@ -63,6 +71,11 @@ class TestOverdueReminderCadence(TestCase):
 
 
 class TestOverdueReminderScheduler(TestCase):
+	def setUp(self):
+		setting = patch("qas_custom.modules.notifications.invoice_overdue_reminders.get_invoice_settings", return_value={"overdue_reminder_interval_days": 4})
+		setting.start()
+		self.addCleanup(setting.stop)
+
 	@patch("qas_custom.modules.notifications.invoice_overdue_reminders._queue_overdue_invoice_reminder")
 	@patch("qas_custom.modules.notifications.invoice_overdue_reminders._get_reminder_history")
 	@patch("qas_custom.modules.notifications.invoice_overdue_reminders._get_overdue_invoice_candidates")

@@ -28,7 +28,6 @@ from qas_custom.utils.environment import email_block_reason, outbound_email_enab
 BRISBANE_TIMEZONE = "Australia/Brisbane"
 CONFIG_KEY = "qas_overdue_invoice_reminders_enabled"
 EVENT_PREFIX = "invoice_overdue_reminder:"
-REMINDER_INTERVAL_DAYS = 3
 MAX_REMINDER_ATTEMPTS = 5
 SCHEDULER_BATCH_SIZE = 100
 
@@ -175,14 +174,15 @@ def overdue_reminder_eligibility(invoice, attempts=None, today=None):
 
 	last_reminder_at = attempt_dates[0]
 	last_attempt_date = _system_datetime_to_brisbane(last_reminder_at).date()
+	reminder_interval_days = get_invoice_settings()["overdue_reminder_interval_days"]
 	days_since_last_attempt = date_diff(today, last_attempt_date)
-	if days_since_last_attempt < REMINDER_INTERVAL_DAYS:
+	if days_since_last_attempt < reminder_interval_days:
 		return _ineligible(
 			"recently_reminded",
-			_("This invoice was reminded within the last {0} days.").format(REMINDER_INTERVAL_DAYS),
+			_("This invoice was reminded within the last {0} days.").format(reminder_interval_days),
 			attempt_count=attempt_count,
 			last_reminder_at=last_reminder_at,
-			days_until_eligible=REMINDER_INTERVAL_DAYS - days_since_last_attempt,
+			days_until_eligible=reminder_interval_days - days_since_last_attempt,
 		)
 	return {
 		"eligible": True,
