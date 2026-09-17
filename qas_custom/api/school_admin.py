@@ -1621,3 +1621,9 @@ def school_admin_complete_direct_enrollment(inquiry=None, payload=None):
 	from qas_custom.services.direct_enrollment import complete
 
 	return complete(inquiry, payload)
+
+
+@frappe.whitelist()
+def school_admin_update_invoice_due_date(invoice=None, due_date=None):
+	from qas_custom.services.school_admin import update_school_admin_invoice_due_date_data
+	return update_school_admin_invoice_due_date_data(invoice=invoice, due_date=due_date)

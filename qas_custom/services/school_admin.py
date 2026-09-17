@@ -2268,6 +2268,8 @@ def reopen_school_admin_unpaid_invoice_data(invoice=None, reason=None):
 		amendment.flags.ignore_permissions = True
 		_run_school_admin_invoice_mutation(lambda: amendment.insert(ignore_permissions=True))
 		_move_enrollment_invoice_snapshots_to_amendment(doc, amendment, reason)
+		from qas_custom.modules.billing.invoice_corrections import link_trial_amendment
+		link_trial_amendment(doc, amendment)
 		_add_comment(
 			"Sales Invoice",
 			doc.name,
@@ -8800,3 +8802,18 @@ def _get_comments(reference_doctype, reference_name, limit=20):
 def _set_if_field(doc, fieldname, value):
 	if fieldname and doc.meta.has_field(fieldname):
 		doc.set(fieldname, value)
+
+
+def update_school_admin_invoice_due_date_data(invoice=None, due_date=None):
+	_require_school_admin()
+	if not invoice:
+		frappe.throw(_("Invoice is required."))
+	from qas_custom.modules.billing.invoice_corrections import change_submitted_due_date
+	frappe.db.savepoint("invoice_due_date_correction")
+	try:
+		doc = change_submitted_due_date(invoice, due_date)
+		frappe.db.commit()
+		return _build_invoice_payload(doc)
+	except Exception:
+		frappe.db.rollback(save_point="invoice_due_date_correction")
+		raise
