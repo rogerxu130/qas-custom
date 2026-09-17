@@ -71,6 +71,7 @@ def is_trial(doc):
 def eligible(doc, config):
 	return bool(configured(config) and doc.get('company') == config.company
 		and cint(doc.docstatus) == 1 and not cint(doc.get('is_return'))
+		and not (config.mode == 'Live' and cint(doc.get('qas_stripe_test')))
 		and doc.get('currency') == 'AUD' and is_trial(doc) and pilot_parent(doc)
 		and cents(get_invoice_payable_amount(doc)) > 0)
 
@@ -158,6 +159,10 @@ def start_checkout(token):
 		doc.reload()
 		if not eligible(doc, config):
 			frappe.throw('This invoice is no longer available for online payment.')
+		if config.mode == 'Test':
+			from qas_custom.modules.billing.store_credit import get_invoice_store_credit_applied
+			if get_invoice_store_credit_applied(doc.name) > 0:
+				frappe.throw('Use a test invoice without store credit.')
 		amount = cents(get_invoice_payable_amount(doc))
 		rows = frappe.get_all(PAYMENT, filters={'invoice': doc.name, 'mode': config.mode,
 			'status': ['!=', 'Expired']}, pluck='name', order_by='creation desc', limit_page_length=1)
@@ -169,7 +174,7 @@ def start_checkout(token):
 			if session.get('payment_status') == 'paid' or session.get('status') == 'complete':
 				frappe.throw('Payment is being confirmed. Please refresh shortly.')
 			if session.get('status') == 'open' and attempt.amount_cents == amount:
-				return {'url': checked_checkout_url(session.get('url'))}
+				return {'url': checked_checkout_url(session.get('url')), 'attempt': attempt.name}
 			if session.get('status') == 'open':
 				stripe_request(config, 'POST', 'checkout/sessions/' + attempt.checkout_session + '/expire')
 			attempt.status = 'Expired'
@@ -182,22 +187,25 @@ def start_checkout(token):
 			frappe.db.commit()
 			frappe.throw('Payment requires staff review.')
 		if not attempt:
+			if config.mode == 'Test':
+				doc.db_set('qas_stripe_test', 1, update_modified=False)
 			attempt = frappe.get_doc({'doctype': PAYMENT, 'invoice': doc.name, 'mode': config.mode,
-				'amount_cents': amount, 'currency': 'aud', 'status': 'Pending'}).insert(ignore_permissions=True)
+				'amount_cents': amount, 'currency': 'aud', 'status': 'Pending',
+				'full_test_flow': cint(config.mode == 'Test')}).insert(ignore_permissions=True)
 		# Persist idempotency identity BEFORE network access. Retry uses exactly the same payload.
 		frappe.db.commit()
 		from qas_custom.modules.billing.presentation import parent_portal_invoice_link
 		portal = parent_portal_invoice_link(doc.name).split('/invoices', 1)[0]
 		# Stable return URL allows retry after a timeout with the same idempotency key.
 		return_url = portal + '/trial-payment?attempt=' + attempt.name
-		data = {'mode': 'payment', 'payment_method_types[0]': 'card',
+		data = {'mode': 'payment', 'locale': 'en', 'payment_method_types[0]': 'card',
 			'line_items[0][price_data][currency]': 'aud',
 			'line_items[0][price_data][unit_amount]': attempt.amount_cents,
 			'line_items[0][price_data][product_data][name]': 'QAS trial invoice ' + doc.name,
 			'line_items[0][quantity]': 1, 'client_reference_id': attempt.name,
 			'metadata[qas_attempt]': attempt.name, 'metadata[qas_invoice]': doc.name,
 			'payment_intent_data[metadata][qas_attempt]': attempt.name,
-			'success_url': return_url, 'cancel_url': return_url}
+			'success_url': return_url + '&result=success', 'cancel_url': return_url + '&result=cancel'}
 		session = stripe_request(config, 'POST', 'checkout/sessions', data, 'qas-trial-' + attempt.name)
 		attempt.reload()
 		if attempt.status in ('Paid', 'Test Paid', 'Needs Review', 'Retry') or attempt.payment_entry:
@@ -215,7 +223,7 @@ def start_checkout(token):
 			attempt.save(ignore_permissions=True)
 			frappe.db.commit()
 			frappe.throw('Invoice changed. Refresh and try again.')
-		return {'url': attempt.checkout_url}
+		return {'url': attempt.checkout_url, 'attempt': attempt.name}
 
 
 def checked_checkout_url(url):
@@ -310,20 +318,24 @@ def settle(session, config, event_id):
 		or cents(get_invoice_payable_amount(doc)) != attempt.amount_cents):
 		attempt.status = 'Needs Review'
 		attempt.last_error = 'Invoice owner, eligibility or balance changed after Checkout. Reconcile the Stripe payment manually.'
-	elif config.mode == 'Test':
+	elif config.mode == 'Test' and not cint(attempt.get('full_test_flow')):
 		attempt.last_error = ''
 		attempt.status = 'Test Paid'  # Never settle a real invoice with simulated funds.
 	else:
 		if not payment_mutations_enabled():
 			frappe.throw('Payment posting is disabled in this environment.')
+		if config.mode == 'Test' and not cint(doc.get('qas_stripe_test')):
+			frappe.throw('Test invoice marker is missing.')
 		entry = create_payment_entry(doc, attempt, config)
 		attempt.payment_entry = entry.name
-		attempt.status = 'Paid'
+		attempt.status = 'Test Paid' if config.mode == 'Test' else 'Paid'
 		attempt.last_error = ''
 		doc.add_comment('Comment', 'Stripe payment recorded: ' + entry.name)
 		from qas_custom.services.school_admin import _enqueue_paid_receipt
 		receipt = _enqueue_paid_receipt(frappe.get_doc('Sales Invoice', doc.name), payment_entry=entry, source='stripe')
 		attempt.receipt_queued = cint((receipt or {}).get('queued'))
+		from qas_custom.modules.notifications.commands import notify_stripe_invoice_paid
+		notify_stripe_invoice_paid(doc, entry, test=config.mode == 'Test')
 	attempt.save(ignore_permissions=True)
 	frappe.db.commit()
 	return {'ok': True}
@@ -340,15 +352,18 @@ def create_payment_entry(doc, attempt, config):
 	try:
 		frappe.set_user('Administrator')
 		credit = get_invoice_store_credit_applied(doc.name)
+		if config.mode == 'Test' and credit > 0:
+			frappe.throw('Use a test invoice without store credit so testing does not consume real credit.')
 		if credit > 0 and not has_invoice_store_credit_journal_entry(doc.name):
 			ensure_store_credit_journal_entry(doc, amount=credit)
 			doc.reload()
-		entry = get_payment_entry('Sales Invoice', doc.name, bank_account=config.clearing_account,
+		entry = get_payment_entry('Sales Invoice', doc.name, bank_account=clearing_account(config),
 			bank_amount=attempt.amount_cents / 100, ignore_permissions=True)
 		entry.mode_of_payment = config.mode_of_payment
 		entry.reference_no = attempt.payment_intent
 		entry.reference_date = now_datetime().date()
-		entry.remarks = 'Stripe trial invoice payment ' + attempt.payment_intent
+		entry.qas_stripe_test = cint(config.mode == 'Test')
+		entry.remarks = ('TEST - no real funds - ' if config.mode == 'Test' else '') + 'Stripe trial invoice payment ' + attempt.payment_intent
 		entry.paid_amount = entry.received_amount = attempt.amount_cents / 100
 		for reference in entry.references:
 			reference.allocated_amount = attempt.amount_cents / 100 if reference.reference_name == doc.name else 0
@@ -360,8 +375,20 @@ def create_payment_entry(doc, attempt, config):
 		frappe.set_user(original_user)
 
 
+def clearing_account(config):
+	if config.mode == 'Test':
+		name = config.get('test_clearing_account')
+		if not name or name == config.clearing_account:
+			frappe.throw('Configure a separate Stripe Test Clearing Account before testing.')
+		return name
+	return config.clearing_account
+
+
 def validate_accounts(config):
-	account = frappe.get_doc('Account', config.clearing_account)
+	from qas_custom.modules.billing.invoice_settings import get_invoice_settings
+	if not (get_invoice_settings().get('school_email') or '').strip():
+		frappe.throw('Configure School Email in QAS Invoice Settings for payment notifications.')
+	account = frappe.get_doc('Account', clearing_account(config))
 	if (account.company != config.company or account.account_currency != 'AUD'
 		or cint(account.is_group) or cint(account.disabled) or account.account_type not in ('Bank', 'Cash')):
 		frappe.throw('Choose an active AUD bank/cash clearing account for the configured company.')

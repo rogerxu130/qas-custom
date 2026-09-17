@@ -26,7 +26,7 @@ The migration changes the default series while retaining legacy series options f
 
 - Book a trial under the pilot parent and verify its submitted invoice receives a Pay online button in the invoice email and parent's invoice view. Existing unpaid pilot trial invoices can be opened from the parent view or the admin invoice's **Online payment link**.
 - Log in as another parent: no online-payment link. Attempt a direct API call for another invoice: access denied. Test cancelled/draft/paid and non-trial records too.
-- Test card payment in Stripe test mode; the portal must show **Test payment successful**, and **no actual Payment Entry may be created**. The real invoice remains unpaid. Use a fresh pilot invoice for another complete test.
+- Test card payment in Stripe test mode on a fresh pilot trial invoice without store credit. A new full-flow attempt marks the invoice and Payment Entry as **Stripe Test Record**, submits one Payment Entry to **Stripe Test Clearing**, and updates the invoice to Paid. Verify the parent TEST receipt email/PDF and the admin TEST payment email. No actual money is collected. Use a fresh pilot invoice for another complete test.
 - Test the Apple Pay flow on a compatible device following Stripe's current testing instructions; a desktop mock does not establish actual wallet availability.
 - Test the same event delivered twice, a timeout followed by retry, a failed card payment, cancellation/back navigation, and the browser closed immediately after payment. Check the webhook delivery and **QAS Stripe Payment** records in Desk.
 - Test an offline payment/invoice change while Checkout is open. Existing Stripe-hosted pages can remain open until expiration; if funds arrive against a changed invoice, the payment record becomes **Needs Review**. It must not silently create a duplicate allocation.
@@ -52,3 +52,15 @@ bench --site YOUR_SITE execute qas_custom.patches.v2026_09_17_setup_stripe_accou
 ```
 
 The command is safe to rerun: existing records and administrator configuration are preserved. This migration does not enable the pilot or create payments. Stripe end-to-end testing is still required after deployment.
+
+## Full test workflow update — 17 September 2026
+
+Run the new `v2026_09_17_stripe_full_test_flow` migration. It adds visible test markers and a separate AUD Stripe Test Clearing account, without changing existing keys, mode or enable switch. Set School Email in QAS Invoice Settings: this is the admin payment notification recipient.
+
+Payment links now check status and redirect automatically to English Stripe Checkout. Paid invoices show an English paid message. The return page polls for confirmation; cancellation allows an explicit retry without redirect loops. All payment UI copy is English.
+
+Only **new** attempts opt into the full test workflow. Historic Test Paid records (including invoice 2600012 if already used) are not retroactively posted or emailed. Create a fresh trial invoice for the same pilot parent. Duplicate webhooks do not duplicate Payment Entries, receipts or admin emails. Test-marked invoices are blocked from Live Checkout. Test payments cannot consume store credit, grant real bonuses or report paid-invoice ad conversions.
+
+These are actual marked accounting records in the current site, not an isolated database: ordinary reports may include them until cleanup. After acceptance, cancel the test Payment Entry first, then cancel the test invoice through normal accounting controls; retain the audit trail and coordinate any linked trial booking cleanup. Never reset balances using direct database writes. Test receipts say TEST / no real money collected. Do not use these invoices for actual tuition collection.
+
+Acceptance checks: automatic Checkout; TEST receipt received with PDF; admin email received at School Email; invoice Paid/zero outstanding; one submitted marked Payment Entry to the test ledger; second delivery creates no duplicates; reopening invoice shows paid. Queued email is not evidence of delivery—check Email Queue/notification audit if mail is absent. Actual Stripe/Apple Pay and deployment verification must be performed after release.

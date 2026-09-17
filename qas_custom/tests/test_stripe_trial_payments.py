@@ -79,6 +79,7 @@ class StripeTrialPaymentTests(TestCase):
 	def session_and_attempt(self, mode='Test'):
 		attempt = MagicMock()
 		for key, value in dict(name='attempt1', invoice='2600001', mode=mode, status='Open', checkout_session='cs_1', amount_cents=3000, currency='aud', payment_entry=None).items(): setattr(attempt,key,value)
+		attempt.get.side_effect = lambda key: getattr(attempt, key, None) if key != 'full_test_flow' else 0
 		session = dict(id='cs_1', livemode=mode=='Live', metadata={'qas_attempt':'attempt1','qas_invoice':'2600001'}, client_reference_id='attempt1', amount_total=3000, currency='aud', payment_status='paid', payment_intent='pi_1')
 		return session,attempt
 
@@ -145,6 +146,7 @@ class CheckoutLifecycleTests(TestCase):
 		self.addCleanup(self.stack.close)
 		for name,value in [('authorize',(self.doc,self.config)),('eligible',True),('get_invoice_payable_amount',30),('validate_accounts',None)]:
 			self.stack.enter_context(patch.object(p,name,return_value=value))
+		self.stack.enter_context(patch('qas_custom.modules.billing.store_credit.get_invoice_store_credit_applied', return_value=0))
 		self.stack.enter_context(patch.object(p.frappe,'cache',MagicMock()))
 		self.db=self.stack.enter_context(patch.object(p.frappe,'db',MagicMock()))
 		self.rows=self.stack.enter_context(patch.object(p.frappe,'get_all',return_value=['a1']))
@@ -204,9 +206,60 @@ class LivePaymentPostingTests(TestCase):
 		session,attempt=self.session_and_attempt('Live');self.config.mode='Live'
 		self.invoice.add_comment=MagicMock()
 		entry=frappe._dict(name='PE1')
-		with self.settle_context(attempt),patch.object(p.frappe,'db',MagicMock()),patch.object(p,'pilot_parent',return_value=True),patch.object(p,'is_trial',return_value=True),patch.object(p,'get_invoice_payable_amount',return_value=30),patch.object(p,'payment_mutations_enabled',return_value=True),patch.object(p,'create_payment_entry',return_value=entry) as create,patch('qas_custom.services.school_admin._enqueue_paid_receipt',return_value={'queued':True}) as receipt:
+		with self.settle_context(attempt),patch.object(p.frappe,'db',MagicMock()),patch.object(p,'pilot_parent',return_value=True),patch.object(p,'is_trial',return_value=True),patch.object(p,'get_invoice_payable_amount',return_value=30),patch.object(p,'payment_mutations_enabled',return_value=True),patch.object(p,'create_payment_entry',return_value=entry) as create,patch('qas_custom.services.school_admin._enqueue_paid_receipt',return_value={'queued':True}) as receipt, patch('qas_custom.modules.notifications.commands.notify_stripe_invoice_paid') as admin:
 			p.settle(session,self.config,'evt1')
 			p.settle(session,self.config,'evt2')
-			create.assert_called_once();receipt.assert_called_once()
+			create.assert_called_once();receipt.assert_called_once();admin.assert_called_once()
 			self.assertEqual(attempt.status,'Paid');self.assertEqual(attempt.payment_entry,'PE1')
 			self.assertEqual(attempt.receipt_queued,1)
+
+
+class FullTestPaymentPostingTests(LivePaymentPostingTests):
+	def test_new_test_confirmation_posts_and_notifies_once(self):
+		session, attempt = self.session_and_attempt()
+		attempt.get.side_effect = lambda key: 1 if key == 'full_test_flow' else None
+		self.invoice.qas_stripe_test = 1
+		self.invoice.add_comment = MagicMock()
+		entry = frappe._dict(name='TEST-PE1')
+		with self.settle_context(attempt), patch.object(p.frappe, 'db', MagicMock()), patch.object(p, 'pilot_parent', return_value=True), patch.object(p, 'is_trial', return_value=True), patch.object(p, 'get_invoice_payable_amount', return_value=30), patch.object(p, 'payment_mutations_enabled', return_value=True), patch.object(p, 'create_payment_entry', return_value=entry) as create, patch('qas_custom.services.school_admin._enqueue_paid_receipt', return_value={'queued': True}) as receipt, patch('qas_custom.modules.notifications.commands.notify_stripe_invoice_paid') as admin:
+			p.settle(session, self.config, 'evt1')
+			p.settle(session, self.config, 'evt2')
+			create.assert_called_once()
+			receipt.assert_called_once()
+			admin.assert_called_once_with(self.invoice, entry, test=True)
+			self.assertEqual(attempt.payment_entry, 'TEST-PE1')
+			self.assertEqual(attempt.status, 'Test Paid')
+
+	def test_separate_test_clearing_is_required(self):
+		with patch.object(p.frappe, 'throw', side_effect=ValueError):
+			for name in (None, 'Stripe'):
+				self.config.test_clearing_account = name
+				with self.assertRaises(ValueError): p.clearing_account(self.config)
+			self.config.test_clearing_account = 'Stripe Test'
+			self.assertEqual(p.clearing_account(self.config), 'Stripe Test')
+			self.config.mode = 'Live'
+			self.assertEqual(p.clearing_account(self.config), 'Stripe')
+
+	def test_test_entry_submits_to_test_bank_with_marker_and_allocation(self):
+		import sys
+		from contextlib import ExitStack
+		from types import SimpleNamespace
+		entry = MagicMock()
+		entry.references = [frappe._dict(reference_name=self.invoice.name)]
+		provider = MagicMock(return_value=entry)
+		self.config.test_clearing_account = 'Stripe Test'
+		attempt = frappe._dict(amount_cents=3000, payment_intent='pi_test')
+		with ExitStack() as stack:
+			stack.enter_context(patch.dict(sys.modules, {'erpnext.accounts.doctype.payment_entry.payment_entry': SimpleNamespace(get_payment_entry=provider)}))
+			stack.enter_context(patch.object(p, 'validate_accounts'))
+			stack.enter_context(patch.object(p.frappe, 'session', SimpleNamespace(user='Guest')))
+			stack.enter_context(patch.object(p.frappe, 'set_user'))
+			stack.enter_context(patch('qas_custom.modules.billing.store_credit.get_invoice_store_credit_applied', return_value=0))
+			stack.enter_context(patch('qas_custom.modules.billing.store_credit.sync_invoice_store_credit_snapshot'))
+			p.create_payment_entry(self.invoice, attempt, self.config)
+			self.assertEqual(provider.call_args.kwargs['bank_account'], 'Stripe Test')
+			self.assertEqual(entry.qas_stripe_test, 1)
+			self.assertEqual(entry.references[0].allocated_amount, 30)
+			self.assertIn('no real funds', entry.remarks)
+			entry.insert.assert_called_once()
+			entry.submit.assert_called_once()

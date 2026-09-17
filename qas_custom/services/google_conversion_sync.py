@@ -41,6 +41,8 @@ RETRY_MINUTES = (1, 5, 15, 60, 240)
 
 
 def capture_payment_entry_submit(doc, method=None):
+	if cint(doc.get("qas_stripe_test")):
+		return
 	if not _capture_enabled() or cint(doc.get("docstatus")) != 1:
 		return
 	invoice_names = sorted(
@@ -257,10 +259,10 @@ def _trial_invoice_paid_event(invoice_name):
 	invoice = frappe.db.get_value(
 		"Sales Invoice",
 		invoice_name,
-		["name", "docstatus", "status", "grand_total", "outstanding_amount"],
+		["name", "docstatus", "status", "grand_total", "outstanding_amount", "qas_stripe_test"],
 		as_dict=True,
 	)
-	if not invoice or cint(invoice.docstatus) != 1 or str(invoice.status or "").lower() == "cancelled":
+	if not invoice or cint(invoice.get("qas_stripe_test")) or cint(invoice.docstatus) != 1 or str(invoice.status or "").lower() == "cancelled":
 		return None
 	if flt(invoice.outstanding_amount) > 0.005:
 		return None

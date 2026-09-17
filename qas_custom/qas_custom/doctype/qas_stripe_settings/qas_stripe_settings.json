@@ -14,6 +14,7 @@
   "signing_secret",
   "company",
   "clearing_account",
+  "test_clearing_account",
   "mode_of_payment",
   "webhook_url",
   "test_notice"
@@ -91,7 +92,14 @@
   {
    "fieldname": "test_notice",
    "fieldtype": "HTML",
-   "options": "<p>Test payments never settle real invoices. Switch to Live only when ready to collect real money from the pilot parent. Fees and payouts require separate reconciliation.</p>"
+   "options": "Test payments update marked test invoices, create test payment entries, and send TEST receipts. No real money is collected. Cancel test records after acceptance testing. Fees and payouts require separate reconciliation."
+  },
+  {
+   "fieldname": "test_clearing_account",
+   "label": "Stripe Test Clearing Account (AUD)",
+   "fieldtype": "Link",
+   "options": "Account",
+   "description": "Simulated payments update test invoices and post only to this separate ledger."
   }
  ],
  "permissions": [

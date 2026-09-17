@@ -2060,7 +2060,7 @@ def _receipt_pdf_attachment(invoice: str, *, payment_entry=None, amounts=None, p
 
 
 def _receipt_email_subject(invoice_doc):
-	return _("Queensland Art School - Payment receipt {0}").format(invoice_doc.name)
+	return ("[TEST] " if cint(invoice_doc.get("qas_stripe_test")) else "") + "Queensland Art School - Payment receipt {0}".format(invoice_doc.name)
 
 
 def _receipt_email_message(invoice_doc, amounts, payment_context):
@@ -2082,7 +2082,7 @@ def _receipt_email_message(invoice_doc, amounts, payment_context):
 				<div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;">
 					<div style="padding:22px 24px;background:#172033;color:#ffffff;">
 						<p style="margin:0 0 6px;font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:#f7b6a4;">{school_name}</p>
-						<h1 style="margin:0;font-size:24px;line-height:1.3;">Payment receipt</h1>
+						<h1 style="margin:0;font-size:24px;line-height:1.3;">{receipt_title}</h1>{test_notice}
 						<div style="margin-top:6px;color:#cbd5e1;">Invoice {invoice}</div>
 						{school_identity}
 					</div>
@@ -2117,6 +2117,8 @@ def _receipt_email_message(invoice_doc, amounts, payment_context):
 			</div>
 		</div>
 	""".format(
+		receipt_title="TEST Payment receipt" if cint(invoice_doc.get("qas_stripe_test")) else "Payment receipt",
+		test_notice="<p>TEST — Simulated payment. No real money was collected.</p>" if cint(invoice_doc.get("qas_stripe_test")) else "",
 		invoice=escape_html(context["invoice"]),
 		school_name=escape_html(context.get("school_name") or "Queensland Art School"),
 		school_identity=_school_identity_email_html(context),
@@ -2171,7 +2173,7 @@ def _receipt_pdf_html(context):
 		<tr>
 			<td>
 				<p class="brand">{school_name}</p>
-				<h1>Payment receipt</h1>
+				<h1>{receipt_title}</h1>{test_notice}
 				<div class="muted">Invoice {invoice}</div>
 				{school_identity}
 			</td>
@@ -2213,6 +2215,8 @@ def _receipt_pdf_html(context):
 </body>
 </html>
 	""".format(
+		receipt_title="TEST Payment receipt" if receipt.get("is_test") else "Payment receipt",
+		test_notice="<p>TEST — Simulated payment. No real money was collected.</p>" if receipt.get("is_test") else "",
 		invoice=escape_html(context["invoice"]),
 		school_name=escape_html(context.get("school_name") or "Queensland Art School"),
 		school_identity=_school_identity_pdf_html(context),
@@ -2261,6 +2265,7 @@ def _receipt_payment_context(invoice_doc, payment_doc, amounts, source=None):
 		"remaining_amount": flt(remaining),
 		"receipt_reference": payment_doc.name if payment_doc else _paid_receipt_event_key(invoice_doc.name),
 		"source": source,
+		"is_test": bool(cint(invoice_doc.get("qas_stripe_test"))),
 	}
 
 
@@ -2439,3 +2444,18 @@ def _add_invoice_comment(invoice, message):
 			"content": message,
 		}
 	).insert(ignore_permissions=True)
+
+
+def notify_stripe_invoice_paid(invoice, payment_entry, *, test=False):
+	"""Queue an admin email in the payment transaction; duplicate webhooks never reenter."""
+	recipient = (get_invoice_settings().get('school_email') or '').strip()
+	if not recipient:
+		frappe.throw('Configure School Email in QAS Invoice Settings for payment notifications.')
+	prefix = '[TEST] ' if test else ''
+	subject = prefix + 'Invoice ' + invoice.name + ' paid via Stripe'
+	message = ('<p>' + ('TEST — Simulated funds; no real money collected. ' if test else '')
+		+ 'Invoice <strong>' + escape_html(invoice.name) + '</strong> has been paid.</p>'
+		+ '<p>Payment entry: ' + escape_html(payment_entry.name) + '</p>')
+	return sendmail_or_skip(action='stripe_admin_payment', recipients=[recipient],
+		subject=subject, message=message, reference_doctype='Sales Invoice',
+		reference_name=invoice.name, delayed=True)

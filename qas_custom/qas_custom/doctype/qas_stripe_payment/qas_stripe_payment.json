@@ -15,7 +15,8 @@
   "payment_entry",
   "last_event",
   "last_error",
-  "receipt_queued"
+  "receipt_queued",
+  "full_test_flow"
  ],
  "fields": [
   {
@@ -98,6 +99,13 @@
    "label": "Receipt queued",
    "fieldtype": "Check",
    "read_only": 1
+  },
+  {
+   "fieldname": "full_test_flow",
+   "label": "Full test workflow",
+   "fieldtype": "Check",
+   "read_only": 1,
+   "default": "0"
   }
  ],
  "permissions": [

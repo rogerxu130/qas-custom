@@ -293,6 +293,8 @@ def grant_store_credit_bonus_for_payment_entry(payment_entry):
 	if not payment_entry:
 		return None
 	doc = frappe.get_doc("Payment Entry", payment_entry) if isinstance(payment_entry, str) else payment_entry
+	if cint(doc.get("qas_stripe_test")):
+		return {"created": False, "skipped": True, "reason": "Simulated Stripe payment."}
 	if doc.get("payment_type") and doc.get("payment_type") != "Receive":
 		return {"created": False, "skipped": True, "reason": "Payment is not a received payment."}
 
