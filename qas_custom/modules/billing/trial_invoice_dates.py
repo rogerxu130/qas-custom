@@ -45,10 +45,11 @@ def sync_trial_invoice_dates(invoice, inquiry, *, dry_run=False):
 
 def repair_trial_invoice_dates(*, dry_run=True):
     """Preview by default; migration applies updates in its existing transaction."""
+    # source_type is optional and is absent on production Sales Invoice schemas.
+    # The linked Inquiry type is checked by sync_trial_invoice_dates instead.
     changes = []
     for row in frappe.get_all("Sales Invoice", filters={
         "docstatus": ["<", 2], "is_return": 0, "source_doctype": "Inquiry",
-        "source_type": ["in", ["Trial Inquiry", "Replacement Trial Inquiry"]],
     }, fields=["name", "source_document"], limit_page_length=0):
         if not row.source_document or not frappe.db.exists("Inquiry", row.source_document):
             continue

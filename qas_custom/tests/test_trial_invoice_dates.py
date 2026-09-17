@@ -77,6 +77,29 @@ class TestTrialInvoiceDates(TestCase):
             self.assertEqual(len(repair_trial_invoice_dates()), 1)
         self.assertEqual(self.invoice.due_date, '2026-09-08')
 
+    def test_migration_supports_production_schema_without_source_type(self):
+        from qas_custom.patches.v2026_09_17_correct_trial_invoice_due_dates import execute
+        def query(doctype, *, filters, fields, limit_page_length):
+            self.assertEqual(doctype, 'Sales Invoice')
+            self.assertNotIn('source_type', filters)
+            self.assertNotIn('source_type', fields)
+            self.assertEqual(filters['source_doctype'], 'Inquiry')
+            return [frappe._dict(name='INV1', source_document='INQ1')]
+        with patch(MODULE+'.frappe.get_all', side_effect=query), patch(
+            MODULE+'.frappe.get_doc', side_effect=[self.invoice, self.inquiry]):
+            execute()
+        self.assertEqual(str(self.invoice.due_date), '2026-10-05')
+        self.invoice.set_status.assert_called_once_with(update=True)
+
+    def test_non_trial_inquiry_invoice_is_not_changed(self):
+        self.inquiry.inquiry_type = 'School Visit'
+        with patch(MODULE+'.frappe.get_all', return_value=[frappe._dict(name='INV1', source_document='INQ1')]), patch(
+            MODULE+'.frappe.get_doc', side_effect=[self.invoice, self.inquiry]):
+            self.assertEqual(repair_trial_invoice_dates(dry_run=False), [])
+        self.assertEqual(self.invoice.due_date, '2026-09-08')
+        self.db.set_value.assert_not_called()
+        self.invoice.add_comment.assert_not_called()
+
     def test_new_and_replacement_payload_use_lesson_date(self):
         module='qas_custom.services.trial_invoice'
         inquiry=frappe._dict(name='INQ1', parent='P1', student='S1', course_session='SESSION1')
