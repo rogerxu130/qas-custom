@@ -1,4 +1,4 @@
-"""Restricted trial-invoice Checkout pilot. No public rollout switch in this release."""
+"""Trial-invoice Checkout: all eligible Live parents, restricted full-flow Test payments."""
 from __future__ import annotations
 
 import base64
@@ -16,7 +16,7 @@ from frappe.utils import cint, get_datetime, get_url, now_datetime
 from qas_custom.modules.billing.store_credit import get_invoice_payable_amount
 from qas_custom.utils.environment import payment_mutations_enabled
 
-PILOT_USER = "rogerxu130@gmail.com"
+TEST_USER = "rogerxu130@gmail.com"
 SETTINGS = "QAS Stripe Settings"
 PAYMENT = "QAS Stripe Payment"
 TRIAL_SOURCES = {"Trial Inquiry", "Replacement Trial Inquiry"}
@@ -44,8 +44,10 @@ def configured(config):
 		and payment_mutations_enabled())
 
 
-def pilot_parent(doc):
+def payment_parent(doc, config):
 	"""Use the invoice's actual account and owner, never request-supplied email."""
+	if not config or config.mode not in ('Test', 'Live') or not doc.get('customer'):
+		return None
 	parent_name = doc.get('parent')
 	if not parent_name:
 		parents = frappe.get_all('Parent', filters={'customer': doc.get('customer')}, pluck='name', limit_page_length=2)
@@ -53,7 +55,8 @@ def pilot_parent(doc):
 			return None
 		parent_name = parents[0]
 	parent = frappe.get_doc('Parent', parent_name)
-	if (str(parent.get('linked_user') or '').strip().lower() != PILOT_USER
+	if (not str(parent.get('linked_user') or '').strip()
+		or (config.mode == 'Test' and str(parent.linked_user).strip().lower() != TEST_USER)
 		or parent.get('customer') != doc.get('customer') or parent.get('status') != 'Active'):
 		return None
 	if not cint(frappe.db.get_value('User', parent.linked_user, 'enabled')):
@@ -72,7 +75,7 @@ def eligible(doc, config):
 	return bool(configured(config) and doc.get('company') == config.company
 		and cint(doc.docstatus) == 1 and not cint(doc.get('is_return'))
 		and not (config.mode == 'Live' and cint(doc.get('qas_stripe_test')))
-		and doc.get('currency') == 'AUD' and is_trial(doc) and pilot_parent(doc)
+		and doc.get('currency') == 'AUD' and is_trial(doc) and payment_parent(doc, config)
 		and cents(get_invoice_payable_amount(doc)) > 0)
 
 
@@ -110,7 +113,7 @@ def payment_url(doc):
 		return ''
 	from qas_custom.modules.billing.presentation import parent_portal_invoice_link
 	portal = parent_portal_invoice_link(doc.name).split('/invoices', 1)[0]
-	return portal + '/trial-payment#' + urlencode({'token': sign_token(doc.name, pilot_parent(doc).name, config)})
+	return portal + '/trial-payment#' + urlencode({'token': sign_token(doc.name, payment_parent(doc, config).name, config)})
 
 
 def authorize(token):
@@ -119,7 +122,7 @@ def authorize(token):
 		frappe.throw('Online payment is not available.', frappe.PermissionError)
 	invoice, parent_name = decode_token(token, config)
 	doc = frappe.get_doc('Sales Invoice', invoice)
-	parent = pilot_parent(doc)
+	parent = payment_parent(doc, config)
 	if not parent or parent.name != parent_name or not is_trial(doc) or doc.company != config.company:
 		frappe.throw('Online payment is not available.', frappe.PermissionError)
 	return doc, config
@@ -313,8 +316,9 @@ def settle(session, config, event_id):
 	frappe.db.sql('select name from `tabSales Invoice` where name=%s for update', attempt.invoice)
 	doc = frappe.get_doc('Sales Invoice', attempt.invoice)
 	# Rollout gating remains enforced, but disabling checkout must not discard money already received.
-	if (not pilot_parent(doc) or not is_trial(doc) or cint(doc.docstatus) != 1 or cint(doc.get('is_return'))
+	if (not payment_parent(doc, config) or not is_trial(doc) or cint(doc.docstatus) != 1 or cint(doc.get('is_return'))
 		or doc.company != config.company or doc.currency != 'AUD'
+		or (config.mode == 'Live' and cint(doc.get('qas_stripe_test')))
 		or cents(get_invoice_payable_amount(doc)) != attempt.amount_cents):
 		attempt.status = 'Needs Review'
 		attempt.last_error = 'Invoice owner, eligibility or balance changed after Checkout. Reconcile the Stripe payment manually.'

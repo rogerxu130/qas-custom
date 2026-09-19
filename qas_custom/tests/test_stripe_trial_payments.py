@@ -37,24 +37,24 @@ class StripeTrialPaymentTests(TestCase):
 			with self.assertRaises(ValueError): p.decode_token(token, self.config)
 
 	def test_pilot_uses_owner_not_contact_email_or_logged_in_operator(self):
-		parent = frappe._dict(name='P1', linked_user=p.PILOT_USER, email='other@example.com', customer='C1', status='Active')
+		parent = frappe._dict(name='P1', linked_user=p.TEST_USER, email='other@example.com', customer='C1', status='Active')
 		with patch.object(p.frappe, 'get_doc', return_value=parent), patch.object(p.frappe, 'db', MagicMock()):
 			p.frappe.db.get_value.return_value=1
-			self.assertEqual(p.pilot_parent(self.invoice).name, 'P1')
-			parent.linked_user='someone@example.com';parent.email=p.PILOT_USER
-			self.assertIsNone(p.pilot_parent(self.invoice))
-			parent.linked_user=p.PILOT_USER;parent.customer='C2'
-			self.assertIsNone(p.pilot_parent(self.invoice))
+			self.assertEqual(p.payment_parent(self.invoice, self.config).name, 'P1')
+			parent.linked_user='someone@example.com';parent.email=p.TEST_USER
+			self.assertIsNone(p.payment_parent(self.invoice, self.config))
+			parent.linked_user=p.TEST_USER;parent.customer='C2'
+			self.assertIsNone(p.payment_parent(self.invoice, self.config))
 			parent.customer='C1';parent.status='Inactive'
-			self.assertIsNone(p.pilot_parent(self.invoice))
+			self.assertIsNone(p.payment_parent(self.invoice, self.config))
 
 	def test_missing_owner_ambiguous_customer_denied(self):
 		self.invoice.parent=None
 		with patch.object(p.frappe, 'get_all', return_value=['P1', 'P2']):
-			self.assertIsNone(p.pilot_parent(self.invoice))
+			self.assertIsNone(p.payment_parent(self.invoice, self.config))
 
 	def test_eligibility_blocks_nonpilot_nontrial_draft_cancelled_credit_and_zero(self):
-		with patch.object(p, 'configured', return_value=True), patch.object(p, 'pilot_parent', return_value=True) as parent, patch.object(p, 'is_trial', return_value=True) as trial, patch.object(p, 'get_invoice_payable_amount', return_value=30) as amount:
+		with patch.object(p, 'configured', return_value=True), patch.object(p, 'payment_parent', return_value=True) as parent, patch.object(p, 'is_trial', return_value=True) as trial, patch.object(p, 'get_invoice_payable_amount', return_value=30) as amount:
 			self.assertTrue(p.eligible(self.invoice, self.config))
 			for key, value in [('docstatus', 0), ('docstatus', 2), ('is_return', 1), ('currency', 'USD'), ('company', 'Other')]:
 				doc = frappe._dict(self.invoice);doc[key] = value
@@ -89,7 +89,7 @@ class StripeTrialPaymentTests(TestCase):
 
 	def test_test_payment_and_duplicate_do_not_touch_accounting(self):
 		session,attempt=self.session_and_attempt()
-		with self.settle_context(attempt), patch.object(p.frappe,'db',MagicMock()), patch.object(p,'pilot_parent',return_value=True), patch.object(p,'is_trial',return_value=True), patch.object(p,'get_invoice_payable_amount',return_value=30), patch.object(p,'create_payment_entry') as create:
+		with self.settle_context(attempt), patch.object(p.frappe,'db',MagicMock()), patch.object(p,'payment_parent',return_value=True), patch.object(p,'is_trial',return_value=True), patch.object(p,'get_invoice_payable_amount',return_value=30), patch.object(p,'create_payment_entry') as create:
 			p.settle(session,self.config,'evt1')
 			self.assertEqual(attempt.status,'Test Paid')
 			p.settle(session,self.config,'evt1')
@@ -98,7 +98,7 @@ class StripeTrialPaymentTests(TestCase):
 
 	def test_paid_before_callback_goes_to_review_not_second_payment(self):
 		session,attempt=self.session_and_attempt('Live');self.config.mode='Live'
-		with self.settle_context(attempt), patch.object(p.frappe,'db',MagicMock()), patch.object(p,'pilot_parent',return_value=True), patch.object(p,'is_trial',return_value=True), patch.object(p,'get_invoice_payable_amount',return_value=0), patch.object(p,'create_payment_entry') as create:
+		with self.settle_context(attempt), patch.object(p.frappe,'db',MagicMock()), patch.object(p,'payment_parent',return_value=True), patch.object(p,'is_trial',return_value=True), patch.object(p,'get_invoice_payable_amount',return_value=0), patch.object(p,'create_payment_entry') as create:
 			p.settle(session,self.config,'evt1')
 			self.assertEqual(attempt.status,'Needs Review');create.assert_not_called()
 
@@ -206,7 +206,7 @@ class LivePaymentPostingTests(TestCase):
 		session,attempt=self.session_and_attempt('Live');self.config.mode='Live'
 		self.invoice.add_comment=MagicMock()
 		entry=frappe._dict(name='PE1')
-		with self.settle_context(attempt),patch.object(p.frappe,'db',MagicMock()),patch.object(p,'pilot_parent',return_value=True),patch.object(p,'is_trial',return_value=True),patch.object(p,'get_invoice_payable_amount',return_value=30),patch.object(p,'payment_mutations_enabled',return_value=True),patch.object(p,'create_payment_entry',return_value=entry) as create,patch('qas_custom.services.school_admin._enqueue_paid_receipt',return_value={'queued':True}) as receipt, patch('qas_custom.modules.notifications.commands.notify_stripe_invoice_paid') as admin:
+		with self.settle_context(attempt),patch.object(p.frappe,'db',MagicMock()),patch.object(p,'payment_parent',return_value=True),patch.object(p,'is_trial',return_value=True),patch.object(p,'get_invoice_payable_amount',return_value=30),patch.object(p,'payment_mutations_enabled',return_value=True),patch.object(p,'create_payment_entry',return_value=entry) as create,patch('qas_custom.services.school_admin._enqueue_paid_receipt',return_value={'queued':True}) as receipt, patch('qas_custom.modules.notifications.commands.notify_stripe_invoice_paid') as admin:
 			p.settle(session,self.config,'evt1')
 			p.settle(session,self.config,'evt2')
 			create.assert_called_once();receipt.assert_called_once();admin.assert_called_once()
@@ -221,7 +221,7 @@ class FullTestPaymentPostingTests(LivePaymentPostingTests):
 		self.invoice.qas_stripe_test = 1
 		self.invoice.add_comment = MagicMock()
 		entry = frappe._dict(name='TEST-PE1')
-		with self.settle_context(attempt), patch.object(p.frappe, 'db', MagicMock()), patch.object(p, 'pilot_parent', return_value=True), patch.object(p, 'is_trial', return_value=True), patch.object(p, 'get_invoice_payable_amount', return_value=30), patch.object(p, 'payment_mutations_enabled', return_value=True), patch.object(p, 'create_payment_entry', return_value=entry) as create, patch('qas_custom.services.school_admin._enqueue_paid_receipt', return_value={'queued': True}) as receipt, patch('qas_custom.modules.notifications.commands.notify_stripe_invoice_paid') as admin:
+		with self.settle_context(attempt), patch.object(p.frappe, 'db', MagicMock()), patch.object(p, 'payment_parent', return_value=True), patch.object(p, 'is_trial', return_value=True), patch.object(p, 'get_invoice_payable_amount', return_value=30), patch.object(p, 'payment_mutations_enabled', return_value=True), patch.object(p, 'create_payment_entry', return_value=entry) as create, patch('qas_custom.services.school_admin._enqueue_paid_receipt', return_value={'queued': True}) as receipt, patch('qas_custom.modules.notifications.commands.notify_stripe_invoice_paid') as admin:
 			p.settle(session, self.config, 'evt1')
 			p.settle(session, self.config, 'evt2')
 			create.assert_called_once()
@@ -271,3 +271,149 @@ class FullTestPaymentPostingTests(LivePaymentPostingTests):
 			with self.assertRaises(RuntimeError):
 				p.create_payment_entry(self.invoice, attempt, self.config)
 			set_user.assert_called_with('Guest')
+
+
+class LiveTrialRolloutTests(TestCase):
+	setUp = StripeTrialPaymentTests.setUp
+	session_and_attempt = StripeTrialPaymentTests.session_and_attempt
+
+	def owner_context(self, mode='Live'):
+		from contextlib import ExitStack
+		self.config.mode = mode
+		self.parent = frappe._dict(name='P1', linked_user='ordinary@example.com', customer='C1', status='Active')
+		stack = ExitStack()
+		self.addCleanup(stack.close)
+		self.db = stack.enter_context(patch.object(p.frappe, 'db', MagicMock()))
+		self.db.get_value.return_value = 1
+		self.db.exists.return_value = False
+		def get_doc(doctype, name):
+			if doctype == 'Parent': return self.parent
+			if doctype == 'Sales Invoice': return self.invoice
+			if doctype == p.PAYMENT: return self.attempt
+			raise AssertionError(doctype)
+		stack.enter_context(patch.object(p.frappe, 'get_doc', side_effect=get_doc))
+		stack.enter_context(patch.object(p, 'settings', return_value=self.config))
+		stack.enter_context(patch.object(p, 'support_request', return_value=False))
+		stack.enter_context(patch.object(p, 'payment_mutations_enabled', return_value=True))
+		stack.enter_context(patch.object(p, 'get_invoice_payable_amount', return_value=30))
+		stack.enter_context(patch.object(p.frappe, 'throw', side_effect=ValueError))
+		stack.enter_context(patch('qas_custom.modules.billing.presentation.parent_portal_invoice_link', return_value='https://portal.example.com/invoices'))
+		return stack
+
+	def test_live_ordinary_and_replacement_trials_get_working_signed_links(self):
+		from urllib.parse import parse_qs, urlparse
+		self.owner_context()
+		for source in p.TRIAL_SOURCES:
+			self.invoice.source_type = source
+			self.assertTrue(p.eligible(self.invoice, self.config))
+			token = parse_qs(urlparse(p.payment_url(self.invoice)).fragment)['token'][0]
+			self.assertIs(p.authorize(token)[0], self.invoice)
+
+	def test_test_gate_uses_linked_user_not_contact_email(self):
+		self.owner_context('Test')
+		self.parent.email = p.TEST_USER
+		self.assertFalse(p.eligible(self.invoice, self.config))
+		self.assertEqual(p.payment_url(self.invoice), '')
+		with self.assertRaises(ValueError):
+			p.authorize(p.sign_token(self.invoice.name, 'P1', self.config))
+		self.parent.linked_user = p.TEST_USER
+		self.assertTrue(p.eligible(self.invoice, self.config))
+
+	def test_live_owner_customer_status_and_enabled_user_are_required(self):
+		self.owner_context()
+		for key, value in [('customer', 'C2'), ('status', 'Inactive'), ('linked_user', '')]:
+			original = self.parent[key]
+			self.parent[key] = value
+			self.assertFalse(p.eligible(self.invoice, self.config))
+			self.parent[key] = original
+		self.db.get_value.return_value = 0
+		self.assertFalse(p.eligible(self.invoice, self.config))
+		self.db.get_value.return_value = 1
+		self.invoice.customer = None
+		self.parent.customer = None
+		self.assertFalse(p.eligible(self.invoice, self.config))
+
+	def test_customer_fallback_requires_unique_matching_parent(self):
+		self.owner_context()
+		self.invoice.parent = None
+		with patch.object(p.frappe, 'get_all', return_value=['P1']) as parents:
+			self.assertTrue(p.eligible(self.invoice, self.config))
+			for matches in ([], ['P1', 'P2']):
+				parents.return_value = matches
+				self.assertFalse(p.eligible(self.invoice, self.config))
+
+	def test_cross_parent_signed_token_is_rejected(self):
+		self.owner_context()
+		with self.assertRaises(ValueError):
+			p.authorize(p.sign_token(self.invoice.name, 'P2', self.config))
+
+	def test_existing_live_token_format_remains_valid(self):
+		import base64
+		self.owner_context()
+		self.parent.linked_user = p.TEST_USER
+		payload = json.dumps([self.invoice.name, 'P1', 'Live', 2000], separators=(',', ':'))
+		encoded = base64.urlsafe_b64encode(payload.encode()).decode().rstrip('=')
+		signature = hmac.new(b'secret-for-test', encoded.encode(), hashlib.sha256).hexdigest()
+		with patch.object(p.time, 'time', return_value=1000):
+			self.assertIs(p.authorize(encoded + '.' + signature)[0], self.invoice)
+
+	def test_nontrial_sources_rejected_unless_authoritatively_linked(self):
+		self.owner_context()
+		for source in ('Course', 'Workshop', 'Store', ''):
+			self.invoice.source_type = source
+			self.assertEqual(p.payment_url(self.invoice), '')
+			with self.assertRaises(ValueError):
+				p.authorize(p.sign_token(self.invoice.name, 'P1', self.config))
+		self.db.exists.return_value = True
+		self.assertTrue(p.eligible(self.invoice, self.config))
+		self.db.exists.assert_called_with('Inquiry', {'trial_invoice': self.invoice.name, 'inquiry_type': 'Trial Lesson'})
+
+	def test_live_marked_test_invoice_blocked_in_checkout_and_settlement(self):
+		self.owner_context()
+		self.invoice.qas_stripe_test = 1
+		self.assertEqual(p.payment_url(self.invoice), '')
+		session, self.attempt = self.session_and_attempt('Live')
+		with patch.object(p, 'create_payment_entry') as create:
+			p.settle(session, self.config, 'evt1')
+			self.assertEqual(self.attempt.status, 'Needs Review')
+			create.assert_not_called()
+
+	def test_live_ordinary_owner_checkout_reuses_valid_session(self):
+		stack = self.owner_context()
+		_, self.attempt = self.session_and_attempt('Live')
+		self.invoice.reload = MagicMock()
+		stack.enter_context(patch.object(p, 'validate_accounts'))
+		stack.enter_context(patch.object(p.frappe, 'cache', MagicMock()))
+		stack.enter_context(patch.object(p.frappe, 'get_all', return_value=['attempt1']))
+		with patch.object(p, 'stripe_request', return_value={'status': 'open', 'payment_status': 'unpaid', 'url': 'https://checkout.stripe.com/pay/1'}) as request:
+			result = p.start_checkout(p.sign_token(self.invoice.name, 'P1', self.config))
+			self.assertEqual(result['url'], 'https://checkout.stripe.com/pay/1')
+			request.assert_called_once_with(self.config, 'GET', 'checkout/sessions/cs_1')
+
+	def test_test_ordinary_owner_cannot_start_checkout_or_post_full_test_flow(self):
+		self.owner_context('Test')
+		session, self.attempt = self.session_and_attempt()
+		self.attempt.get.side_effect = lambda key: 1 if key == 'full_test_flow' else None
+		self.invoice.qas_stripe_test = 1
+		with patch.object(p, 'stripe_request') as request, patch.object(p, 'create_payment_entry') as create:
+			with self.assertRaises(ValueError):
+				p.start_checkout(p.sign_token(self.invoice.name, 'P1', self.config))
+			request.assert_not_called()
+			p.settle(session, self.config, 'evt1')
+			self.assertEqual(self.attempt.status, 'Needs Review')
+			create.assert_not_called()
+
+	def test_live_ordinary_owner_posts_and_notifies_once_after_checkout_disabled(self):
+		self.owner_context()
+		self.config.enabled = 0
+		session, self.attempt = self.session_and_attempt('Live')
+		self.invoice.add_comment = MagicMock()
+		entry = frappe._dict(name='PE1')
+		with patch.object(p, 'create_payment_entry', return_value=entry) as create, patch('qas_custom.services.school_admin._enqueue_paid_receipt', return_value={'queued': True}) as receipt, patch('qas_custom.modules.notifications.commands.notify_stripe_invoice_paid') as admin:
+			p.settle(session, self.config, 'evt1')
+			p.settle(session, self.config, 'evt2')
+			create.assert_called_once()
+			receipt.assert_called_once()
+			admin.assert_called_once_with(self.invoice, entry, test=False)
+			self.assertEqual(self.attempt.status, 'Paid')
+			self.assertEqual(self.attempt.receipt_queued, 1)

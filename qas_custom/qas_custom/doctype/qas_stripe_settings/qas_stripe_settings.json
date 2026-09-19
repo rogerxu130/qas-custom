@@ -22,14 +22,14 @@
  "fields": [
   {
    "fieldname": "enabled",
-   "label": "Enable trial payment pilot",
+   "label": "Enable trial payments",
    "fieldtype": "Check",
    "default": "0"
   },
   {
    "fieldname": "pilot_notice",
    "fieldtype": "HTML",
-   "options": "<p>Restricted to rogerxu130@gmail.com. This release cannot enable payments for other parents.</p>"
+   "options": "<p>Live payments are available for all eligible ordinary and replacement trial invoices. Test payments remain restricted to rogerxu130@gmail.com. Course, Workshop and store invoices are not eligible.</p>"
   },
   {
    "fieldname": "mode",
