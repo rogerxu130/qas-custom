@@ -67,7 +67,9 @@ def _create_trial_invoice(inquiry: str):
 		invoice_doc = frappe.get_doc("Sales Invoice", invoice_name)
 		if cint(invoice_doc.docstatus) == 2 or invoice_doc.get("status") == "Cancelled":
 			return _status_payload(doc, "skipped", _("The linked Trial Invoice is cancelled and will not be recreated."), invoice=invoice_name)
-		sync_trial_invoice_dates(invoice_doc, doc)
+		# Reusing a linked invoice must preserve its agreed or manually edited deadline.
+		if cint(invoice_doc.docstatus) == 0 and not invoice_doc.get("due_date"):
+			sync_trial_invoice_dates(invoice_doc, doc)
 		if cint(invoice_doc.docstatus) == 1:
 			_check_rescheduled_trial_fee(doc, invoice_doc)
 			resolve_data_issue(_trial_invoice_issue_key(doc.name))

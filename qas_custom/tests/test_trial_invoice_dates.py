@@ -14,6 +14,9 @@ class Document(frappe._dict):
 
 class TestTrialInvoiceDates(TestCase):
     def setUp(self):
+        settings_patch = patch("qas_custom.modules.billing.invoice_settings.get_invoice_settings", return_value={"course_due_lead_days": 7, "course_due_grace_days": 3})
+        self.settings_mock = settings_patch.start()
+        self.addCleanup(settings_patch.stop)
         self.invoice = Document(name='INV1', docstatus=1, posting_date='2026-09-01',
             due_date='2026-09-08', outstanding_amount=68,
             payment_schedule=[Document(due_date='2026-09-08')],
@@ -113,3 +116,7 @@ class TestTrialInvoiceDates(TestCase):
             for replacement in (False, True):
                 payload=_trial_invoice_draft_payload(inquiry, context, replacement=replacement)
                 self.assertEqual(str(payload['due_date']), '2026-10-05')
+                self.settings_mock.return_value = {'course_due_lead_days': 10, 'course_due_grace_days': 5}
+                payload = _trial_invoice_draft_payload(inquiry, context, replacement=replacement)
+                self.assertEqual(str(payload['due_date']), '2026-10-02')
+                self.settings_mock.return_value = {'course_due_lead_days': 7, 'course_due_grace_days': 3}

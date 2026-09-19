@@ -6,6 +6,11 @@ from qas_custom.modules.billing.invoice_settings import course_invoice_due_date,
 MODULE='qas_custom.modules.billing.invoice_settings'
 
 class TestCourseInvoiceDates(TestCase):
+    def setUp(self):
+        settings_patch = patch("qas_custom.modules.billing.invoice_settings.get_invoice_settings", return_value={"course_due_lead_days": 7, "course_due_grace_days": 3})
+        self.settings_mock = settings_patch.start()
+        self.addCleanup(settings_patch.stop)
+
     def test_deadlines(self):
         for posting, first, mid, expected in [
             ('2026-09-11','2026-10-12',False,'2026-10-05'),

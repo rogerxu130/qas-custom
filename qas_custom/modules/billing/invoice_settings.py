@@ -19,6 +19,8 @@ DEFAULT_INVOICE_SETTINGS = {
 	"school_website": "",
 	"school_address": "",
 	"payment_due_days": 7,
+	"course_due_lead_days": 7,
+	"course_due_grace_days": 3,
 	"overdue_reminder_interval_days": 4,
 	"invoice_message": "Thank you for learning with Queensland Art School. Please contact us if you have any questions about this invoice.",
 	"accepted_payment_methods": "Bank transfer, cash, or POS",
@@ -71,6 +73,8 @@ def get_invoice_settings():
 		value = doc.get(fieldname)
 		if fieldname == "payment_due_days":
 			settings[fieldname] = _normalize_due_days(value)
+		elif fieldname in {"course_due_lead_days", "course_due_grace_days"}:
+			settings[fieldname] = validate_course_due_days(value, fieldname)
 		elif fieldname == "overdue_reminder_interval_days":
 			settings[fieldname] = max(1, cint(value)) if value else 4
 		elif fieldname == "store_credit_bonus_enabled":
@@ -93,6 +97,8 @@ def update_invoice_settings(payload):
 		if fieldname in payload:
 			if fieldname == "payment_due_days":
 				doc.set(fieldname, _normalize_due_days(payload.get(fieldname)))
+			elif fieldname in {"course_due_lead_days", "course_due_grace_days"}:
+				doc.set(fieldname, validate_course_due_days(payload.get(fieldname), fieldname))
 			elif fieldname == "overdue_reminder_interval_days":
 				doc.set(fieldname, validate_reminder_interval(payload.get(fieldname)))
 			elif fieldname == "store_credit_bonus_enabled":
@@ -203,7 +209,10 @@ def _normalize_store_credit_bonus_rule(row):
 def course_invoice_due_date(posting_date, first_class_date, *, mid_term=False):
 	"""Use calendar days, including weekends, for course payment deadlines."""
 	posting_date, first_class_date = getdate(posting_date), getdate(first_class_date)
-	return add_days(posting_date, 3) if mid_term or (first_class_date - posting_date).days < 7 else add_days(first_class_date, -7)
+	settings = get_invoice_settings()
+	lead = settings["course_due_lead_days"]
+	grace = settings["course_due_grace_days"]
+	return add_days(posting_date, grace) if mid_term or (first_class_date - posting_date).days < lead else add_days(first_class_date, -lead)
 
 
 def apply_course_invoice_dates(invoice, *, enrollment=None, start_session=None):
@@ -244,3 +253,18 @@ def validate_reminder_interval(value):
 	except (TypeError, ValueError, OverflowError):
 		frappe.throw(frappe._("Overdue reminder interval must be a whole number of at least 1 day."))
 	return int(days)
+
+
+def validate_course_due_days(value, fieldname):
+	"""Accept whole calendar days; zero lead means payment on the first class day."""
+	if value is None or value == "":
+		return DEFAULT_INVOICE_SETTINGS[fieldname]
+	minimum = 0 if fieldname == "course_due_lead_days" else 1
+	try:
+		number = float(value)
+		if number.is_integer() and number >= minimum:
+			return int(number)
+	except (TypeError, ValueError, OverflowError):
+		pass
+	label = "Days Before First Class" if minimum == 0 else "Late Booking / Mid-term Grace Days"
+	frappe.throw(f"{label} must be a whole number of at least {minimum}.")

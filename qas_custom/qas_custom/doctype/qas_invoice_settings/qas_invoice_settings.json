@@ -14,6 +14,8 @@
   "school_phone",
   "school_website",
   "school_address",
+  "course_due_lead_days",
+  "course_due_grace_days",
   "payment_due_days",
   "overdue_reminder_interval_days",
   "invoice_message",
@@ -74,10 +76,27 @@
    "label": "School Address"
   },
   {
+   "fieldname": "course_due_lead_days",
+   "fieldtype": "Int",
+   "label": "Days Before First Class",
+   "default": "7",
+   "reqd": 1,
+   "description": "New course and trial invoices are due this many calendar days before the first class. Zero means the class date. Existing invoices are unchanged."
+  },
+  {
+   "fieldname": "course_due_grace_days",
+   "fieldtype": "Int",
+   "label": "Late Booking / Mid-term Grace Days",
+   "default": "3",
+   "reqd": 1,
+   "description": "Calendar days after the invoice date for bookings less than the lead days before class, and mid-term enrolments. Minimum 1 day."
+  },
+  {
    "default": "7",
    "fieldname": "payment_due_days",
    "fieldtype": "Int",
-   "label": "Default Payment Due Days"
+   "label": "Fallback Payment Due Days",
+   "description": "Default for manual and Workshop invoices. Course and trial invoices use the class-based settings above."
   },
   {
    "fieldname": "overdue_reminder_interval_days",
