@@ -1,6 +1,11 @@
 import frappe
 
 from qas_custom.services.school_admin_timetable_export import export_school_admin_timetable_data
+from qas_custom.services.parent_contact_export import (
+	export_school_admin_parent_contacts_data,
+	get_school_admin_parent_contact_export_options_data,
+	get_school_admin_parent_contact_export_summary_data,
+)
 
 from qas_custom.services.workshops import (
 	activate_school_admin_workshop_enrollment_data,
@@ -625,6 +630,34 @@ def school_admin_get_term_parent_email_export_summary(term=None):
 @frappe.whitelist()
 def school_admin_export_term_parent_emails(term=None):
 	return export_school_admin_term_parent_emails_data(term=term)
+
+
+@frappe.whitelist()
+def school_admin_get_parent_contact_export_options(scope_type=None, term=None, query=None, limit=200):
+	return get_school_admin_parent_contact_export_options_data(
+		scope_type=scope_type,
+		term=term,
+		query=query,
+		limit=limit,
+	)
+
+
+@frappe.whitelist()
+def school_admin_get_parent_contact_export_summary(scope_type=None, scope_name=None, term=None):
+	return get_school_admin_parent_contact_export_summary_data(
+		scope_type=scope_type,
+		scope_name=scope_name,
+		term=term,
+	)
+
+
+@frappe.whitelist()
+def school_admin_export_parent_contacts(scope_type=None, scope_name=None, term=None):
+	return export_school_admin_parent_contacts_data(
+		scope_type=scope_type,
+		scope_name=scope_name,
+		term=term,
+	)
 
 
 @frappe.whitelist()
