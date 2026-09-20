@@ -1151,6 +1151,7 @@ def school_admin_get_enrollments(
 	statuses=None,
 	include_inactive_terms=0,
 	limit=80,
+	query=None,
 ):
 	return get_school_admin_enrollments_data(
 		student=student,
@@ -1162,6 +1163,7 @@ def school_admin_get_enrollments(
 		statuses=statuses,
 		include_inactive_terms=include_inactive_terms,
 		limit=limit,
+		query=query,
 	)
 
 

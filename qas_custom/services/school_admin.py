@@ -3347,6 +3347,7 @@ def get_school_admin_enrollments_data(
 	statuses=None,
 	include_inactive_terms=0,
 	limit=80,
+	query=None,
 ):
 	_require_school_admin()
 	filters = {}
@@ -3366,7 +3367,7 @@ def get_school_admin_enrollments_data(
 		filters["status"] = ["in", status_values]
 	else:
 		filters["status"] = ["in", ["Planned", "Active"]]
-	return {"items": _get_enrollment_rows(filters=filters, open_terms_only=not term and not _is_truthy(include_inactive_terms), limit=_limit(limit, default=80, max_value=200))}
+	return {"items": _get_enrollment_rows(filters=filters, open_terms_only=not term and not _is_truthy(include_inactive_terms), limit=_limit(limit, default=80, max_value=200), query=query)}
 
 
 def get_school_admin_enrollment_data(enrollment=None):
@@ -7503,7 +7504,7 @@ def _create_payment_entry_for_invoice(doc, amount, mode_of_payment=None, referen
 		frappe.set_user(original_user)
 
 
-def _get_enrollment_rows(parent=None, students=None, filters=None, limit=80, open_terms_only=False, start=0):
+def _get_enrollment_rows(parent=None, students=None, filters=None, limit=80, open_terms_only=False, start=0, query=None):
 	if not _doctype_available("Enrollment"):
 		return []
 	filters = dict(filters or {})
@@ -7511,6 +7512,17 @@ def _get_enrollment_rows(parent=None, students=None, filters=None, limit=80, ope
 		filters["parent"] = parent
 	if students:
 		filters["student"] = ["in", students]
+	if str(query or "").strip():
+		# Keep text OR conditions separate from open-term OR conditions. Do not cap
+		# matches before applying term scope: older records must not hide open ones.
+		names = frappe.get_all(
+			"Enrollment", filters=filters,
+			or_filters=_text_search_filters("Enrollment", query, ["name", "student", "parent", "course", "weekly_timeslot", "invoice"]),
+			pluck="name", limit_page_length=0,
+		)
+		if not names:
+			return []
+		filters["name"] = ["in", names]
 	fields = _safe_fields(
 		"Enrollment",
 		[
