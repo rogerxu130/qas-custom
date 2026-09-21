@@ -3891,6 +3891,7 @@ def update_school_admin_weekly_timeslot_data(weekly_timeslot=None, payload=None)
 		frappe.throw(_("Weekly timeslot is required."))
 	payload = _get_payload(payload)
 	doc = frappe.get_doc("Weekly Timeslot", weekly_timeslot)
+	_validate_weekly_timeslot_change(doc, payload)
 	if "teacher" in payload and payload.get("teacher") != doc.get("teacher") and _weekly_timeslot_has_course_sessions(doc.name):
 		frappe.throw(_("Use Change weekly teacher from the Classes workspace after sessions have been created."))
 	previous_day_of_week = doc.get("day_of_week")
@@ -8481,6 +8482,37 @@ def _weekly_timeslot_has_course_sessions(weekly_timeslot):
 	return bool(weekly_timeslot and frappe.db.exists("Course Sessions", {"weekly_timeslot": weekly_timeslot}))
 
 
+def _weekly_timeslot_value_changed(doc, payload, fieldname):
+	if fieldname not in payload:
+		return False
+	if fieldname in {"start_time", "end_time"}:
+		return _format_time_for_message(payload.get(fieldname)) != _format_time_for_message(doc.get(fieldname))
+	return (payload.get(fieldname) or "") != (doc.get(fieldname) or "")
+
+
+def _validate_weekly_timeslot_change(doc, payload):
+	has_sessions = _weekly_timeslot_has_course_sessions(doc.name)
+	if _weekly_timeslot_value_changed(doc, payload, "course"):
+		has_enrollments = frappe.db.exists("Enrollment", {"weekly_timeslot": doc.name})
+		if has_sessions or has_enrollments:
+			frappe.throw(_("Use the reviewed pre-term course change action when this class already has sessions or enrollments."))
+
+	schedule_changed = any(
+		_weekly_timeslot_value_changed(doc, payload, fieldname)
+		for fieldname in ("day_of_week", "start_time", "end_time")
+	)
+	if schedule_changed and has_sessions:
+		if not cint(payload.get("apply_future_sessions")):
+			frappe.throw(_("Confirm that this schedule change should apply to future course sessions."))
+		if not payload.get("effective_date"):
+			frappe.throw(_("Effective date is required when changing a schedule with generated sessions."))
+
+	if _weekly_timeslot_value_changed(doc, payload, "campus") and not cint(payload.get("confirm_active_term_campus_change")):
+		term_start = frappe.db.get_value("Term", doc.get("term"), "start_date") if doc.get("term") else None
+		if term_start and getdate(term_start) <= getdate(today()):
+			frappe.throw(_("Confirm the campus change because this term has already started."))
+
+
 def _assert_active_teacher(teacher):
 	if not teacher or not frappe.db.exists("Teacher", teacher):
 		frappe.throw(_("An active teacher is required."))
@@ -8618,7 +8650,7 @@ def _sync_future_course_sessions_for_timeslot(doc, effective_date=None, previous
 	filters = {
 		"weekly_timeslot": doc.name,
 		"session_date": [">=", start_date],
-		"status": ["not in", ["Completed", "Cancelled"]],
+		"status": "Scheduled",
 	}
 	sessions = frappe.get_all(
 		"Course Sessions",
