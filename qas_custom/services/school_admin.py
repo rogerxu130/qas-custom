@@ -6235,7 +6235,7 @@ def _search_enrollments(query, limit):
 		"Enrollment",
 		["name", "student", "parent", "term", "course", "weekly_timeslot", "enrollment_type", "status", "invoice"],
 	)
-	return _search_doctype("Enrollment", query, fields, ["name", "student", "parent", "course", "weekly_timeslot", "invoice"], limit)
+	return _attach_enrollment_timeslot_details(_search_doctype("Enrollment", query, fields, ["name", "student", "parent", "course", "weekly_timeslot", "invoice"], limit))
 
 
 def _search_invoices(query, limit):
@@ -7553,7 +7553,14 @@ def _get_enrollment_rows(parent=None, students=None, filters=None, limit=80, ope
 		start=start,
 		limit=limit,
 	)
-	return _attach_course_labels([_normalize_row_payload("Enrollment", row) for row in rows])
+	return _attach_enrollment_timeslot_details(_attach_course_labels([_normalize_row_payload("Enrollment", row) for row in rows]))
+
+
+def _attach_enrollment_timeslot_details(rows):
+	timeslots = _get_timeslot_map(list({row.get("weekly_timeslot") for row in rows if row.get("weekly_timeslot")}))
+	for row in rows:
+		row["weekly_timeslot_detail"] = timeslots.get(row.get("weekly_timeslot")) or {}
+	return rows
 
 
 def _get_family_workshop_enrollment_rows(parent=None, students=None, student_rows=None, limit=80):
