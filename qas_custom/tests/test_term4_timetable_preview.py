@@ -125,6 +125,40 @@ class TestTerm4TimetablePreview(TestCase):
         self.assertTrue(result[0]["dynamic"])
         self.assertEqual(rows.call_args.args[1], [["reference_doctype", "=", "Course Sessions"], ["reference_name", "in", ["CS"]]])
 
+    def test_unreadable_references_block_and_other_checks_continue(self):
+        meta = Mock(issingle=False)
+        meta.has_field.return_value = False
+        for failure in (None, RuntimeError("Query unavailable")):
+            with self.subTest(failure=failure):
+                errors = []
+                with patch.object(service, "_link_fields", return_value=[("Unreadable", "reference"), ("Enrollment", "weekly_timeslot")]), patch.object(service.frappe, "get_all", return_value=[]), patch.object(service.frappe, "get_meta", return_value=meta), patch.object(service, "_rows", side_effect=[failure, [{"name": "ENR", "weekly_timeslot": "WTS"}]]):
+                    refs = service._references("Weekly Timeslot", ["WTS"], errors)
+                self.assertEqual(len(refs), 1)
+                self.assertEqual(refs[0]["doctype"], "Enrollment")
+                self.assertEqual(len(errors), 1)
+                self.assertIn("Unreadable.reference -> Weekly Timeslot", errors[0])
+                self.snapshot["reference_read_errors"] = errors
+                result = self.review()
+                self.assertIn(errors[0], result["blocking_errors"])
+                self.assertFalse(result["executable"])
+
+    def test_none_dynamic_reference_result_reports_exact_field(self):
+        meta = Mock(issingle=False)
+        meta.has_field.return_value = False
+        errors = []
+        schema = [frappe._dict(parent="Virtual Record", fieldname="reference_name", options="reference_doctype")]
+        with patch.object(service, "_link_fields", return_value=[]), patch.object(service.frappe, "get_all", side_effect=[schema, []]), patch.object(service.frappe, "get_meta", return_value=meta), patch.object(service, "_rows", return_value=None):
+            self.assertEqual(service._references("Course Sessions", ["CS"], errors), [])
+        self.assertIn("Virtual Record.reference_name -> Course Sessions", errors[0])
+        self.assertIn("NoneType", errors[0])
+
+    def test_reference_errors_cannot_be_silently_discarded(self):
+        meta = Mock(issingle=False)
+        meta.has_field.return_value = False
+        with patch.object(service, "_link_fields", return_value=[("Unreadable", "reference")]), patch.object(service.frappe, "get_meta", return_value=meta), patch.object(service, "_rows", return_value=None):
+            with self.assertRaisesRegex(RuntimeError, "Reference check incomplete"):
+                service._references("Weekly Timeslot", ["WTS"])
+
     def test_bundled_plan_covers_every_source_once_and_preserves_user_choices(self):
         plan = json.loads(Path(service.__file__).with_name("term4_timetable_plan.json").read_text())
         actions = plan["actions"]

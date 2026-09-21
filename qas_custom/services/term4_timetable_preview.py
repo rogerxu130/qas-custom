@@ -52,7 +52,7 @@ def _rows(doctype, filters, fields):
     return frappe.get_all(doctype, filters=filters, fields=fields, order_by="name asc", limit_page_length=0)
 
 
-def _references(target, names):
+def _references(target, names, read_errors=None):
     """Inventory Link and Dynamic Link rows, without touching their documents."""
     if not names:
         return []
@@ -71,7 +71,16 @@ def _references(target, names):
         else:
             fields = ["name", field]
             fields += [f for f in ("modified", "status", "student", "enrollment_type", "inquiry_type", "invoice", "invoice_status", "invoice_amount", "start_course_session", "source_doctype", "source_document") if meta.has_field(f) and f not in fields]
-            rows = _rows(doctype, filters, fields)
+            try:
+                rows = _rows(doctype, filters, fields)
+                if not isinstance(rows, (list, tuple)):
+                    raise TypeError(f"Expected a row list, received {type(rows).__name__}")
+            except Exception as exc:
+                message = f"Reference check incomplete: {doctype}.{field} -> {target}: {type(exc).__name__}: {exc}"
+                if read_errors is None:
+                    raise RuntimeError(message) from exc
+                read_errors.append(message)
+                return
         for row in rows:
             result.append({"doctype": doctype, "field": field, "target": row[field], "dynamic": dynamic, "record": dict(row)})
 
@@ -95,7 +104,7 @@ def _label(row, rooms):
 
 
 def _review(plan, snapshot, as_of):
-    blockers, warnings, reports = [], [], []
+    blockers, warnings, reports = list(snapshot.get("reference_read_errors", [])), [], []
     slots = {r["name"]: r for r in snapshot["slots"]}
     rooms = {r["name"]: r for r in snapshot["rooms"]}
     teachers = {r["name"]: r for r in snapshot["teachers"]}
@@ -205,10 +214,14 @@ def preview():
     if frappe.get_meta("Course Sessions").has_field("teacher_override"):
         session_fields.append("teacher_override")
     sessions = _rows("Course Sessions", {"weekly_timeslot": ["in", names]}, session_fields) if names else []
+    reference_read_errors = []
+    references = _references("Weekly Timeslot", names, reference_read_errors)
+    references += _references("Course Sessions", [s.name for s in sessions], reference_read_errors)
     snapshot = {
         "term": frappe.db.get_value("Term", SUPPORTED_TERM, ["name", "start_date", "end_date", "status", "modified"], as_dict=True),
         "slots": slots, "sessions": sessions,
-        "references": _references("Weekly Timeslot", names) + _references("Course Sessions", [s.name for s in sessions]),
+        "references": references,
+        "reference_read_errors": reference_read_errors,
         "rooms": _rows("Classroom", {}, ["name", "classroom_name", "campus", "status", "capacity", "modified"]),
         "teachers": _rows("Teacher", {}, ["name", "teacher_name", "status", "modified"]),
         "courses": _rows("Course", {}, ["name", "duration_mins", "modified"]),
