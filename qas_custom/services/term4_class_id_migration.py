@@ -16,14 +16,14 @@ DUPLICATE_FIELDS = ("course", "class_language", "campus", "classroom", "day_of_w
 
 def _link_fields(target_doctype):
 	fields = []
-	for meta_doctype in ("DocField", "Custom Field"):
+	for meta_doctype, owner_field in (("DocField", "parent"), ("Custom Field", "dt")):
 		for row in frappe.get_all(
 			meta_doctype,
 			filters={"fieldtype": "Link", "options": target_doctype},
-			fields=["parent", "fieldname"],
+			fields=[owner_field, "fieldname"],
 			limit_page_length=0,
 		):
-			item = (row.parent, row.fieldname)
+			item = (row[owner_field], row.fieldname)
 			if item not in fields:
 				fields.append(item)
 	return sorted(fields)

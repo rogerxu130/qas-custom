@@ -1,10 +1,11 @@
 from unittest import TestCase
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 import frappe
 
 from qas_custom.services.term4_class_id_migration import (
 	SUPPORTED_TERM,
+	_link_fields,
 	execute_duplicate_consolidation,
 	preview,
 	preview_duplicate_consolidation,
@@ -12,6 +13,29 @@ from qas_custom.services.term4_class_id_migration import (
 
 
 class TestTerm4ClassIdMigration(TestCase):
+	@patch("qas_custom.services.term4_class_id_migration.frappe.get_all")
+	def test_link_fields_reads_standard_and_custom_owners_and_deduplicates(self, get_all):
+		get_all.side_effect = [
+			[
+				frappe._dict(parent="Enrollment", fieldname="weekly_timeslot"),
+				frappe._dict(parent="Course Sessions", fieldname="weekly_timeslot"),
+			],
+			[
+				frappe._dict(dt="Enrollment", fieldname="weekly_timeslot"),
+				frappe._dict(dt="Enrollment", fieldname="custom_original_timeslot"),
+			],
+		]
+
+		self.assertEqual(_link_fields("Weekly Timeslot"), [
+			("Course Sessions", "weekly_timeslot"),
+			("Enrollment", "custom_original_timeslot"),
+			("Enrollment", "weekly_timeslot"),
+		])
+		self.assertEqual(get_all.call_args_list, [
+			call("DocField", filters={"fieldtype": "Link", "options": "Weekly Timeslot"}, fields=["parent", "fieldname"], limit_page_length=0),
+			call("Custom Field", filters={"fieldtype": "Link", "options": "Weekly Timeslot"}, fields=["dt", "fieldname"], limit_page_length=0),
+		])
+
 	def test_preview_is_read_only_and_reports_duplicate(self):
 		db = Mock()
 		frappe_api = Mock()
