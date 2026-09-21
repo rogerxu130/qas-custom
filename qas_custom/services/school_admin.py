@@ -8491,7 +8491,21 @@ def _assert_active_teacher(teacher):
 def validate_weekly_timeslot_document(doc, method=None):
 	if not doc.get("end_time") and doc.get("course") and doc.get("start_time"):
 		_apply_course_duration_end_time(doc)
+	_validate_exact_weekly_timeslot_duplicate(doc)
 	_validate_weekly_timeslot_room_conflict(doc)
+
+
+def _validate_exact_weekly_timeslot_duplicate(doc):
+	if (doc.get("status") or "Active") != "Active":
+		return
+	fieldnames = ["term", "course", "class_language", "campus", "classroom", "day_of_week", "start_time", "end_time"]
+	if not all(doc.get(fieldname) for fieldname in fieldnames):
+		return
+	filters = {fieldname: doc.get(fieldname) for fieldname in fieldnames}
+	filters["status"] = "Active"
+	existing = frappe.db.exists("Weekly Timeslot", filters)
+	if existing and existing != doc.get("name"):
+		frappe.throw(_("An active weekly timeslot with the same term, course, language, room, weekday and time already exists: {0}.").format(existing))
 
 
 def _apply_course_duration_end_time(doc):

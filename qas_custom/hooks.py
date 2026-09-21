@@ -181,6 +181,7 @@ doc_events = {
 	},
 	"Weekly Timeslot": {
 		"validate": ["qas_custom.services.term_lifecycle.validate_term_child", "qas_custom.services.school_admin.validate_weekly_timeslot_document"],
+		"on_update": "qas_custom.services.class_record_labels.refresh_linked_course_session_labels",
 	},
 	"Session Homework": {
 		"validate": "qas_custom.services.session_homework.validate_session_homework",

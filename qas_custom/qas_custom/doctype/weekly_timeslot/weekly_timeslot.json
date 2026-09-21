@@ -5,11 +5,21 @@
  "autoname": "WTS-.YYYY.-.#####",
  "doctype": "DocType",
  "engine": "InnoDB",
+ "search_fields": "display_label,term,course,class_language,campus,classroom,teacher,day_of_week,start_time",
+ "show_title_field_in_link": 1,
+ "title_field": "display_label",
  "fields": [
   {
    "fieldname": "detail_section",
    "fieldtype": "Section Break",
    "label": "Detail"
+  },
+  {
+   "fieldname": "display_label",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "Display Label",
+   "read_only": 1
   },
   {
    "fieldname": "term",
@@ -154,6 +164,7 @@
  "states": [],
  "field_order": [
   "detail_section",
+  "display_label",
   "term",
   "course",
   "class_language",

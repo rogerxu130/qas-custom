@@ -4,7 +4,17 @@
  "autoname": "CS-.YYYY.-.#####",
  "doctype": "DocType",
  "engine": "InnoDB",
+ "search_fields": "display_label,weekly_timeslot,session_date,status",
+ "show_title_field_in_link": 1,
+ "title_field": "display_label",
  "fields": [
+  {
+   "fieldname": "display_label",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "Display Label",
+   "read_only": 1
+  },
   {
    "fieldname": "weekly_timeslot",
    "fieldtype": "Link",
