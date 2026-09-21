@@ -41,13 +41,14 @@ class TestConfigurableDueDays(TestCase):
                                    ({'course_due_lead_days': '0', 'course_due_grace_days': '6'}, {'course_due_lead_days': '0', 'course_due_grace_days': '6'})]:
             values = dict(existing, payment_due_days='5')
             db = Mock()
-            db.get_value.side_effect = lambda doctype, filters, field: values.get(filters['field'])
+            db.get_single_value.side_effect = lambda doctype, field: values.get(field)
             db.set_single_value.side_effect = lambda doctype, field, value: values.update({field: value})
             with patch('frappe.db', db):
                 execute()
                 writes = db.set_single_value.call_count
                 execute()
                 self.assertEqual(db.set_single_value.call_count, writes)
+                self.assertEqual(db.get_value.call_count, 0)
             self.assertEqual(values, dict(expected, payment_due_days='5'))
 
     def test_existing_submitted_trial_keeps_agreed_deadline(self):
