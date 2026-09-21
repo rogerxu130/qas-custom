@@ -6,6 +6,7 @@ import re
 
 import frappe
 from frappe import _
+from frappe.model.rename_doc import rename_doc
 
 
 SUPPORTED_TERM = "Term 4 2026"
@@ -223,7 +224,7 @@ def execute_duplicate_consolidation(canonical=None, duplicate=None, confirmation
 
 	for action in report["session_actions"]:
 		if action["action"] == "merge":
-			frappe.rename_doc(
+			rename_doc(
 				"Course Sessions", action["source"], action["target"],
 				force=True, merge=True, ignore_permissions=True,
 			)
@@ -233,7 +234,7 @@ def execute_duplicate_consolidation(canonical=None, duplicate=None, confirmation
 				update_modified=True,
 			)
 
-	frappe.rename_doc("Weekly Timeslot", duplicate, canonical, force=True, merge=True, ignore_permissions=True)
+	rename_doc("Weekly Timeslot", duplicate, canonical, force=True, merge=True, ignore_permissions=True)
 	remaining = _reference_inventory("Weekly Timeslot", [duplicate])
 	if remaining or frappe.db.exists("Weekly Timeslot", duplicate):
 		frappe.throw(_("Duplicate Weekly Timeslot still has references after consolidation; transaction aborted."))
@@ -274,10 +275,10 @@ def execute(term=SUPPORTED_TERM, confirmation_token=None):
 
 	result = {"term": term, "weekly_timeslots": [], "course_sessions": []}
 	for old_name, new_name in report["weekly_timeslot_mapping"].items():
-		frappe.rename_doc("Weekly Timeslot", old_name, new_name, force=False, merge=False, ignore_permissions=True)
+		rename_doc("Weekly Timeslot", old_name, new_name, force=False, merge=False, ignore_permissions=True)
 		result["weekly_timeslots"].append({"old": old_name, "new": new_name})
 	for old_name, new_name in report["course_session_mapping"].items():
-		frappe.rename_doc("Course Sessions", old_name, new_name, force=False, merge=False, ignore_permissions=True)
+		rename_doc("Course Sessions", old_name, new_name, force=False, merge=False, ignore_permissions=True)
 		result["course_sessions"].append({"old": old_name, "new": new_name})
 
 	remaining_old_references = [

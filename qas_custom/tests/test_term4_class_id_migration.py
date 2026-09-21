@@ -6,6 +6,7 @@ import frappe
 from qas_custom.services.term4_class_id_migration import (
 	SUPPORTED_TERM,
 	_link_fields,
+	execute,
 	execute_duplicate_consolidation,
 	preview,
 	preview_duplicate_consolidation,
@@ -91,7 +92,7 @@ class TestTerm4ClassIdMigration(TestCase):
 		db = Mock()
 		db.exists.return_value = None
 		db.get_value.return_value = frappe._dict(invoice="INV-1", invoice_status="Draft", invoice_amount=100)
-		with patch("qas_custom.services.term4_class_id_migration.frappe.db", new=db), patch("qas_custom.services.term4_class_id_migration.frappe.rename_doc") as rename_doc:
+		with patch("qas_custom.services.term4_class_id_migration.frappe.db", new=db), patch("qas_custom.services.term4_class_id_migration.rename_doc", autospec=True) as rename_doc:
 			result = execute_duplicate_consolidation("LONG-WTS", "WTS-2026-00009", "token")
 
 		rename_doc.assert_any_call("Course Sessions", "SHORT-CS-1", "LONG-CS", force=True, merge=True, ignore_permissions=True)
@@ -99,3 +100,24 @@ class TestTerm4ClassIdMigration(TestCase):
 		db.set_value.assert_called_once_with("Course Sessions", "SHORT-CS-2", "weekly_timeslot", "LONG-WTS", update_modified=True)
 		self.assertEqual(result["invoice_snapshot"][0]["invoice"], "INV-1")
 		self.assertTrue(result["ok"])
+
+	@patch("qas_custom.services.term4_class_id_migration._require_access")
+	@patch("qas_custom.services.term4_class_id_migration.verify", return_value={"ok": True})
+	@patch("qas_custom.services.term4_class_id_migration._advance_series")
+	@patch("qas_custom.services.term4_class_id_migration._reference_inventory", return_value=[])
+	@patch("qas_custom.services.term4_class_id_migration.preview")
+	def test_migration_uses_supported_rename_signature(self, preview_mock, _inventory, _series, _verify, _access):
+		preview_mock.return_value = {
+			"blocking_errors": [], "confirmation_token": "token",
+			"weekly_timeslot_mapping": {"LONG-WTS": "WTS-2026-00010"},
+			"course_session_mapping": {"LONG-CS": "CS-2026-00018"},
+		}
+		db = Mock()
+		with patch("qas_custom.services.term4_class_id_migration.frappe.db", new=db), patch("qas_custom.services.term4_class_id_migration.rename_doc", autospec=True) as rename_doc:
+			result = execute(confirmation_token="token")
+		self.assertEqual(rename_doc.call_args_list, [
+			call("Weekly Timeslot", "LONG-WTS", "WTS-2026-00010", force=False, merge=False, ignore_permissions=True),
+			call("Course Sessions", "LONG-CS", "CS-2026-00018", force=False, merge=False, ignore_permissions=True),
+		])
+		db.commit.assert_called_once()
+		self.assertEqual(result["remaining_old_references"], [])
