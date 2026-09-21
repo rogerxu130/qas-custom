@@ -16,6 +16,7 @@ from qas_custom.modules.billing.commands import (
 	sync_invoice_student_summary,
 )
 from qas_custom.modules.billing.invoice_settings import apply_default_invoice_dates, apply_invoice_payment_snapshot
+from qas_custom.modules.billing.store_credit import get_invoice_payable_amount
 from qas_custom.modules.common import has_field, set_if_field
 from qas_custom.modules.notifications.guard import disable_sales_invoice_auto_notifications
 from qas_custom.services.display_labels import get_student_display_code, get_student_parent_name
@@ -309,7 +310,7 @@ def update_school_admin_workshop_attendance_data(workshop_session=None, updates=
 
 def get_school_admin_workshop_session_data(workshop_session=None):
 	_require_school_admin()
-	return _build_session_detail(_required_doc("Workshop Session", workshop_session), include_drafts=True)
+	return _build_session_detail(_required_doc("Workshop Session", workshop_session), include_drafts=True, audience="admin")
 
 
 # Teacher
@@ -344,7 +345,7 @@ def get_teacher_workshop_session_detail_data(workshop_session=None):
 	teacher = _require_teacher()
 	session = _required_doc("Workshop Session", workshop_session)
 	_assert_teacher_session(session, teacher.name)
-	return _build_session_detail(session, include_drafts=True)
+	return _build_session_detail(session, include_drafts=True, audience="teacher")
 
 
 def update_teacher_workshop_attendance_data(workshop_session=None, updates=None):
@@ -354,7 +355,7 @@ def update_teacher_workshop_attendance_data(workshop_session=None, updates=None)
 	_assert_teacher_session(session, teacher.name)
 	_update_attendance(session.name, updates, teacher=teacher.name)
 	frappe.db.commit()
-	return _build_session_detail(session, include_drafts=True)
+	return _build_session_detail(session, include_drafts=True, audience="teacher")
 
 
 def publish_teacher_workshop_homework_data(workshop_session=None, title=None, description=None):
@@ -472,19 +473,96 @@ def _build_offering_detail(doc, include_drafts=True, audience="admin"):
 	return result
 
 
-def _build_session_detail(session, include_drafts=True):
+def _build_session_detail(session, include_drafts=True, audience="teacher"):
 	offering = _required_doc("Workshop Offering", session.workshop_offering)
 	attendance = frappe.get_all("Workshop Attendance", filters={"workshop_session":session.name}, fields=["name", "workshop_enrollment", "student", "status", "comments", "marked_by", "marked_at"], order_by="creation asc")
 	student_map = {row.name: row for row in frappe.get_all("Student", filters={"name":["in", [item.student for item in attendance] or [""]]}, fields=["name", "student_name", "guardian", "teaching_notes"])}
-	parent_ids = {row.guardian for row in student_map.values() if row.guardian}
-	parent_map = {row.name: row for row in frappe.get_all("Parent", filters={"name":["in", list(parent_ids) or [""]]}, fields=["name", "parent_name", "mobile_number", "linked_user"])}
+	enrollment_map = {}
+	if audience == "admin":
+		enrollment_ids = sorted({row.workshop_enrollment for row in attendance if row.workshop_enrollment})
+		enrollment_map = {
+			row.name: row
+			for row in frappe.get_all(
+				"Workshop Enrollment",
+				filters={"name": ["in", enrollment_ids or [""]]},
+				fields=["name", "parent", "invoice"],
+				limit_page_length=0,
+			)
+		}
+	parent_ids = set()
+	for row in attendance:
+		student = student_map.get(row.student, {})
+		enrollment = enrollment_map.get(row.workshop_enrollment, {})
+		parent = enrollment.get("parent") or student.get("guardian")
+		if parent:
+			parent_ids.add(parent)
+	parent_fields = ["name", "parent_name", "mobile_number", "linked_user"]
+	if audience == "admin" and has_field("Parent", "customer"):
+		parent_fields.append("customer")
+	parent_map = {row.name: row for row in frappe.get_all("Parent", filters={"name":["in", list(parent_ids) or [""]]}, fields=parent_fields, limit_page_length=0)}
+	financials = _admin_workshop_financial_context(parent_map, enrollment_map) if audience == "admin" else {}
 	students = []
 	for row in attendance:
 		student = student_map.get(row.student, {})
-		parent = parent_map.get(student.get("guardian"), {})
-		students.append({"row_id":row.name, "student":row.student, "student_name":student.get("student_name") or row.student, "teaching_notes":student.get("teaching_notes") or "", "parent_name":parent.get("parent_name") or "", "parent_phone":parent.get("mobile_number") or "", "parent_email":parent.get("linked_user") or "", "status":row.status, "comments":row.comments or "", "enrollment_type":"Workshop"})
+		enrollment = enrollment_map.get(row.workshop_enrollment, {})
+		parent_id = enrollment.get("parent") or student.get("guardian")
+		parent = parent_map.get(parent_id, {})
+		payload = {"row_id":row.name, "student":row.student, "student_name":student.get("student_name") or row.student, "teaching_notes":student.get("teaching_notes") or "", "parent_name":parent.get("parent_name") or "", "parent_phone":parent.get("mobile_number") or "", "parent_email":parent.get("linked_user") or "", "status":row.status, "comments":row.comments or "", "enrollment_type":"Workshop"}
+		if audience == "admin":
+			account = financials.get("accounts", {}).get(parent_id, {"amount": 0}) if parent_id and financials.get("available") else None
+			invoice = financials.get("invoices", {}).get(enrollment.get("invoice")) if enrollment.get("invoice") else None
+			payload.update({
+				"has_outstanding_invoice": bool(account.get("amount")) if account is not None else None,
+				"outstanding_amount": flt(account.get("amount") or 0) if account is not None else 0,
+				"workshop_invoice": enrollment.get("invoice") or "",
+				"workshop_invoice_status": invoice.get("status") if invoice else "No invoice",
+				"workshop_invoice_outstanding_amount": flt(invoice.get("outstanding_amount") or 0) if invoice else 0,
+			})
+		students.append(payload)
 	content = _content_for_sessions([session.name], include_drafts=include_drafts, audience="teacher")
 	return {"session": {**_session_payload(session), "id":session.name, "session_id":session.name, "source_type":"workshop", "course":offering.title, "workshop_category":offering.workshop_category, "class_language":offering.class_language, "student_count":len(students), "leave_count":0}, "students":students, "homeworks":content["homeworks"], "photo_posts":content["photo_posts"], "video_posts":content["video_posts"], "status_options":list(ATTENDANCE_STATUSES)}
+
+
+def _admin_workshop_financial_context(parent_map, enrollment_map):
+	try:
+		from qas_custom.services.school_admin import _get_family_outstanding_invoice_map
+
+		families = [
+			{"parent": parent_id, "customer": parent.get("customer")}
+			for parent_id, parent in parent_map.items()
+		]
+		accounts = _get_family_outstanding_invoice_map(families)
+		invoice_names = sorted({row.get("invoice") for row in enrollment_map.values() if row.get("invoice")})
+		invoices = _workshop_invoice_summary_map(invoice_names)
+		return {"available": True, "accounts": accounts, "invoices": invoices}
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "Workshop attendance financial enrichment failed")
+		return {"available": False, "accounts": {}, "invoices": {}}
+
+
+def _workshop_invoice_summary_map(invoice_names):
+	if not invoice_names:
+		return {}
+	rows = frappe.get_all(
+		"Sales Invoice",
+		filters={"name": ["in", invoice_names]},
+		fields=["name", "docstatus", "status", "grand_total", "rounded_total", "outstanding_amount"],
+		limit_page_length=0,
+	)
+	result = {}
+	for row in rows:
+		docstatus = cint(row.get("docstatus"))
+		if docstatus == 2:
+			status = "Cancelled"
+			payable = 0
+		elif docstatus == 0:
+			status = "Draft"
+			payable = 0
+		else:
+			payable = flt(get_invoice_payable_amount(row))
+			status = "Outstanding" if payable > 0.005 else "Paid"
+		result[row.get("name")] = {"status": status, "outstanding_amount": payable}
+	return result
 
 
 def _content_for_sessions(session_ids, include_drafts=False, audience="parent"):

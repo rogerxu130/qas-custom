@@ -7,12 +7,14 @@ import frappe
 
 from qas_custom.services.workshops import (
 	ATTENDANCE_STATUSES,
+	_build_session_detail,
 	_copy_child_row_values,
 	_find_draft_workshop_invoice,
 	_invoice_has_workshop_enrollment_item,
 	_relink_invoice_records,
 	_validate_invoice_consolidation,
 	_validate_no_invoice_payment_activity,
+	_workshop_invoice_summary_map,
 	activate_school_admin_workshop_enrollment_data,
 	consolidate_school_admin_invoices_data,
 	duplicate_school_admin_workshop_offering_data,
@@ -25,6 +27,85 @@ from qas_custom.services.school_admin import _get_family_workshop_enrollment_row
 
 
 class TestWorkshops(TestCase):
+	@patch("qas_custom.services.workshops.get_invoice_payable_amount", side_effect=[0, 25])
+	@patch("qas_custom.services.workshops.frappe")
+	def test_workshop_invoice_summary_uses_live_document_and_payable_state(self, workshop_frappe, _payable):
+		workshop_frappe.get_all.return_value = [
+			frappe._dict(name="SINV-DRAFT", docstatus=0, status="Draft", outstanding_amount=200),
+			frappe._dict(name="SINV-CANCELLED", docstatus=2, status="Cancelled", outstanding_amount=200),
+			frappe._dict(name="SINV-PAID", docstatus=1, status="Paid", outstanding_amount=0),
+			frappe._dict(name="SINV-OUT", docstatus=1, status="Overdue", outstanding_amount=25),
+		]
+
+		result = _workshop_invoice_summary_map(["SINV-DRAFT", "SINV-CANCELLED", "SINV-PAID", "SINV-OUT"])
+
+		self.assertEqual(result["SINV-DRAFT"], {"status": "Draft", "outstanding_amount": 0})
+		self.assertEqual(result["SINV-CANCELLED"], {"status": "Cancelled", "outstanding_amount": 0})
+		self.assertEqual(result["SINV-PAID"], {"status": "Paid", "outstanding_amount": 0})
+		self.assertEqual(result["SINV-OUT"], {"status": "Outstanding", "outstanding_amount": 25})
+
+	@patch("qas_custom.services.workshops._content_for_sessions", return_value={"homeworks": [], "photo_posts": [], "video_posts": []})
+	@patch("qas_custom.services.school_admin._get_family_outstanding_invoice_map", return_value={"PAR-1": {"amount": 125}})
+	@patch("qas_custom.services.workshops.get_invoice_payable_amount", return_value=75)
+	@patch("qas_custom.services.workshops.has_field", return_value=True)
+	@patch("qas_custom.services.workshops._required_doc")
+	@patch("qas_custom.services.workshops.frappe")
+	def test_admin_workshop_session_includes_account_and_live_invoice_status(
+		self, workshop_frappe, required_doc, _has_field, _payable, family_outstanding, _content
+	):
+		session = frappe._dict(
+			name="WSS-1", workshop_offering="WSO-1", session_date="2026-09-22",
+			start_time="09:00:00", end_time="16:00:00", workshop_session_index=1,
+			workshop_session_count=3, status="Scheduled",
+		)
+		required_doc.return_value = frappe._dict(
+			name="WSO-1", title="Spring Camp", workshop_category="Holiday Camp", class_language="English"
+		)
+		workshop_frappe.get_all.side_effect = [
+			[frappe._dict(name="WAT-1", workshop_enrollment="WEN-1", student="STU-1", status="Not Marked", comments="")],
+			[frappe._dict(name="STU-1", student_name="Amy", guardian="PAR-LEGACY", teaching_notes="")],
+			[frappe._dict(name="WEN-1", parent="PAR-1", invoice="SINV-1")],
+			[frappe._dict(name="PAR-1", parent_name="Parent One", mobile_number="0400", linked_user="p@example.com", customer="CUS-1")],
+			[frappe._dict(name="SINV-1", docstatus=1, status="Overdue", grand_total=200, rounded_total=200, outstanding_amount=75)],
+		]
+
+		result = _build_session_detail(session, audience="admin")
+
+		row = result["students"][0]
+		self.assertTrue(row["has_outstanding_invoice"])
+		self.assertEqual(row["outstanding_amount"], 125)
+		self.assertEqual(row["workshop_invoice"], "SINV-1")
+		self.assertEqual(row["workshop_invoice_status"], "Outstanding")
+		self.assertEqual(row["workshop_invoice_outstanding_amount"], 75)
+		self.assertEqual(row["parent_name"], "Parent One")
+		family_outstanding.assert_called_once_with([{"parent": "PAR-1", "customer": "CUS-1"}])
+
+	@patch("qas_custom.services.workshops._content_for_sessions", return_value={"homeworks": [], "photo_posts": [], "video_posts": []})
+	@patch("qas_custom.services.workshops._required_doc")
+	@patch("qas_custom.services.workshops.frappe")
+	def test_teacher_workshop_session_omits_financial_fields(self, workshop_frappe, required_doc, _content):
+		session = frappe._dict(
+			name="WSS-1", workshop_offering="WSO-1", session_date="2026-09-22",
+			start_time="09:00:00", end_time="16:00:00", workshop_session_index=1,
+			workshop_session_count=3, status="Scheduled",
+		)
+		required_doc.return_value = frappe._dict(
+			name="WSO-1", title="Spring Camp", workshop_category="Holiday Camp", class_language="English"
+		)
+		workshop_frappe.get_all.side_effect = [
+			[frappe._dict(name="WAT-1", workshop_enrollment="WEN-1", student="STU-1", status="Not Marked", comments="")],
+			[frappe._dict(name="STU-1", student_name="Amy", guardian="PAR-1", teaching_notes="")],
+			[frappe._dict(name="PAR-1", parent_name="Parent One", mobile_number="0400", linked_user="p@example.com")],
+		]
+
+		row = _build_session_detail(session, audience="teacher")["students"][0]
+
+		for field in (
+			"has_outstanding_invoice", "outstanding_amount", "workshop_invoice",
+			"workshop_invoice_status", "workshop_invoice_outstanding_amount",
+		):
+			self.assertNotIn(field, row)
+
 	@patch("qas_custom.services.school_admin._doctype_available", return_value=True)
 	@patch("qas_custom.services.school_admin.frappe")
 	def test_family_workshop_enrollments_include_all_statuses_and_display_context(self, school_admin_frappe, _doctype):
