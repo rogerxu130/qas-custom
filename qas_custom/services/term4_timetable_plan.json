@@ -1,0 +1,3756 @@
+{
+  "term": "Term 4 2026",
+  "version": 1,
+  "actions": [
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00010",
+      "before_label": "indooroopilly fri 10:00 R3 Adult Art Studio (Veronica Violet Curties Chen)",
+      "target_label": "indooroopilly fri 10:00 R3 Adult Art Studio (Veronica Violet Curties Chen)",
+      "expected": {
+        "course": "Adult Art Studio",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r3",
+        "day_of_week": "Friday",
+        "start_time": "10:00:00",
+        "end_time": "12:00:00",
+        "teacher": "Veronica Violet Curties Chen",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Adult Art Studio",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r3",
+        "day_of_week": "Friday",
+        "start_time": "10:00:00",
+        "end_time": "12:00:00",
+        "teacher": "Veronica Violet Curties Chen",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "update",
+      "source": "WTS-2026-00026",
+      "before_label": "indooroopilly fri 15:45 R3 Anime Art - Intermediate (Clara Chan)",
+      "target_label": "indooroopilly fri 15:45 R3 Anime Art - Intermediate (Veronica Violet Curties Chen)",
+      "expected": {
+        "course": "Anime Art - Intermediate",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r3",
+        "day_of_week": "Friday",
+        "start_time": "15:45:00",
+        "end_time": "17:15:00",
+        "teacher": "Clara Chan",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Anime Art - Intermediate",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r3",
+        "day_of_week": "Friday",
+        "start_time": "15:45:00",
+        "end_time": "17:15:00",
+        "teacher": "Veronica Violet Curties Chen",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00072",
+      "before_label": "indooroopilly fri 16:00 R1 Designer Art - Beginner (Zoe / Zitong Z)",
+      "target_label": "indooroopilly fri 16:00 R1 Designer Art - Beginner (Zoe / Zitong Z)",
+      "expected": {
+        "course": "Designer Art - Beginner",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1-1",
+        "day_of_week": "Friday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Zoe / Zitong Z",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Designer Art - Beginner",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1-1",
+        "day_of_week": "Friday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Zoe / Zitong Z",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "update",
+      "source": "WTS-2026-00116",
+      "before_label": "indooroopilly fri 16:00 R2 Realistic Art - Intermediate (Veronica Violet Curties Chen)",
+      "target_label": "indooroopilly fri 16:00 R2 Anime Art - Advanced (Jayson)",
+      "expected": {
+        "course": "Realistic Art - Intermediate",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1",
+        "day_of_week": "Friday",
+        "start_time": "16:00:00",
+        "end_time": "18:00:00",
+        "teacher": "Veronica Violet Curties Chen",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Anime Art - Advanced",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1",
+        "day_of_week": "Friday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Jayson",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00063",
+      "before_label": "indooroopilly fri 16:00 R4 Creative Art - Intermediate B (Julie)",
+      "target_label": "indooroopilly fri 16:00 R4 Creative Art - Intermediate B (Julie)",
+      "expected": {
+        "course": "Creative Art - Intermediate B",
+        "class_language": "Chinese",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r4",
+        "day_of_week": "Friday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Julie",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Creative Art - Intermediate B",
+        "class_language": "Chinese",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r4",
+        "day_of_week": "Friday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Julie",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00130",
+      "before_label": "indooroopilly fri 16:00 R5 Storytelling and Art - Beginner (Joanne)",
+      "target_label": "indooroopilly fri 16:00 R5 Storytelling and Art - Beginner (Joanne)",
+      "expected": {
+        "course": "Storytelling and Art - Beginner",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r5",
+        "day_of_week": "Friday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Joanne",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Storytelling and Art - Beginner",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r5",
+        "day_of_week": "Friday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Joanne",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "update",
+      "source": "WTS-2026-00052",
+      "before_label": "indooroopilly fri 17:20 R3 Creative Art - Beginner B (Clara Chan)",
+      "target_label": "indooroopilly fri 17:20 R3 Creative Art - Beginner B (Veronica Violet Curties Chen)",
+      "expected": {
+        "course": "Creative Art - Beginner B",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r3",
+        "day_of_week": "Friday",
+        "start_time": "17:20:00",
+        "end_time": "18:20:00",
+        "teacher": "Clara Chan",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Creative Art - Beginner B",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r3",
+        "day_of_week": "Friday",
+        "start_time": "17:20:00",
+        "end_time": "18:20:00",
+        "teacher": "Veronica Violet Curties Chen",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00042",
+      "before_label": "indooroopilly mon 15:45 R2 Creative Art - Beginner A (Joanne)",
+      "target_label": "indooroopilly mon 15:45 R2 Creative Art - Beginner A (Joanne)",
+      "expected": {
+        "course": "Creative Art - Beginner A",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1",
+        "day_of_week": "Monday",
+        "start_time": "15:45:00",
+        "end_time": "16:45:00",
+        "teacher": "Joanne",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Creative Art - Beginner A",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1",
+        "day_of_week": "Monday",
+        "start_time": "15:45:00",
+        "end_time": "16:45:00",
+        "teacher": "Joanne",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "update",
+      "source": "WTS-2026-00117",
+      "before_label": "indooroopilly mon 15:30 R4 Realistic Art - Intermediate (Joanne)",
+      "target_label": "indooroopilly mon 16:00 R3 Realistic Art - Intermediate (Zoe / Zitong Z)",
+      "expected": {
+        "course": "Realistic Art - Intermediate",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r4",
+        "day_of_week": "Monday",
+        "start_time": "15:30:00",
+        "end_time": "17:30:00",
+        "teacher": "Joanne",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Realistic Art - Intermediate",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r3",
+        "day_of_week": "Monday",
+        "start_time": "16:00:00",
+        "end_time": "18:00:00",
+        "teacher": "Zoe / Zitong Z",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "create_candidate",
+      "source": null,
+      "before_label": "",
+      "target_label": "indooroopilly mon 16:00 R5 Storytelling and Art - Beginner (Loanne Ho)",
+      "expected": null,
+      "target": {
+        "course": "Storytelling and Art - Beginner",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r5",
+        "day_of_week": "Monday",
+        "start_time": "16:00:00",
+        "teacher": "Loanne Ho",
+        "status": "Active",
+        "end_time": "17:30:00"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00027",
+      "before_label": "indooroopilly mon 16:50 R2 Anime Art - Intermediate (Joanne)",
+      "target_label": "indooroopilly mon 16:50 R2 Anime Art - Intermediate (Joanne)",
+      "expected": {
+        "course": "Anime Art - Intermediate",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1",
+        "day_of_week": "Monday",
+        "start_time": "16:50:00",
+        "end_time": "18:20:00",
+        "teacher": "Joanne",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Anime Art - Intermediate",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1",
+        "day_of_week": "Monday",
+        "start_time": "16:50:00",
+        "end_time": "18:20:00",
+        "teacher": "Joanne",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "create_candidate",
+      "source": null,
+      "before_label": "",
+      "target_label": "indooroopilly sat 10:10 R5 Storytelling and Art - Beginner (Stella Ke)",
+      "expected": null,
+      "target": {
+        "course": "Storytelling and Art - Beginner",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r5",
+        "day_of_week": "Saturday",
+        "start_time": "10:10:00",
+        "teacher": "Stella Ke",
+        "status": "Active",
+        "end_time": "11:40:00"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00057",
+      "before_label": "indooroopilly sat 10:40 R1 Creative Art - Intermediate A (Veronica Violet Curties Chen)",
+      "target_label": "indooroopilly sat 10:40 R1 Creative Art - Intermediate A (Veronica Violet Curties Chen)",
+      "expected": {
+        "course": "Creative Art - Intermediate A",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1-1",
+        "day_of_week": "Saturday",
+        "start_time": "10:40:00",
+        "end_time": "12:10:00",
+        "teacher": "Veronica Violet Curties Chen",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Creative Art - Intermediate A",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1-1",
+        "day_of_week": "Saturday",
+        "start_time": "10:40:00",
+        "end_time": "12:10:00",
+        "teacher": "Veronica Violet Curties Chen",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "update",
+      "source": "WTS-2026-00119",
+      "before_label": "indooroopilly sat 10:40 R3 Realistic Art - Intermediate (Arthur)",
+      "target_label": "indooroopilly sat 10:40 R3 Realistic Art - Intermediate (Amaya Foley)",
+      "expected": {
+        "course": "Realistic Art - Intermediate",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r3",
+        "day_of_week": "Saturday",
+        "start_time": "10:40:00",
+        "end_time": "12:40:00",
+        "teacher": "Arthur",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Realistic Art - Intermediate",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r3",
+        "day_of_week": "Saturday",
+        "start_time": "10:40:00",
+        "end_time": "12:40:00",
+        "teacher": "Amaya Foley",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "update",
+      "source": "WTS-2026-00028",
+      "before_label": "indooroopilly sat 10:40 R4 Anime Art - Intermediate (Jayson)",
+      "target_label": "indooroopilly sat 10:40 R4 Anime Art - Intermediate (Jonie)",
+      "expected": {
+        "course": "Anime Art - Intermediate",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r4",
+        "day_of_week": "Saturday",
+        "start_time": "10:40:00",
+        "end_time": "12:10:00",
+        "teacher": "Jayson",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Anime Art - Intermediate",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r4",
+        "day_of_week": "Saturday",
+        "start_time": "10:40:00",
+        "end_time": "12:10:00",
+        "teacher": "Jonie",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "update",
+      "source": "WTS-2026-00099",
+      "before_label": "indooroopilly sat 12:00 R5 Little Artist (Sita Intaranan)",
+      "target_label": "indooroopilly sat 12:30 R5 Little Artist (Stella Ke)",
+      "expected": {
+        "course": "Little Artist",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r5",
+        "day_of_week": "Saturday",
+        "start_time": "12:00:00",
+        "end_time": "13:00:00",
+        "teacher": "Sita Intaranan",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Little Artist",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r5",
+        "day_of_week": "Saturday",
+        "start_time": "12:30:00",
+        "end_time": "13:30:00",
+        "teacher": "Stella Ke",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "update",
+      "source": "WTS-2026-00053",
+      "before_label": "indooroopilly sat 12:50 R4 Creative Art - Beginner B (Jayson)",
+      "target_label": "indooroopilly sat 12:50 R4 Creative Art - Beginner B (Jonie)",
+      "expected": {
+        "course": "Creative Art - Beginner B",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r4",
+        "day_of_week": "Saturday",
+        "start_time": "12:50:00",
+        "end_time": "13:50:00",
+        "teacher": "Jayson",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Creative Art - Beginner B",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r4",
+        "day_of_week": "Saturday",
+        "start_time": "12:50:00",
+        "end_time": "13:50:00",
+        "teacher": "Jonie",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00012",
+      "before_label": "indooroopilly sat 13:00 R1 Anime Art - Advanced (Veronica Violet Curties Chen)",
+      "target_label": "indooroopilly sat 13:00 R1 Anime Art - Advanced (Veronica Violet Curties Chen)",
+      "expected": {
+        "course": "Anime Art - Advanced",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1-1",
+        "day_of_week": "Saturday",
+        "start_time": "13:00:00",
+        "end_time": "14:30:00",
+        "teacher": "Veronica Violet Curties Chen",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Anime Art - Advanced",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1-1",
+        "day_of_week": "Saturday",
+        "start_time": "13:00:00",
+        "end_time": "14:30:00",
+        "teacher": "Veronica Violet Curties Chen",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "update",
+      "source": "WTS-2026-00105",
+      "before_label": "indooroopilly sat 13:30 R3 Realistic Art - Advanced (Arthur)",
+      "target_label": "indooroopilly sat 13:30 R3 Realistic Art - Advanced (Amaya Foley)",
+      "expected": {
+        "course": "Realistic Art - Advanced",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r3",
+        "day_of_week": "Saturday",
+        "start_time": "13:30:00",
+        "end_time": "15:30:00",
+        "teacher": "Arthur",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Realistic Art - Advanced",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r3",
+        "day_of_week": "Saturday",
+        "start_time": "13:30:00",
+        "end_time": "15:30:00",
+        "teacher": "Amaya Foley",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "update",
+      "source": "WTS-2026-00131",
+      "before_label": "indooroopilly sat 13:40 R5 Storytelling and Art - Beginner (Sita Intaranan)",
+      "target_label": "indooroopilly sat 13:40 R5 Anime Art - Beginner ()",
+      "expected": {
+        "course": "Storytelling and Art - Beginner",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r5",
+        "day_of_week": "Saturday",
+        "start_time": "13:40:00",
+        "end_time": "15:10:00",
+        "teacher": "Sita Intaranan",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Anime Art - Beginner",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r5",
+        "day_of_week": "Saturday",
+        "start_time": "13:40:00",
+        "end_time": "15:10:00",
+        "teacher": "",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "update",
+      "source": "WTS-2026-00009",
+      "before_label": "indooroopilly sat 14:00 R4 Realistic Art - Beginner (Jayson)",
+      "target_label": "indooroopilly sat 14:00 R4 Realistic Art - Beginner (Jonie)",
+      "expected": {
+        "course": "Realistic Art - Beginner",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r4",
+        "day_of_week": "Saturday",
+        "start_time": "14:00:00",
+        "end_time": "15:30:00",
+        "teacher": "Jayson",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Realistic Art - Beginner",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r4",
+        "day_of_week": "Saturday",
+        "start_time": "14:00:00",
+        "end_time": "15:30:00",
+        "teacher": "Jonie",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00073",
+      "before_label": "indooroopilly sat 14:40 R1 Designer Art - Beginner (Veronica Violet Curties Chen)",
+      "target_label": "indooroopilly sat 14:40 R1 Designer Art - Beginner (Veronica Violet Curties Chen)",
+      "expected": {
+        "course": "Designer Art - Beginner",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1-1",
+        "day_of_week": "Saturday",
+        "start_time": "14:40:00",
+        "end_time": "16:10:00",
+        "teacher": "Veronica Violet Curties Chen",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Designer Art - Beginner",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1-1",
+        "day_of_week": "Saturday",
+        "start_time": "14:40:00",
+        "end_time": "16:10:00",
+        "teacher": "Veronica Violet Curties Chen",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "update",
+      "source": "WTS-2026-00029",
+      "before_label": "indooroopilly sat 15:20 R2 Anime Art - Intermediate (Sita Intaranan)",
+      "target_label": "indooroopilly sat 15:20 R2 Anime Art - Intermediate (Stella Ke)",
+      "expected": {
+        "course": "Anime Art - Intermediate",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1",
+        "day_of_week": "Saturday",
+        "start_time": "15:20:00",
+        "end_time": "16:50:00",
+        "teacher": "Sita Intaranan",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Anime Art - Intermediate",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1",
+        "day_of_week": "Saturday",
+        "start_time": "15:20:00",
+        "end_time": "16:50:00",
+        "teacher": "Stella Ke",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "update",
+      "source": "WTS-2026-00106",
+      "before_label": "indooroopilly sat 15:40 R3 Realistic Art - Advanced (Arthur)",
+      "target_label": "indooroopilly sat 15:40 R3 Realistic Art - Advanced (Amaya Foley)",
+      "expected": {
+        "course": "Realistic Art - Advanced",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r3",
+        "day_of_week": "Saturday",
+        "start_time": "15:40:00",
+        "end_time": "17:40:00",
+        "teacher": "Arthur",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Realistic Art - Advanced",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r3",
+        "day_of_week": "Saturday",
+        "start_time": "15:40:00",
+        "end_time": "17:40:00",
+        "teacher": "Amaya Foley",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "update",
+      "source": "WTS-2026-00070",
+      "before_label": "indooroopilly sat 15:40 R4 Designer Art - Advanced (Jayson)",
+      "target_label": "indooroopilly sat 15:40 R4 Designer Art - Advanced (Jonie)",
+      "expected": {
+        "course": "Designer Art - Advanced",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r4",
+        "day_of_week": "Saturday",
+        "start_time": "15:40:00",
+        "end_time": "17:10:00",
+        "teacher": "Jayson",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Designer Art - Advanced",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r4",
+        "day_of_week": "Saturday",
+        "start_time": "15:40:00",
+        "end_time": "17:10:00",
+        "teacher": "Jonie",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00044",
+      "before_label": "indooroopilly sat 16:20 R1 Creative Art - Beginner A (Veronica Violet Curties Chen)",
+      "target_label": "indooroopilly sat 16:20 R1 Creative Art - Beginner A (Veronica Violet Curties Chen)",
+      "expected": {
+        "course": "Creative Art - Beginner A",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1-1",
+        "day_of_week": "Saturday",
+        "start_time": "16:20:00",
+        "end_time": "17:20:00",
+        "teacher": "Veronica Violet Curties Chen",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Creative Art - Beginner A",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1-1",
+        "day_of_week": "Saturday",
+        "start_time": "16:20:00",
+        "end_time": "17:20:00",
+        "teacher": "Veronica Violet Curties Chen",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00019",
+      "before_label": "indooroopilly sat 09:00 R1 Anime Art - Beginner (Veronica Violet Curties Chen)",
+      "target_label": "indooroopilly sat 9:00 R1 Anime Art - Beginner (Veronica Violet Curties Chen)",
+      "expected": {
+        "course": "Anime Art - Beginner",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1-1",
+        "day_of_week": "Saturday",
+        "start_time": "09:00:00",
+        "end_time": "10:30:00",
+        "teacher": "Veronica Violet Curties Chen",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Anime Art - Beginner",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1-1",
+        "day_of_week": "Saturday",
+        "start_time": "09:00:00",
+        "end_time": "10:30:00",
+        "teacher": "Veronica Violet Curties Chen",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "update",
+      "source": "WTS-2026-00013",
+      "before_label": "indooroopilly sat 09:00 R3 Anime Art - Advanced (Arthur)",
+      "target_label": "indooroopilly sat 9:00 R3 Anime Art - Advanced (Amaya Foley)",
+      "expected": {
+        "course": "Anime Art - Advanced",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r3",
+        "day_of_week": "Saturday",
+        "start_time": "09:00:00",
+        "end_time": "10:30:00",
+        "teacher": "Arthur",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Anime Art - Advanced",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r3",
+        "day_of_week": "Saturday",
+        "start_time": "09:00:00",
+        "end_time": "10:30:00",
+        "teacher": "Amaya Foley",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "update",
+      "source": "WTS-2026-00074",
+      "before_label": "indooroopilly sat 09:00 R4 Designer Art - Beginner (Jayson)",
+      "target_label": "indooroopilly sat 9:00 R4 Digital Art with IPad (Jonie)",
+      "expected": {
+        "course": "Designer Art - Beginner",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r4",
+        "day_of_week": "Saturday",
+        "start_time": "09:00:00",
+        "end_time": "10:30:00",
+        "teacher": "Jayson",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Digital Art with IPad",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r4",
+        "day_of_week": "Saturday",
+        "start_time": "09:00:00",
+        "end_time": "10:30:00",
+        "teacher": "Jonie",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "update",
+      "source": "WTS-2026-00132",
+      "before_label": "indooroopilly sat 09:00 R5 Storytelling and Art - Beginner (Sita Intaranan)",
+      "target_label": "indooroopilly sat 9:00 R5 Creative Art - Beginner A ()",
+      "expected": {
+        "course": "Storytelling and Art - Beginner",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r5",
+        "day_of_week": "Saturday",
+        "start_time": "09:00:00",
+        "end_time": "10:30:00",
+        "teacher": "Sita Intaranan",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Creative Art - Beginner A",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r5",
+        "day_of_week": "Saturday",
+        "start_time": "09:00:00",
+        "end_time": "10:00:00",
+        "teacher": "",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00020",
+      "before_label": "indooroopilly sun 10:40 R1 Anime Art - Beginner (Stella Ke)",
+      "target_label": "indooroopilly sun 10:40 R1 Anime Art - Beginner (Stella Ke)",
+      "expected": {
+        "course": "Anime Art - Beginner",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1-1",
+        "day_of_week": "Sunday",
+        "start_time": "10:40:00",
+        "end_time": "12:10:00",
+        "teacher": "Stella Ke",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Anime Art - Beginner",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1-1",
+        "day_of_week": "Sunday",
+        "start_time": "10:40:00",
+        "end_time": "12:10:00",
+        "teacher": "Stella Ke",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00112",
+      "before_label": "indooroopilly sun 10:40 R2 Realistic Art - Beginner (Roman Jiang)",
+      "target_label": "indooroopilly sun 10:40 R2 Realistic Art - Beginner (Roman Jiang)",
+      "expected": {
+        "course": "Realistic Art - Beginner",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1",
+        "day_of_week": "Sunday",
+        "start_time": "10:40:00",
+        "end_time": "12:10:00",
+        "teacher": "Roman Jiang",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Realistic Art - Beginner",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1",
+        "day_of_week": "Sunday",
+        "start_time": "10:40:00",
+        "end_time": "12:10:00",
+        "teacher": "Roman Jiang",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00120",
+      "before_label": "indooroopilly sun 10:40 R3 Realistic Art - Intermediate (Julie)",
+      "target_label": "indooroopilly sun 10:40 R3 Realistic Art - Intermediate (Julie)",
+      "expected": {
+        "course": "Realistic Art - Intermediate",
+        "class_language": "Chinese",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r3",
+        "day_of_week": "Sunday",
+        "start_time": "10:40:00",
+        "end_time": "12:40:00",
+        "teacher": "Julie",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Realistic Art - Intermediate",
+        "class_language": "Chinese",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r3",
+        "day_of_week": "Sunday",
+        "start_time": "10:40:00",
+        "end_time": "12:40:00",
+        "teacher": "Julie",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "create_candidate",
+      "source": null,
+      "before_label": "",
+      "target_label": "indooroopilly sun 10:40 R4 Anime Art - Intermediate (Jayson)",
+      "expected": null,
+      "target": {
+        "course": "Anime Art - Intermediate",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r4",
+        "day_of_week": "Sunday",
+        "start_time": "10:40:00",
+        "teacher": "Jayson",
+        "status": "Active",
+        "end_time": "12:10:00"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00133",
+      "before_label": "indooroopilly sun 10:40 R5 Storytelling and Art - Beginner (Joanne)",
+      "target_label": "indooroopilly sun 10:40 R5 Storytelling and Art - Beginner (Joanne)",
+      "expected": {
+        "course": "Storytelling and Art - Beginner",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r5",
+        "day_of_week": "Sunday",
+        "start_time": "10:40:00",
+        "end_time": "12:10:00",
+        "teacher": "Joanne",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Storytelling and Art - Beginner",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r5",
+        "day_of_week": "Sunday",
+        "start_time": "10:40:00",
+        "end_time": "12:10:00",
+        "teacher": "Joanne",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00058",
+      "before_label": "indooroopilly sun 13:00 R1 Creative Art - Intermediate A (Stella Ke)",
+      "target_label": "indooroopilly sun 13:00 R1 Creative Art - Intermediate A (Stella Ke)",
+      "expected": {
+        "course": "Creative Art - Intermediate A",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1-1",
+        "day_of_week": "Sunday",
+        "start_time": "13:00:00",
+        "end_time": "14:30:00",
+        "teacher": "Stella Ke",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Creative Art - Intermediate A",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1-1",
+        "day_of_week": "Sunday",
+        "start_time": "13:00:00",
+        "end_time": "14:30:00",
+        "teacher": "Stella Ke",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00121",
+      "before_label": "indooroopilly sun 13:00 R2 Realistic Art - Intermediate (Roman Jiang)",
+      "target_label": "indooroopilly sun 13:00 R2 Realistic Art - Intermediate (Roman Jiang)",
+      "expected": {
+        "course": "Realistic Art - Intermediate",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1",
+        "day_of_week": "Sunday",
+        "start_time": "13:00:00",
+        "end_time": "15:00:00",
+        "teacher": "Roman Jiang",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Realistic Art - Intermediate",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1",
+        "day_of_week": "Sunday",
+        "start_time": "13:00:00",
+        "end_time": "15:00:00",
+        "teacher": "Roman Jiang",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00088",
+      "before_label": "indooroopilly sun 13:00 R3 Designer Art - Intermediate (Jayson)",
+      "target_label": "indooroopilly sun 13:00 R3 Designer Art - Intermediate (Jayson)",
+      "expected": {
+        "course": "Designer Art - Intermediate",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r3",
+        "day_of_week": "Sunday",
+        "start_time": "13:00:00",
+        "end_time": "14:30:00",
+        "teacher": "Jayson",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Designer Art - Intermediate",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r3",
+        "day_of_week": "Sunday",
+        "start_time": "13:00:00",
+        "end_time": "14:30:00",
+        "teacher": "Jayson",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00075",
+      "before_label": "indooroopilly sun 13:00 R4 Designer Art - Beginner (Joanne)",
+      "target_label": "indooroopilly sun 13:00 R4 Designer Art - Beginner (Joanne)",
+      "expected": {
+        "course": "Designer Art - Beginner",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r4",
+        "day_of_week": "Sunday",
+        "start_time": "13:00:00",
+        "end_time": "14:30:00",
+        "teacher": "Joanne",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Designer Art - Beginner",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r4",
+        "day_of_week": "Sunday",
+        "start_time": "13:00:00",
+        "end_time": "14:30:00",
+        "teacher": "Joanne",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00039",
+      "before_label": "indooroopilly sun 14:40 R1 Creative Art - Advanced (Joanne)",
+      "target_label": "indooroopilly sun 14:40 R1 Creative Art - Advanced (Joanne)",
+      "expected": {
+        "course": "Creative Art - Advanced",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1-1",
+        "day_of_week": "Sunday",
+        "start_time": "14:40:00",
+        "end_time": "16:10:00",
+        "teacher": "Joanne",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Creative Art - Advanced",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1-1",
+        "day_of_week": "Sunday",
+        "start_time": "14:40:00",
+        "end_time": "16:10:00",
+        "teacher": "Joanne",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00107",
+      "before_label": "indooroopilly sun 14:40 R3 Realistic Art - Advanced (Julie)",
+      "target_label": "indooroopilly sun 14:40 R3 Realistic Art - Advanced (Julie)",
+      "expected": {
+        "course": "Realistic Art - Advanced",
+        "class_language": "Chinese",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r3",
+        "day_of_week": "Sunday",
+        "start_time": "14:40:00",
+        "end_time": "16:40:00",
+        "teacher": "Julie",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Realistic Art - Advanced",
+        "class_language": "Chinese",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r3",
+        "day_of_week": "Sunday",
+        "start_time": "14:40:00",
+        "end_time": "16:40:00",
+        "teacher": "Julie",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00014",
+      "before_label": "indooroopilly sun 14:40 R4 Anime Art - Advanced (Jayson)",
+      "target_label": "indooroopilly sun 14:40 R4 Anime Art - Advanced (Jayson)",
+      "expected": {
+        "course": "Anime Art - Advanced",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r4",
+        "day_of_week": "Sunday",
+        "start_time": "14:40:00",
+        "end_time": "16:10:00",
+        "teacher": "Jayson",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Anime Art - Advanced",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r4",
+        "day_of_week": "Sunday",
+        "start_time": "14:40:00",
+        "end_time": "16:10:00",
+        "teacher": "Jayson",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00134",
+      "before_label": "indooroopilly sun 14:40 R5 Storytelling and Art - Beginner (Stella Ke)",
+      "target_label": "indooroopilly sun 14:40 R5 Storytelling and Art - Beginner (Stella Ke)",
+      "expected": {
+        "course": "Storytelling and Art - Beginner",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r5",
+        "day_of_week": "Sunday",
+        "start_time": "14:40:00",
+        "end_time": "16:10:00",
+        "teacher": "Stella Ke",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Storytelling and Art - Beginner",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r5",
+        "day_of_week": "Sunday",
+        "start_time": "14:40:00",
+        "end_time": "16:10:00",
+        "teacher": "Stella Ke",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00100",
+      "before_label": "indooroopilly sun 15:00 R2 Little Artist (Roman Jiang)",
+      "target_label": "indooroopilly sun 15:00 R2 Little Artist (Roman Jiang)",
+      "expected": {
+        "course": "Little Artist",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1",
+        "day_of_week": "Sunday",
+        "start_time": "15:00:00",
+        "end_time": "16:00:00",
+        "teacher": "Roman Jiang",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Little Artist",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1",
+        "day_of_week": "Sunday",
+        "start_time": "15:00:00",
+        "end_time": "16:00:00",
+        "teacher": "Roman Jiang",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00076",
+      "before_label": "indooroopilly sun 09:00 R1 Designer Art - Beginner (Joanne)",
+      "target_label": "indooroopilly sun 9:00 R1 Designer Art - Beginner (Joanne)",
+      "expected": {
+        "course": "Designer Art - Beginner",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1-1",
+        "day_of_week": "Sunday",
+        "start_time": "09:00:00",
+        "end_time": "10:30:00",
+        "teacher": "Joanne",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Designer Art - Beginner",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1-1",
+        "day_of_week": "Sunday",
+        "start_time": "09:00:00",
+        "end_time": "10:30:00",
+        "teacher": "Joanne",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00030",
+      "before_label": "indooroopilly sun 09:00 R2 Anime Art - Intermediate (Roman Jiang)",
+      "target_label": "indooroopilly sun 9:00 R2 Anime Art - Intermediate (Roman Jiang)",
+      "expected": {
+        "course": "Anime Art - Intermediate",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1",
+        "day_of_week": "Sunday",
+        "start_time": "09:00:00",
+        "end_time": "10:30:00",
+        "teacher": "Roman Jiang",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Anime Art - Intermediate",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1",
+        "day_of_week": "Sunday",
+        "start_time": "09:00:00",
+        "end_time": "10:30:00",
+        "teacher": "Roman Jiang",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "update",
+      "source": "WTS-2026-00108",
+      "before_label": "indooroopilly sun 09:00 R4 Realistic Art - Advanced (Jayson)",
+      "target_label": "indooroopilly sun 9:00 R4 Realistic Art - Beginner (Jayson)",
+      "expected": {
+        "course": "Realistic Art - Advanced",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r4",
+        "day_of_week": "Sunday",
+        "start_time": "09:00:00",
+        "end_time": "11:00:00",
+        "teacher": "Jayson",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Realistic Art - Beginner",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r4",
+        "day_of_week": "Sunday",
+        "start_time": "09:00:00",
+        "end_time": "10:30:00",
+        "teacher": "Jayson",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00101",
+      "before_label": "indooroopilly sun 09:30 R5 Little Artist (Stella Ke)",
+      "target_label": "indooroopilly sun 9:30 R5 Little Artist (Stella Ke)",
+      "expected": {
+        "course": "Little Artist",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r5",
+        "day_of_week": "Sunday",
+        "start_time": "09:30:00",
+        "end_time": "10:30:00",
+        "teacher": "Stella Ke",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Little Artist",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r5",
+        "day_of_week": "Sunday",
+        "start_time": "09:30:00",
+        "end_time": "10:30:00",
+        "teacher": "Stella Ke",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "update",
+      "source": "WTS-2026-00059",
+      "before_label": "indooroopilly thu 15:45 R1 Creative Art - Intermediate A (Veronica Violet Curties Chen)",
+      "target_label": "indooroopilly thu 15:45 R1 Anime Art - Beginner (Veronica Violet Curties Chen)",
+      "expected": {
+        "course": "Creative Art - Intermediate A",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1-1",
+        "day_of_week": "Thursday",
+        "start_time": "15:45:00",
+        "end_time": "17:15:00",
+        "teacher": "Veronica Violet Curties Chen",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Anime Art - Beginner",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1-1",
+        "day_of_week": "Thursday",
+        "start_time": "15:45:00",
+        "end_time": "17:15:00",
+        "teacher": "Veronica Violet Curties Chen",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00094",
+      "before_label": "indooroopilly thu 15:45 R2 Digital Art with IPad (Ville)",
+      "target_label": "indooroopilly thu 15:45 R2 Digital Art with IPad (Ville)",
+      "expected": {
+        "course": "Digital Art with IPad",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1",
+        "day_of_week": "Thursday",
+        "start_time": "15:45:00",
+        "end_time": "17:15:00",
+        "teacher": "Ville",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Digital Art with IPad",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1",
+        "day_of_week": "Thursday",
+        "start_time": "15:45:00",
+        "end_time": "17:15:00",
+        "teacher": "Ville",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00122",
+      "before_label": "indooroopilly thu 16:00 R3 Realistic Art - Intermediate (Jayson)",
+      "target_label": "indooroopilly thu 16:00 R3 Realistic Art - Intermediate (Jayson)",
+      "expected": {
+        "course": "Realistic Art - Intermediate",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r3",
+        "day_of_week": "Thursday",
+        "start_time": "16:00:00",
+        "end_time": "18:00:00",
+        "teacher": "Jayson",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Realistic Art - Intermediate",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r3",
+        "day_of_week": "Thursday",
+        "start_time": "16:00:00",
+        "end_time": "18:00:00",
+        "teacher": "Jayson",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "create_candidate",
+      "source": null,
+      "before_label": "",
+      "target_label": "indooroopilly thu 16:00 R4 Designer Art - Intermediate (Zoe / Zitong Z)",
+      "expected": null,
+      "target": {
+        "course": "Designer Art - Intermediate",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r4",
+        "day_of_week": "Thursday",
+        "start_time": "16:00:00",
+        "teacher": "Zoe / Zitong Z",
+        "status": "Active",
+        "end_time": "17:30:00"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00054",
+      "before_label": "indooroopilly thu 17:15 R1 Creative Art - Beginner B (Veronica Violet Curties Chen)",
+      "target_label": "indooroopilly thu 17:15 R1 Creative Art - Beginner B (Veronica Violet Curties Chen)",
+      "expected": {
+        "course": "Creative Art - Beginner B",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1-1",
+        "day_of_week": "Thursday",
+        "start_time": "17:15:00",
+        "end_time": "18:15:00",
+        "teacher": "Veronica Violet Curties Chen",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Creative Art - Beginner B",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1-1",
+        "day_of_week": "Thursday",
+        "start_time": "17:15:00",
+        "end_time": "18:15:00",
+        "teacher": "Veronica Violet Curties Chen",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00071",
+      "before_label": "indooroopilly thu 17:20 R2 Designer Art - Advanced (Ville)",
+      "target_label": "indooroopilly thu 17:20 R2 Designer Art - Advanced (Ville)",
+      "expected": {
+        "course": "Designer Art - Advanced",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1",
+        "day_of_week": "Thursday",
+        "start_time": "17:20:00",
+        "end_time": "18:50:00",
+        "teacher": "Ville",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Designer Art - Advanced",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1",
+        "day_of_week": "Thursday",
+        "start_time": "17:20:00",
+        "end_time": "18:50:00",
+        "teacher": "Ville",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "update",
+      "source": "WTS-2026-00064",
+      "before_label": "indooroopilly tue 15:45 R1 Creative Art - Intermediate B (Amaya Foley)",
+      "target_label": "indooroopilly tue 15:45 R1 Designer Art - Beginner (Joanne)",
+      "expected": {
+        "course": "Creative Art - Intermediate B",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1-1",
+        "day_of_week": "Tuesday",
+        "start_time": "15:45:00",
+        "end_time": "17:15:00",
+        "teacher": "Amaya Foley",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Designer Art - Beginner",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1-1",
+        "day_of_week": "Tuesday",
+        "start_time": "15:45:00",
+        "end_time": "17:15:00",
+        "teacher": "Joanne",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "update",
+      "source": "WTS-2026-00031",
+      "before_label": "indooroopilly tue 16:00 R2 Anime Art - Intermediate (Amaya Foley)",
+      "target_label": "indooroopilly tue 16:00 R2 Anime Art - Intermediate (Zoe / Zitong Z)",
+      "expected": {
+        "course": "Anime Art - Intermediate",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1",
+        "day_of_week": "Tuesday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Amaya Foley",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Anime Art - Intermediate",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1",
+        "day_of_week": "Tuesday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Zoe / Zitong Z",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "update",
+      "source": "WTS-2026-00021",
+      "before_label": "indooroopilly tue 16:00 R3 Anime Art - Beginner (Veronica Violet Curties Chen)",
+      "target_label": "indooroopilly tue 16:00 R3 Digital Art with IPad (Ville)",
+      "expected": {
+        "course": "Anime Art - Beginner",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r3",
+        "day_of_week": "Tuesday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Veronica Violet Curties Chen",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Digital Art with IPad",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r3",
+        "day_of_week": "Tuesday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Ville",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00046",
+      "before_label": "indooroopilly tue 17:20 R1 Creative Art - Beginner A (Joanne)",
+      "target_label": "indooroopilly tue 17:20 R1 Creative Art - Beginner A (Joanne)",
+      "expected": {
+        "course": "Creative Art - Beginner A",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1-1",
+        "day_of_week": "Tuesday",
+        "start_time": "17:20:00",
+        "end_time": "18:20:00",
+        "teacher": "Joanne",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Creative Art - Beginner A",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1-1",
+        "day_of_week": "Tuesday",
+        "start_time": "17:20:00",
+        "end_time": "18:20:00",
+        "teacher": "Joanne",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00089",
+      "before_label": "indooroopilly wed 16:00 R1 Designer Art - Intermediate (Joanne)",
+      "target_label": "indooroopilly wed 16:00 R1 Designer Art - Intermediate (Joanne)",
+      "expected": {
+        "course": "Designer Art - Intermediate",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1-1",
+        "day_of_week": "Wednesday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Joanne",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Designer Art - Intermediate",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1-1",
+        "day_of_week": "Wednesday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Joanne",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00032",
+      "before_label": "indooroopilly wed 16:00 R2 Anime Art - Intermediate (Veronica Violet Curties Chen)",
+      "target_label": "indooroopilly wed 16:00 R2 Anime Art - Intermediate (Veronica Violet Curties Chen)",
+      "expected": {
+        "course": "Anime Art - Intermediate",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1",
+        "day_of_week": "Wednesday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Veronica Violet Curties Chen",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Anime Art - Intermediate",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1",
+        "day_of_week": "Wednesday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Veronica Violet Curties Chen",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00123",
+      "before_label": "indooroopilly wed 16:00 R3 Realistic Art - Intermediate (Jayson)",
+      "target_label": "indooroopilly wed 16:00 R3 Realistic Art - Intermediate (Jayson)",
+      "expected": {
+        "course": "Realistic Art - Intermediate",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r3",
+        "day_of_week": "Wednesday",
+        "start_time": "16:00:00",
+        "end_time": "18:00:00",
+        "teacher": "Jayson",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Realistic Art - Intermediate",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r3",
+        "day_of_week": "Wednesday",
+        "start_time": "16:00:00",
+        "end_time": "18:00:00",
+        "teacher": "Jayson",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "create_candidate",
+      "source": null,
+      "before_label": "",
+      "target_label": "indooroopilly wed 16:00 R4 Realistic Art - Advanced (Zoe / Zitong Z)",
+      "expected": null,
+      "target": {
+        "course": "Realistic Art - Advanced",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r4",
+        "day_of_week": "Wednesday",
+        "start_time": "16:00:00",
+        "teacher": "Zoe / Zitong Z",
+        "status": "Active",
+        "end_time": "18:00:00"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00065",
+      "before_label": "upper_mount_gravatt fri 16:00 R2 Creative Art - Intermediate B (Ville)",
+      "target_label": "upper_mount_gravatt fri 16:00 R2 Creative Art - Intermediate B (Ville)",
+      "expected": {
+        "course": "Creative Art - Intermediate B",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r2",
+        "day_of_week": "Friday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Ville",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Creative Art - Intermediate B",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r2",
+        "day_of_week": "Friday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Ville",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00079",
+      "before_label": "upper_mount_gravatt fri 16:00 R4 Designer Art - Beginner (Caroline Emma Girdler)",
+      "target_label": "upper_mount_gravatt fri 16:00 R4 Designer Art - Beginner (Caroline Emma Girdler)",
+      "expected": {
+        "course": "Designer Art - Beginner",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r4",
+        "day_of_week": "Friday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Caroline Emma Girdler",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Designer Art - Beginner",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r4",
+        "day_of_week": "Friday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Caroline Emma Girdler",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00113",
+      "before_label": "upper_mount_gravatt fri 16:00 R5 Realistic Art - Beginner (Amaya Foley)",
+      "target_label": "upper_mount_gravatt fri 16:00 R5 Realistic Art - Beginner (Amaya Foley)",
+      "expected": {
+        "course": "Realistic Art - Beginner",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r5",
+        "day_of_week": "Friday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Amaya Foley",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Realistic Art - Beginner",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r5",
+        "day_of_week": "Friday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Amaya Foley",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00090",
+      "before_label": "upper_mount_gravatt mon 16:00 R1 Designer Art - Intermediate (Ville)",
+      "target_label": "upper_mount_gravatt mon 16:00 R1 Designer Art - Intermediate (Ville)",
+      "expected": {
+        "course": "Designer Art - Intermediate",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r1",
+        "day_of_week": "Monday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Ville",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Designer Art - Intermediate",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r1",
+        "day_of_week": "Monday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Ville",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "update",
+      "source": "WTS-2026-00114",
+      "before_label": "upper_mount_gravatt mon 16:00 R2 Realistic Art - Beginner (Clara Chan)",
+      "target_label": "upper_mount_gravatt mon 16:00 R2 Realistic Art - Beginner (Amaya Foley)",
+      "expected": {
+        "course": "Realistic Art - Beginner",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r2",
+        "day_of_week": "Monday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Clara Chan",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Realistic Art - Beginner",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r2",
+        "day_of_week": "Monday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Amaya Foley",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00060",
+      "before_label": "upper_mount_gravatt mon 16:00 R3 Creative Art - Intermediate A (Julie)",
+      "target_label": "upper_mount_gravatt mon 16:00 R3 Creative Art - Intermediate A (Julie)",
+      "expected": {
+        "course": "Creative Art - Intermediate A",
+        "class_language": "Chinese",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r3",
+        "day_of_week": "Monday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Julie",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Creative Art - Intermediate A",
+        "class_language": "Chinese",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r3",
+        "day_of_week": "Monday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Julie",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00135",
+      "before_label": "upper_mount_gravatt mon 16:00 R4 Storytelling and Art - Beginner (Caroline Emma Girdler)",
+      "target_label": "upper_mount_gravatt mon 16:00 R4 Storytelling and Art - Beginner (Caroline Emma Girdler)",
+      "expected": {
+        "course": "Storytelling and Art - Beginner",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r4",
+        "day_of_week": "Monday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Caroline Emma Girdler",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Storytelling and Art - Beginner",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r4",
+        "day_of_week": "Monday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Caroline Emma Girdler",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "update",
+      "source": "WTS-2026-00081",
+      "before_label": "upper_mount_gravatt sat 10:40 R1 Designer Art - Beginner (Stella Ke)",
+      "target_label": "upper_mount_gravatt sat 10:40 R1 Designer Art - Beginner (Jayson)",
+      "expected": {
+        "course": "Designer Art - Beginner",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r1",
+        "day_of_week": "Saturday",
+        "start_time": "10:40:00",
+        "end_time": "12:10:00",
+        "teacher": "Stella Ke",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Designer Art - Beginner",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r1",
+        "day_of_week": "Saturday",
+        "start_time": "10:40:00",
+        "end_time": "12:10:00",
+        "teacher": "Jayson",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00066",
+      "before_label": "upper_mount_gravatt sat 10:40 R2 Creative Art - Intermediate B (Julie)",
+      "target_label": "upper_mount_gravatt sat 10:40 R2 Creative Art - Intermediate B (Julie)",
+      "expected": {
+        "course": "Creative Art - Intermediate B",
+        "class_language": "Chinese",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r2",
+        "day_of_week": "Saturday",
+        "start_time": "10:40:00",
+        "end_time": "12:10:00",
+        "teacher": "Julie",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Creative Art - Intermediate B",
+        "class_language": "Chinese",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r2",
+        "day_of_week": "Saturday",
+        "start_time": "10:40:00",
+        "end_time": "12:10:00",
+        "teacher": "Julie",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00034",
+      "before_label": "upper_mount_gravatt sat 10:40 R3 Anime Art - Intermediate (Sophie Liu)",
+      "target_label": "upper_mount_gravatt sat 10:40 R3 Anime Art - Intermediate (Sophie Liu)",
+      "expected": {
+        "course": "Anime Art - Intermediate",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r3",
+        "day_of_week": "Saturday",
+        "start_time": "10:40:00",
+        "end_time": "12:10:00",
+        "teacher": "Sophie Liu",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Anime Art - Intermediate",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r3",
+        "day_of_week": "Saturday",
+        "start_time": "10:40:00",
+        "end_time": "12:10:00",
+        "teacher": "Sophie Liu",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00136",
+      "before_label": "upper_mount_gravatt sat 10:40 R4 Storytelling and Art - Beginner (Caroline Emma Girdler)",
+      "target_label": "upper_mount_gravatt sat 10:40 R4 Storytelling and Art - Beginner (Caroline Emma Girdler)",
+      "expected": {
+        "course": "Storytelling and Art - Beginner",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r4",
+        "day_of_week": "Saturday",
+        "start_time": "10:40:00",
+        "end_time": "12:10:00",
+        "teacher": "Caroline Emma Girdler",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Storytelling and Art - Beginner",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r4",
+        "day_of_week": "Saturday",
+        "start_time": "10:40:00",
+        "end_time": "12:10:00",
+        "teacher": "Caroline Emma Girdler",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00080",
+      "before_label": "upper_mount_gravatt sat 10:40 R5 Designer Art - Beginner (Lilian Li)",
+      "target_label": "upper_mount_gravatt sat 10:40 R5 Designer Art - Beginner (Lilian Li)",
+      "expected": {
+        "course": "Designer Art - Beginner",
+        "class_language": "Chinese",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r5",
+        "day_of_week": "Saturday",
+        "start_time": "10:40:00",
+        "end_time": "12:10:00",
+        "teacher": "Lilian Li",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Designer Art - Beginner",
+        "class_language": "Chinese",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r5",
+        "day_of_week": "Saturday",
+        "start_time": "10:40:00",
+        "end_time": "12:10:00",
+        "teacher": "Lilian Li",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00047",
+      "before_label": "upper_mount_gravatt sat 12:40 R4 Creative Art - Beginner A (Caroline Emma Girdler)",
+      "target_label": "upper_mount_gravatt sat 12:40 R4 Creative Art - Beginner A (Caroline Emma Girdler)",
+      "expected": {
+        "course": "Creative Art - Beginner A",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r4",
+        "day_of_week": "Saturday",
+        "start_time": "12:40:00",
+        "end_time": "13:40:00",
+        "teacher": "Caroline Emma Girdler",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Creative Art - Beginner A",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r4",
+        "day_of_week": "Saturday",
+        "start_time": "12:40:00",
+        "end_time": "13:40:00",
+        "teacher": "Caroline Emma Girdler",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "update",
+      "source": "WTS-2026-00061",
+      "before_label": "upper_mount_gravatt sat 13:00 R1 Creative Art - Intermediate A (Stella Ke)",
+      "target_label": "upper_mount_gravatt sat 13:00 R1 Creative Art - Intermediate A (Jayson)",
+      "expected": {
+        "course": "Creative Art - Intermediate A",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r1",
+        "day_of_week": "Saturday",
+        "start_time": "13:00:00",
+        "end_time": "14:30:00",
+        "teacher": "Stella Ke",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Creative Art - Intermediate A",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r1",
+        "day_of_week": "Saturday",
+        "start_time": "13:00:00",
+        "end_time": "14:30:00",
+        "teacher": "Jayson",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00040",
+      "before_label": "upper_mount_gravatt sat 13:00 R2 Creative Art - Advanced (Julie)",
+      "target_label": "upper_mount_gravatt sat 13:00 R2 Creative Art - Advanced (Julie)",
+      "expected": {
+        "course": "Creative Art - Advanced",
+        "class_language": "Chinese",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r2",
+        "day_of_week": "Saturday",
+        "start_time": "13:00:00",
+        "end_time": "14:30:00",
+        "teacher": "Julie",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Creative Art - Advanced",
+        "class_language": "Chinese",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r2",
+        "day_of_week": "Saturday",
+        "start_time": "13:00:00",
+        "end_time": "14:30:00",
+        "teacher": "Julie",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00091",
+      "before_label": "upper_mount_gravatt sat 13:00 R3 Designer Art - Intermediate (Sophie Liu)",
+      "target_label": "upper_mount_gravatt sat 13:00 R3 Designer Art - Intermediate (Sophie Liu)",
+      "expected": {
+        "course": "Designer Art - Intermediate",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r3",
+        "day_of_week": "Saturday",
+        "start_time": "13:00:00",
+        "end_time": "14:30:00",
+        "teacher": "Sophie Liu",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Designer Art - Intermediate",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r3",
+        "day_of_week": "Saturday",
+        "start_time": "13:00:00",
+        "end_time": "14:30:00",
+        "teacher": "Sophie Liu",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "update",
+      "source": "WTS-2026-00067",
+      "before_label": "upper_mount_gravatt sat 13:00 R5 Creative Art - Intermediate B (Amaya Foley)",
+      "target_label": "upper_mount_gravatt sat 13:00 R5 Creative Art - Intermediate B (Xi Yuan Shen)",
+      "expected": {
+        "course": "Creative Art - Intermediate B",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r5",
+        "day_of_week": "Saturday",
+        "start_time": "13:00:00",
+        "end_time": "14:30:00",
+        "teacher": "Amaya Foley",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Creative Art - Intermediate B",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r5",
+        "day_of_week": "Saturday",
+        "start_time": "13:00:00",
+        "end_time": "14:30:00",
+        "teacher": "Xi Yuan Shen",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00102",
+      "before_label": "upper_mount_gravatt sat 13:50 R4 Little Artist (Caroline Emma Girdler)",
+      "target_label": "upper_mount_gravatt sat 13:50 R4 Little Artist (Caroline Emma Girdler)",
+      "expected": {
+        "course": "Little Artist",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r4",
+        "day_of_week": "Saturday",
+        "start_time": "13:50:00",
+        "end_time": "14:50:00",
+        "teacher": "Caroline Emma Girdler",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Little Artist",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r4",
+        "day_of_week": "Saturday",
+        "start_time": "13:50:00",
+        "end_time": "14:50:00",
+        "teacher": "Caroline Emma Girdler",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "update",
+      "source": "WTS-2026-00022",
+      "before_label": "upper_mount_gravatt sat 14:40 R1 Anime Art - Beginner (Stella Ke)",
+      "target_label": "upper_mount_gravatt sat 14:40 R1 Anime Art - Beginner (Xi Yuan Shen)",
+      "expected": {
+        "course": "Anime Art - Beginner",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r1",
+        "day_of_week": "Saturday",
+        "start_time": "14:40:00",
+        "end_time": "16:10:00",
+        "teacher": "Stella Ke",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Anime Art - Beginner",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r1",
+        "day_of_week": "Saturday",
+        "start_time": "14:40:00",
+        "end_time": "16:10:00",
+        "teacher": "Xi Yuan Shen",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00015",
+      "before_label": "upper_mount_gravatt sat 14:40 R2 Anime Art - Advanced (Sophie Liu)",
+      "target_label": "upper_mount_gravatt sat 14:40 R2 Anime Art - Advanced (Sophie Liu)",
+      "expected": {
+        "course": "Anime Art - Advanced",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r2",
+        "day_of_week": "Saturday",
+        "start_time": "14:40:00",
+        "end_time": "16:10:00",
+        "teacher": "Sophie Liu",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Anime Art - Advanced",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r2",
+        "day_of_week": "Saturday",
+        "start_time": "14:40:00",
+        "end_time": "16:10:00",
+        "teacher": "Sophie Liu",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00109",
+      "before_label": "upper_mount_gravatt sat 14:40 R3 Realistic Art - Advanced (Julie)",
+      "target_label": "upper_mount_gravatt sat 14:40 R3 Realistic Art - Advanced (Julie)",
+      "expected": {
+        "course": "Realistic Art - Advanced",
+        "class_language": "Chinese",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r3",
+        "day_of_week": "Saturday",
+        "start_time": "14:40:00",
+        "end_time": "16:40:00",
+        "teacher": "Julie",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Realistic Art - Advanced",
+        "class_language": "Chinese",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r3",
+        "day_of_week": "Saturday",
+        "start_time": "14:40:00",
+        "end_time": "16:40:00",
+        "teacher": "Julie",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "update",
+      "source": "WTS-2026-00125",
+      "before_label": "upper_mount_gravatt sat 14:40 R5 Realistic Art - Intermediate (Amaya Foley)",
+      "target_label": "upper_mount_gravatt sat 14:40 R5 Realistic Art - Intermediate (Jayson)",
+      "expected": {
+        "course": "Realistic Art - Intermediate",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r5",
+        "day_of_week": "Saturday",
+        "start_time": "14:40:00",
+        "end_time": "16:40:00",
+        "teacher": "Amaya Foley",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Realistic Art - Intermediate",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r5",
+        "day_of_week": "Saturday",
+        "start_time": "14:40:00",
+        "end_time": "16:40:00",
+        "teacher": "Jayson",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00048",
+      "before_label": "upper_mount_gravatt sat 15:00 R4 Creative Art - Beginner A (Caroline Emma Girdler)",
+      "target_label": "upper_mount_gravatt sat 15:00 R4 Creative Art - Beginner A (Caroline Emma Girdler)",
+      "expected": {
+        "course": "Creative Art - Beginner A",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r4",
+        "day_of_week": "Saturday",
+        "start_time": "15:00:00",
+        "end_time": "16:00:00",
+        "teacher": "Caroline Emma Girdler",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Creative Art - Beginner A",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r4",
+        "day_of_week": "Saturday",
+        "start_time": "15:00:00",
+        "end_time": "16:00:00",
+        "teacher": "Caroline Emma Girdler",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "update",
+      "source": "WTS-2026-00082",
+      "before_label": "upper_mount_gravatt sat 09:00 R1 Designer Art - Beginner (Stella Ke)",
+      "target_label": "upper_mount_gravatt sat 9:00 R1 Designer Art - Beginner (Jayson)",
+      "expected": {
+        "course": "Designer Art - Beginner",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r1",
+        "day_of_week": "Saturday",
+        "start_time": "09:00:00",
+        "end_time": "10:30:00",
+        "teacher": "Stella Ke",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Designer Art - Beginner",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r1",
+        "day_of_week": "Saturday",
+        "start_time": "09:00:00",
+        "end_time": "10:30:00",
+        "teacher": "Jayson",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00062",
+      "before_label": "upper_mount_gravatt sat 09:00 R2 Creative Art - Intermediate A (Julie)",
+      "target_label": "upper_mount_gravatt sat 9:00 R2 Creative Art - Intermediate A (Julie)",
+      "expected": {
+        "course": "Creative Art - Intermediate A",
+        "class_language": "Chinese",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r2",
+        "day_of_week": "Saturday",
+        "start_time": "09:00:00",
+        "end_time": "10:30:00",
+        "teacher": "Julie",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Creative Art - Intermediate A",
+        "class_language": "Chinese",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r2",
+        "day_of_week": "Saturday",
+        "start_time": "09:00:00",
+        "end_time": "10:30:00",
+        "teacher": "Julie",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00016",
+      "before_label": "upper_mount_gravatt sat 09:00 R3 Anime Art - Advanced (Sophie Liu)",
+      "target_label": "upper_mount_gravatt sat 9:00 R3 Anime Art - Advanced (Sophie Liu)",
+      "expected": {
+        "course": "Anime Art - Advanced",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r3",
+        "day_of_week": "Saturday",
+        "start_time": "09:00:00",
+        "end_time": "10:30:00",
+        "teacher": "Sophie Liu",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Anime Art - Advanced",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r3",
+        "day_of_week": "Saturday",
+        "start_time": "09:00:00",
+        "end_time": "10:30:00",
+        "teacher": "Sophie Liu",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00137",
+      "before_label": "upper_mount_gravatt sat 09:00 R4 Storytelling and Art - Beginner (Caroline Emma Girdler)",
+      "target_label": "upper_mount_gravatt sat 9:00 R4 Storytelling and Art - Beginner (Caroline Emma Girdler)",
+      "expected": {
+        "course": "Storytelling and Art - Beginner",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r4",
+        "day_of_week": "Saturday",
+        "start_time": "09:00:00",
+        "end_time": "10:30:00",
+        "teacher": "Caroline Emma Girdler",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Storytelling and Art - Beginner",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r4",
+        "day_of_week": "Saturday",
+        "start_time": "09:00:00",
+        "end_time": "10:30:00",
+        "teacher": "Caroline Emma Girdler",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00138",
+      "before_label": "upper_mount_gravatt sat 09:00 R5 Storytelling and Art - Beginner (Lilian Li)",
+      "target_label": "upper_mount_gravatt sat 9:00 R5 Storytelling and Art - Beginner (Lilian Li)",
+      "expected": {
+        "course": "Storytelling and Art - Beginner",
+        "class_language": "Chinese",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r5",
+        "day_of_week": "Saturday",
+        "start_time": "09:00:00",
+        "end_time": "10:30:00",
+        "teacher": "Lilian Li",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Storytelling and Art - Beginner",
+        "class_language": "Chinese",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r5",
+        "day_of_week": "Saturday",
+        "start_time": "09:00:00",
+        "end_time": "10:30:00",
+        "teacher": "Lilian Li",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00139",
+      "before_label": "upper_mount_gravatt sun 10:10 R4 Storytelling and Art - Beginner (Suki Tung)",
+      "target_label": "upper_mount_gravatt sun 10:10 R4 Storytelling and Art - Beginner (Suki Tung)",
+      "expected": {
+        "course": "Storytelling and Art - Beginner",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r4",
+        "day_of_week": "Sunday",
+        "start_time": "10:10:00",
+        "end_time": "11:40:00",
+        "teacher": "Suki Tung",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Storytelling and Art - Beginner",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r4",
+        "day_of_week": "Sunday",
+        "start_time": "10:10:00",
+        "end_time": "11:40:00",
+        "teacher": "Suki Tung",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00083",
+      "before_label": "upper_mount_gravatt sun 10:40 R2 Designer Art - Beginner (Phoebe Hon)",
+      "target_label": "upper_mount_gravatt sun 10:40 R2 Designer Art - Beginner (Phoebe Hon)",
+      "expected": {
+        "course": "Designer Art - Beginner",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r2",
+        "day_of_week": "Sunday",
+        "start_time": "10:40:00",
+        "end_time": "12:10:00",
+        "teacher": "Phoebe Hon",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Designer Art - Beginner",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r2",
+        "day_of_week": "Sunday",
+        "start_time": "10:40:00",
+        "end_time": "12:10:00",
+        "teacher": "Phoebe Hon",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "update",
+      "source": "WTS-2026-00092",
+      "before_label": "upper_mount_gravatt sun 10:40 R3 Designer Art - Intermediate (Sophie Liu)",
+      "target_label": "upper_mount_gravatt sun 10:40 R3 Designer Art - Intermediate (Amaya Foley)",
+      "expected": {
+        "course": "Designer Art - Intermediate",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r3",
+        "day_of_week": "Sunday",
+        "start_time": "10:40:00",
+        "end_time": "12:10:00",
+        "teacher": "Sophie Liu",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Designer Art - Intermediate",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r3",
+        "day_of_week": "Sunday",
+        "start_time": "10:40:00",
+        "end_time": "12:10:00",
+        "teacher": "Amaya Foley",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00143",
+      "before_label": "upper_mount_gravatt sun 10:40 R5 Storytelling and Art - Intermediate (Ville)",
+      "target_label": "upper_mount_gravatt sun 10:40 R5 Storytelling and Art - Intermediate (Ville)",
+      "expected": {
+        "course": "Storytelling and Art - Intermediate",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r5",
+        "day_of_week": "Sunday",
+        "start_time": "10:40:00",
+        "end_time": "12:10:00",
+        "teacher": "Ville",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Storytelling and Art - Intermediate",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r5",
+        "day_of_week": "Sunday",
+        "start_time": "10:40:00",
+        "end_time": "12:10:00",
+        "teacher": "Ville",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00126",
+      "before_label": "upper_mount_gravatt sun 11:30 R1 Realistic Art - Intermediate (Arthur)",
+      "target_label": "upper_mount_gravatt sun 11:30 R1 Realistic Art - Intermediate (Arthur)",
+      "expected": {
+        "course": "Realistic Art - Intermediate",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r1",
+        "day_of_week": "Sunday",
+        "start_time": "11:30:00",
+        "end_time": "13:30:00",
+        "teacher": "Arthur",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Realistic Art - Intermediate",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r1",
+        "day_of_week": "Sunday",
+        "start_time": "11:30:00",
+        "end_time": "13:30:00",
+        "teacher": "Arthur",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00084",
+      "before_label": "upper_mount_gravatt sun 13:00 R2 Designer Art - Beginner (Phoebe Hon)",
+      "target_label": "upper_mount_gravatt sun 13:00 R2 Designer Art - Beginner (Phoebe Hon)",
+      "expected": {
+        "course": "Designer Art - Beginner",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r2",
+        "day_of_week": "Sunday",
+        "start_time": "13:00:00",
+        "end_time": "14:30:00",
+        "teacher": "Phoebe Hon",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Designer Art - Beginner",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r2",
+        "day_of_week": "Sunday",
+        "start_time": "13:00:00",
+        "end_time": "14:30:00",
+        "teacher": "Phoebe Hon",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00035",
+      "before_label": "upper_mount_gravatt sun 13:00 R3 Anime Art - Intermediate (Sophie Liu)",
+      "target_label": "upper_mount_gravatt sun 13:00 R3 Anime Art - Intermediate (Sophie Liu)",
+      "expected": {
+        "course": "Anime Art - Intermediate",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r3",
+        "day_of_week": "Sunday",
+        "start_time": "13:00:00",
+        "end_time": "14:30:00",
+        "teacher": "Sophie Liu",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Anime Art - Intermediate",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r3",
+        "day_of_week": "Sunday",
+        "start_time": "13:00:00",
+        "end_time": "14:30:00",
+        "teacher": "Sophie Liu",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00049",
+      "before_label": "upper_mount_gravatt sun 13:00 R4 Creative Art - Beginner A (Suki Tung)",
+      "target_label": "upper_mount_gravatt sun 13:00 R4 Creative Art - Beginner A (Suki Tung)",
+      "expected": {
+        "course": "Creative Art - Beginner A",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r4",
+        "day_of_week": "Sunday",
+        "start_time": "13:00:00",
+        "end_time": "14:00:00",
+        "teacher": "Suki Tung",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Creative Art - Beginner A",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r4",
+        "day_of_week": "Sunday",
+        "start_time": "13:00:00",
+        "end_time": "14:00:00",
+        "teacher": "Suki Tung",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "update",
+      "source": "WTS-2026-00068",
+      "before_label": "upper_mount_gravatt sun 13:00 R5 Creative Art - Intermediate B (Ville)",
+      "target_label": "upper_mount_gravatt sun 13:00 R5 Designer Art - Advanced (Ville)",
+      "expected": {
+        "course": "Creative Art - Intermediate B",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r5",
+        "day_of_week": "Sunday",
+        "start_time": "13:00:00",
+        "end_time": "14:30:00",
+        "teacher": "Ville",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Designer Art - Advanced",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r5",
+        "day_of_week": "Sunday",
+        "start_time": "13:00:00",
+        "end_time": "14:30:00",
+        "teacher": "Ville",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00110",
+      "before_label": "upper_mount_gravatt sun 14:10 R1 Realistic Art - Advanced (Arthur)",
+      "target_label": "upper_mount_gravatt sun 14:10 R1 Realistic Art - Advanced (Arthur)",
+      "expected": {
+        "course": "Realistic Art - Advanced",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r1",
+        "day_of_week": "Sunday",
+        "start_time": "14:10:00",
+        "end_time": "16:10:00",
+        "teacher": "Arthur",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Realistic Art - Advanced",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r1",
+        "day_of_week": "Sunday",
+        "start_time": "14:10:00",
+        "end_time": "16:10:00",
+        "teacher": "Arthur",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00140",
+      "before_label": "upper_mount_gravatt sun 14:10 R4 Storytelling and Art - Beginner (Suki Tung)",
+      "target_label": "upper_mount_gravatt sun 14:10 R4 Storytelling and Art - Beginner (Suki Tung)",
+      "expected": {
+        "course": "Storytelling and Art - Beginner",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r4",
+        "day_of_week": "Sunday",
+        "start_time": "14:10:00",
+        "end_time": "15:40:00",
+        "teacher": "Suki Tung",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Storytelling and Art - Beginner",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r4",
+        "day_of_week": "Sunday",
+        "start_time": "14:10:00",
+        "end_time": "15:40:00",
+        "teacher": "Suki Tung",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00097",
+      "before_label": "upper_mount_gravatt sun 14:40 R2 Digital Art with IPad (Phoebe Hon)",
+      "target_label": "upper_mount_gravatt sun 14:40 R2 Digital Art with IPad (Phoebe Hon)",
+      "expected": {
+        "course": "Digital Art with IPad",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r2",
+        "day_of_week": "Sunday",
+        "start_time": "14:40:00",
+        "end_time": "16:10:00",
+        "teacher": "Phoebe Hon",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Digital Art with IPad",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r2",
+        "day_of_week": "Sunday",
+        "start_time": "14:40:00",
+        "end_time": "16:10:00",
+        "teacher": "Phoebe Hon",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00036",
+      "before_label": "upper_mount_gravatt sun 14:40 R3 Anime Art - Intermediate (Sophie Liu)",
+      "target_label": "upper_mount_gravatt sun 14:40 R3 Anime Art - Intermediate (Sophie Liu)",
+      "expected": {
+        "course": "Anime Art - Intermediate",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r3",
+        "day_of_week": "Sunday",
+        "start_time": "14:40:00",
+        "end_time": "16:10:00",
+        "teacher": "Sophie Liu",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Anime Art - Intermediate",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r3",
+        "day_of_week": "Sunday",
+        "start_time": "14:40:00",
+        "end_time": "16:10:00",
+        "teacher": "Sophie Liu",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00023",
+      "before_label": "upper_mount_gravatt sun 14:40 R5 Anime Art - Beginner (Ville)",
+      "target_label": "upper_mount_gravatt sun 14:40 R5 Anime Art - Beginner (Ville)",
+      "expected": {
+        "course": "Anime Art - Beginner",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r5",
+        "day_of_week": "Sunday",
+        "start_time": "14:40:00",
+        "end_time": "16:10:00",
+        "teacher": "Ville",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Anime Art - Beginner",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r5",
+        "day_of_week": "Sunday",
+        "start_time": "14:40:00",
+        "end_time": "16:10:00",
+        "teacher": "Ville",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00127",
+      "before_label": "upper_mount_gravatt sun 09:00 R1 Realistic Art - Intermediate (Arthur)",
+      "target_label": "upper_mount_gravatt sun 9:00 R1 Realistic Art - Intermediate (Arthur)",
+      "expected": {
+        "course": "Realistic Art - Intermediate",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r1",
+        "day_of_week": "Sunday",
+        "start_time": "09:00:00",
+        "end_time": "11:00:00",
+        "teacher": "Arthur",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Realistic Art - Intermediate",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r1",
+        "day_of_week": "Sunday",
+        "start_time": "09:00:00",
+        "end_time": "11:00:00",
+        "teacher": "Arthur",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00024",
+      "before_label": "upper_mount_gravatt sun 09:00 R2 Anime Art - Beginner (Phoebe Hon)",
+      "target_label": "upper_mount_gravatt sun 9:00 R2 Anime Art - Beginner (Phoebe Hon)",
+      "expected": {
+        "course": "Anime Art - Beginner",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r2",
+        "day_of_week": "Sunday",
+        "start_time": "09:00:00",
+        "end_time": "10:30:00",
+        "teacher": "Phoebe Hon",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Anime Art - Beginner",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r2",
+        "day_of_week": "Sunday",
+        "start_time": "09:00:00",
+        "end_time": "10:30:00",
+        "teacher": "Phoebe Hon",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "update",
+      "source": "WTS-2026-00017",
+      "before_label": "upper_mount_gravatt sun 09:00 R3 Anime Art - Advanced (Sophie Liu)",
+      "target_label": "upper_mount_gravatt sun 9:00 R3 Anime Art - Advanced (Amaya Foley)",
+      "expected": {
+        "course": "Anime Art - Advanced",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r3",
+        "day_of_week": "Sunday",
+        "start_time": "09:00:00",
+        "end_time": "10:30:00",
+        "teacher": "Sophie Liu",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Anime Art - Advanced",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r3",
+        "day_of_week": "Sunday",
+        "start_time": "09:00:00",
+        "end_time": "10:30:00",
+        "teacher": "Amaya Foley",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00103",
+      "before_label": "upper_mount_gravatt sun 09:00 R4 Little Artist (Suki Tung)",
+      "target_label": "upper_mount_gravatt sun 9:00 R4 Little Artist (Suki Tung)",
+      "expected": {
+        "course": "Little Artist",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r4",
+        "day_of_week": "Sunday",
+        "start_time": "09:00:00",
+        "end_time": "10:00:00",
+        "teacher": "Suki Tung",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Little Artist",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r4",
+        "day_of_week": "Sunday",
+        "start_time": "09:00:00",
+        "end_time": "10:00:00",
+        "teacher": "Suki Tung",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00115",
+      "before_label": "upper_mount_gravatt sun 09:00 R5 Realistic Art - Beginner (Ville)",
+      "target_label": "upper_mount_gravatt sun 9:00 R5 Realistic Art - Beginner (Ville)",
+      "expected": {
+        "course": "Realistic Art - Beginner",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r5",
+        "day_of_week": "Sunday",
+        "start_time": "09:00:00",
+        "end_time": "10:30:00",
+        "teacher": "Ville",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Realistic Art - Beginner",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r5",
+        "day_of_week": "Sunday",
+        "start_time": "09:00:00",
+        "end_time": "10:30:00",
+        "teacher": "Ville",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00011",
+      "before_label": "upper_mount_gravatt thu 10:00 R2 Adult Art Studio (Arthur)",
+      "target_label": "upper_mount_gravatt thu 10:00 R2 Adult Art Studio (Arthur)",
+      "expected": {
+        "course": "Adult Art Studio",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r2",
+        "day_of_week": "Thursday",
+        "start_time": "10:00:00",
+        "end_time": "12:00:00",
+        "teacher": "Arthur",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Adult Art Studio",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r2",
+        "day_of_week": "Thursday",
+        "start_time": "10:00:00",
+        "end_time": "12:00:00",
+        "teacher": "Arthur",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00050",
+      "before_label": "upper_mount_gravatt thu 15:45 R1 Creative Art - Beginner A (Xi Yuan Shen)",
+      "target_label": "upper_mount_gravatt thu 15:45 R1 Creative Art - Beginner A (Xi Yuan Shen)",
+      "expected": {
+        "course": "Creative Art - Beginner A",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r1",
+        "day_of_week": "Thursday",
+        "start_time": "15:45:00",
+        "end_time": "16:45:00",
+        "teacher": "Xi Yuan Shen",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Creative Art - Beginner A",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r1",
+        "day_of_week": "Thursday",
+        "start_time": "15:45:00",
+        "end_time": "16:45:00",
+        "teacher": "Xi Yuan Shen",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00128",
+      "before_label": "upper_mount_gravatt thu 16:00 R2 Realistic Art - Intermediate (Arthur)",
+      "target_label": "upper_mount_gravatt thu 16:00 R2 Realistic Art - Intermediate (Arthur)",
+      "expected": {
+        "course": "Realistic Art - Intermediate",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r2",
+        "day_of_week": "Thursday",
+        "start_time": "16:00:00",
+        "end_time": "18:00:00",
+        "teacher": "Arthur",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Realistic Art - Intermediate",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r2",
+        "day_of_week": "Thursday",
+        "start_time": "16:00:00",
+        "end_time": "18:00:00",
+        "teacher": "Arthur",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00041",
+      "before_label": "upper_mount_gravatt thu 16:00 R3 Creative Art - Advanced (Julie)",
+      "target_label": "upper_mount_gravatt thu 16:00 R3 Creative Art - Advanced (Julie)",
+      "expected": {
+        "course": "Creative Art - Advanced",
+        "class_language": "Chinese",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r3",
+        "day_of_week": "Thursday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Julie",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Creative Art - Advanced",
+        "class_language": "Chinese",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r3",
+        "day_of_week": "Thursday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Julie",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "update",
+      "source": "WTS-2026-00141",
+      "before_label": "upper_mount_gravatt thu 16:00 R4 Storytelling and Art - Beginner (Jaz)",
+      "target_label": "upper_mount_gravatt thu 16:00 R4 Storytelling and Art - Beginner (Amaya Foley)",
+      "expected": {
+        "course": "Storytelling and Art - Beginner",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r4",
+        "day_of_week": "Thursday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Jaz",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Storytelling and Art - Beginner",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r4",
+        "day_of_week": "Thursday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Amaya Foley",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00085",
+      "before_label": "upper_mount_gravatt thu 16:50 R1 Designer Art - Beginner (Xi Yuan Shen)",
+      "target_label": "upper_mount_gravatt thu 16:50 R1 Designer Art - Beginner (Xi Yuan Shen)",
+      "expected": {
+        "course": "Designer Art - Beginner",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r1",
+        "day_of_week": "Thursday",
+        "start_time": "16:50:00",
+        "end_time": "18:20:00",
+        "teacher": "Xi Yuan Shen",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Designer Art - Beginner",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r1",
+        "day_of_week": "Thursday",
+        "start_time": "16:50:00",
+        "end_time": "18:20:00",
+        "teacher": "Xi Yuan Shen",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00055",
+      "before_label": "upper_mount_gravatt tue 15:45 R1 Creative Art - Beginner B (Suki Tung)",
+      "target_label": "upper_mount_gravatt tue 15:45 R1 Creative Art - Beginner B (Suki Tung)",
+      "expected": {
+        "course": "Creative Art - Beginner B",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r1",
+        "day_of_week": "Tuesday",
+        "start_time": "15:45:00",
+        "end_time": "16:45:00",
+        "teacher": "Suki Tung",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Creative Art - Beginner B",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r1",
+        "day_of_week": "Tuesday",
+        "start_time": "15:45:00",
+        "end_time": "16:45:00",
+        "teacher": "Suki Tung",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00086",
+      "before_label": "upper_mount_gravatt tue 16:00 R2 Designer Art - Beginner (Xi Yuan Shen)",
+      "target_label": "upper_mount_gravatt tue 16:00 R2 Designer Art - Beginner (Xi Yuan Shen)",
+      "expected": {
+        "course": "Designer Art - Beginner",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r2",
+        "day_of_week": "Tuesday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Xi Yuan Shen",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Designer Art - Beginner",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r2",
+        "day_of_week": "Tuesday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Xi Yuan Shen",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00069",
+      "before_label": "upper_mount_gravatt tue 16:00 R3 Creative Art - Intermediate B (Julie)",
+      "target_label": "upper_mount_gravatt tue 16:00 R3 Creative Art - Intermediate B (Julie)",
+      "expected": {
+        "course": "Creative Art - Intermediate B",
+        "class_language": "Chinese",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r3",
+        "day_of_week": "Tuesday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Julie",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Creative Art - Intermediate B",
+        "class_language": "Chinese",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r3",
+        "day_of_week": "Tuesday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Julie",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "update",
+      "source": "WTS-2026-00142",
+      "before_label": "upper_mount_gravatt tue 16:50 R4 Storytelling and Art - Beginner (Caroline Emma Girdler)",
+      "target_label": "upper_mount_gravatt tue 16:00 R4 Storytelling and Art - Beginner (Caroline Emma Girdler)",
+      "expected": {
+        "course": "Storytelling and Art - Beginner",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r4",
+        "day_of_week": "Tuesday",
+        "start_time": "16:50:00",
+        "end_time": "18:20:00",
+        "teacher": "Caroline Emma Girdler",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Storytelling and Art - Beginner",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r4",
+        "day_of_week": "Tuesday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Caroline Emma Girdler",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "update",
+      "source": "WTS-2026-00129",
+      "before_label": "upper_mount_gravatt tue 16:00 R5 Realistic Art - Intermediate (Clara Chan)",
+      "target_label": "upper_mount_gravatt tue 16:00 R5 Realistic Art - Intermediate (Amaya Foley)",
+      "expected": {
+        "course": "Realistic Art - Intermediate",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r5",
+        "day_of_week": "Tuesday",
+        "start_time": "16:00:00",
+        "end_time": "18:00:00",
+        "teacher": "Clara Chan",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Realistic Art - Intermediate",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r5",
+        "day_of_week": "Tuesday",
+        "start_time": "16:00:00",
+        "end_time": "18:00:00",
+        "teacher": "Amaya Foley",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00025",
+      "before_label": "upper_mount_gravatt tue 16:50 R1 Anime Art - Beginner (Suki Tung)",
+      "target_label": "upper_mount_gravatt tue 16:50 R1 Anime Art - Beginner (Suki Tung)",
+      "expected": {
+        "course": "Anime Art - Beginner",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r1",
+        "day_of_week": "Tuesday",
+        "start_time": "16:50:00",
+        "end_time": "18:20:00",
+        "teacher": "Suki Tung",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Anime Art - Beginner",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r1",
+        "day_of_week": "Tuesday",
+        "start_time": "16:50:00",
+        "end_time": "18:20:00",
+        "teacher": "Suki Tung",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00051",
+      "before_label": "upper_mount_gravatt wed 15:45 R3 Creative Art - Beginner A (Suki Tung)",
+      "target_label": "upper_mount_gravatt wed 15:45 R3 Creative Art - Beginner A (Suki Tung)",
+      "expected": {
+        "course": "Creative Art - Beginner A",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r3",
+        "day_of_week": "Wednesday",
+        "start_time": "15:45:00",
+        "end_time": "16:45:00",
+        "teacher": "Suki Tung",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Creative Art - Beginner A",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r3",
+        "day_of_week": "Wednesday",
+        "start_time": "15:45:00",
+        "end_time": "16:45:00",
+        "teacher": "Suki Tung",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00087",
+      "before_label": "upper_mount_gravatt wed 15:45 R4 Designer Art - Beginner (Caroline Emma Girdler)",
+      "target_label": "upper_mount_gravatt wed 15:45 R4 Designer Art - Beginner (Caroline Emma Girdler)",
+      "expected": {
+        "course": "Designer Art - Beginner",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r4",
+        "day_of_week": "Wednesday",
+        "start_time": "15:45:00",
+        "end_time": "17:15:00",
+        "teacher": "Caroline Emma Girdler",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Designer Art - Beginner",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r4",
+        "day_of_week": "Wednesday",
+        "start_time": "15:45:00",
+        "end_time": "17:15:00",
+        "teacher": "Caroline Emma Girdler",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00098",
+      "before_label": "upper_mount_gravatt wed 16:00 R1 Digital Art with IPad (Ville)",
+      "target_label": "upper_mount_gravatt wed 16:00 R1 Digital Art with IPad (Ville)",
+      "expected": {
+        "course": "Digital Art with IPad",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r1",
+        "day_of_week": "Wednesday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Ville",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Digital Art with IPad",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r1",
+        "day_of_week": "Wednesday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Ville",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00111",
+      "before_label": "upper_mount_gravatt wed 16:00 R2 Realistic Art - Advanced (Clara Chan)",
+      "target_label": "upper_mount_gravatt wed 16:00 R2 Realistic Art - Advanced (Clara Chan)",
+      "expected": {
+        "course": "Realistic Art - Advanced",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r2",
+        "day_of_week": "Wednesday",
+        "start_time": "16:00:00",
+        "end_time": "18:00:00",
+        "teacher": "Clara Chan",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Realistic Art - Advanced",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r2",
+        "day_of_week": "Wednesday",
+        "start_time": "16:00:00",
+        "end_time": "18:00:00",
+        "teacher": "Clara Chan",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00038",
+      "before_label": "upper_mount_gravatt wed 16:50 R3 Anime Art - Intermediate (Suki Tung)",
+      "target_label": "upper_mount_gravatt wed 16:50 R3 Anime Art - Intermediate (Suki Tung)",
+      "expected": {
+        "course": "Anime Art - Intermediate",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r3",
+        "day_of_week": "Wednesday",
+        "start_time": "16:50:00",
+        "end_time": "18:20:00",
+        "teacher": "Suki Tung",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Anime Art - Intermediate",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r3",
+        "day_of_week": "Wednesday",
+        "start_time": "16:50:00",
+        "end_time": "18:20:00",
+        "teacher": "Suki Tung",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "unchanged",
+      "source": "WTS-2026-00056",
+      "before_label": "upper_mount_gravatt wed 17:20 R4 Creative Art - Beginner B (Caroline Emma Girdler)",
+      "target_label": "upper_mount_gravatt wed 17:20 R4 Creative Art - Beginner B (Caroline Emma Girdler)",
+      "expected": {
+        "course": "Creative Art - Beginner B",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r4",
+        "day_of_week": "Wednesday",
+        "start_time": "17:20:00",
+        "end_time": "18:20:00",
+        "teacher": "Caroline Emma Girdler",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Creative Art - Beginner B",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r4",
+        "day_of_week": "Wednesday",
+        "start_time": "17:20:00",
+        "end_time": "18:20:00",
+        "teacher": "Caroline Emma Girdler",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "delete_candidate",
+      "source": "WTS-2026-00118",
+      "before_label": "indooroopilly mon 16:00 R1 Realistic Art - Intermediate (Veronica Violet Curties Chen)",
+      "target_label": "",
+      "expected": {
+        "course": "Realistic Art - Intermediate",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r1-1",
+        "day_of_week": "Monday",
+        "start_time": "16:00:00",
+        "end_time": "18:00:00",
+        "teacher": "Veronica Violet Curties Chen",
+        "status": "Active"
+      },
+      "target": null
+    },
+    {
+      "action": "delete_candidate",
+      "source": "WTS-2026-00018",
+      "before_label": "indooroopilly mon 16:00 R3 Anime Art - Beginner (Joanne)",
+      "target_label": "",
+      "expected": {
+        "course": "Anime Art - Beginner",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r3",
+        "day_of_week": "Monday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Joanne",
+        "status": "Active"
+      },
+      "target": null
+    },
+    {
+      "action": "delete_candidate",
+      "source": "WTS-2026-00095",
+      "before_label": "indooroopilly tue 16:00 R4 Digital Art with IPad (Ville)",
+      "target_label": "",
+      "expected": {
+        "course": "Digital Art with IPad",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r4",
+        "day_of_week": "Tuesday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Ville",
+        "status": "Active"
+      },
+      "target": null
+    },
+    {
+      "action": "delete_candidate",
+      "source": "WTS-2026-00078",
+      "before_label": "indooroopilly tue 16:00 R5 Designer Art - Beginner (Joanne)",
+      "target_label": "",
+      "expected": {
+        "course": "Designer Art - Beginner",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r5",
+        "day_of_week": "Tuesday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Joanne",
+        "status": "Active"
+      },
+      "target": null
+    },
+    {
+      "action": "delete_candidate",
+      "source": "WTS-2026-00077",
+      "before_label": "indooroopilly thu 16:00 R5 Designer Art - Beginner (Amaya Foley)",
+      "target_label": "",
+      "expected": {
+        "course": "Designer Art - Beginner",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r5",
+        "day_of_week": "Thursday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Amaya Foley",
+        "status": "Active"
+      },
+      "target": null
+    },
+    {
+      "action": "delete_candidate",
+      "source": "WTS-2026-00043",
+      "before_label": "indooroopilly sat 10:40 R5 Creative Art - Beginner A (Sita Intaranan)",
+      "target_label": "",
+      "expected": {
+        "course": "Creative Art - Beginner A",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r5",
+        "day_of_week": "Saturday",
+        "start_time": "10:40:00",
+        "end_time": "11:40:00",
+        "teacher": "Sita Intaranan",
+        "status": "Active"
+      },
+      "target": null
+    },
+    {
+      "action": "delete_candidate",
+      "source": "WTS-2026-00045",
+      "before_label": "indooroopilly sun 11:00 R4 Creative Art - Beginner A (Jayson)",
+      "target_label": "",
+      "expected": {
+        "course": "Creative Art - Beginner A",
+        "class_language": "English",
+        "campus": "Indooroopilly",
+        "classroom": "indooroopilly-r4",
+        "day_of_week": "Sunday",
+        "start_time": "11:00:00",
+        "end_time": "12:00:00",
+        "teacher": "Jayson",
+        "status": "Active"
+      },
+      "target": null
+    },
+    {
+      "action": "delete_candidate",
+      "source": "WTS-2026-00033",
+      "before_label": "upper_mount_gravatt mon 16:00 R5 Anime Art - Intermediate (Amaya Foley)",
+      "target_label": "",
+      "expected": {
+        "course": "Anime Art - Intermediate",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r5",
+        "day_of_week": "Monday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Amaya Foley",
+        "status": "Active"
+      },
+      "target": null
+    },
+    {
+      "action": "delete_candidate",
+      "source": "WTS-2026-00104",
+      "before_label": "upper_mount_gravatt tue 15:45 R4 Little Artist (Caroline Emma Girdler)",
+      "target_label": "",
+      "expected": {
+        "course": "Little Artist",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r4",
+        "day_of_week": "Tuesday",
+        "start_time": "15:45:00",
+        "end_time": "16:45:00",
+        "teacher": "Caroline Emma Girdler",
+        "status": "Active"
+      },
+      "target": null
+    },
+    {
+      "action": "hold_referenced",
+      "source": "WTS-2026-00093",
+      "before_label": "upper_mount_gravatt wed 16:00 R5 Designer Art - Intermediate (Amaya Foley)",
+      "target_label": "",
+      "expected": {
+        "course": "Designer Art - Intermediate",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r5",
+        "day_of_week": "Wednesday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Amaya Foley",
+        "status": "Active"
+      },
+      "target": {
+        "course": "Designer Art - Intermediate",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r5",
+        "day_of_week": "Wednesday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Amaya Foley",
+        "status": "Active"
+      }
+    },
+    {
+      "action": "delete_candidate",
+      "source": "WTS-2026-00037",
+      "before_label": "upper_mount_gravatt thu 16:00 R5 Anime Art - Intermediate (Clara Chan)",
+      "target_label": "",
+      "expected": {
+        "course": "Anime Art - Intermediate",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r5",
+        "day_of_week": "Thursday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Clara Chan",
+        "status": "Active"
+      },
+      "target": null
+    },
+    {
+      "action": "delete_candidate",
+      "source": "WTS-2026-00096",
+      "before_label": "upper_mount_gravatt fri 16:00 R1 Digital Art with IPad (Ville)",
+      "target_label": "",
+      "expected": {
+        "course": "Digital Art with IPad",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r1",
+        "day_of_week": "Friday",
+        "start_time": "16:00:00",
+        "end_time": "17:30:00",
+        "teacher": "Ville",
+        "status": "Active"
+      },
+      "target": null
+    },
+    {
+      "action": "delete_candidate",
+      "source": "WTS-2026-00124",
+      "before_label": "upper_mount_gravatt fri 16:00 R3 Realistic Art - Intermediate (Jayson)",
+      "target_label": "",
+      "expected": {
+        "course": "Realistic Art - Intermediate",
+        "class_language": "English",
+        "campus": "Upper Mount Gravatt",
+        "classroom": "upper-mount-gravatt-r3",
+        "day_of_week": "Friday",
+        "start_time": "16:00:00",
+        "end_time": "18:00:00",
+        "teacher": "Jayson",
+        "status": "Active"
+      },
+      "target": null
+    }
+  ]
+}
