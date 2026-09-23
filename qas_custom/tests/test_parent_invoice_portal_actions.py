@@ -2,6 +2,8 @@ from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import patch
 
+import frappe
+
 from qas_custom.modules.notifications.commands import (
 	_invoice_email_message,
 	_receipt_email_message,
@@ -100,7 +102,7 @@ class TestParentInvoicePortalActions(TestCase):
 	@patch("qas_custom.modules.notifications.commands.build_parent_invoice_context")
 	def test_receipt_email_always_displays_invoice_portal_action(self, mock_context, _mock_link, _mock_identity, _translate):
 		mock_context.return_value = invoice_context()
-		invoice = SimpleNamespace(name="SINV-0001")
+		invoice = frappe._dict(name="SINV-0001")
 
 		html = _receipt_email_message(
 			invoice,
