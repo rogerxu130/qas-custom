@@ -307,7 +307,8 @@ def confirm_booking(student, session, preview_card, request_key, *, confirmed_ru
         frappe.get_doc({"doctype": ENTRY, "card": selected.name, "booking": booking.name,
                         "kind": "Reserve", "available_delta": -1, "reserved_delta": 1,
                         "consumed_delta": 0, "operation_key": f"reserve:{booking.name}",
-                        "actor": frappe.session.user, "occurred_at": now}).insert(ignore_permissions=True)
+                        "actor": frappe.session.user, "occurred_at": now}).insert(
+                            ignore_permissions=True, ignore_links=True)
         booking.attendance_entry = attendance
         booking.flags.payg_mutation_token = QASPAYGBooking._SERVICE_MUTATION_TOKEN
         try:

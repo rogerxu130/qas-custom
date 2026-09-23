@@ -178,6 +178,22 @@ class TestBooking(TestCase):
         self.assertFalse(any("tabQAS PAYG Booking" in call.args[0]
                              for call in self.db.sql.call_args_list))
 
+
+    def test_reserve_entry_uses_locked_controller_links_not_old_snapshot(self):
+        original = self.fake.get_doc.side_effect
+        inserts = []
+        class CheckedReserve(Document):
+            def insert(self, **options):
+                inserts.append(options)
+                return super().insert(**options)
+        def get_doc(dt, name=None, **kwargs):
+            if isinstance(dt, dict) and dt.get("doctype") == "QAS PAYG Entry" and dt.get("kind") == "Reserve":
+                return CheckedReserve(self.state, **dt)
+            return original(dt, name, **kwargs)
+        self.fake.get_doc.side_effect = get_doc
+        booking.confirm_booking("S-1", "CS-1", "A", "req-1", confirmed_rules=True)
+        self.assertEqual(inserts, [{"ignore_permissions": True, "ignore_links": True}])
+
     def test_new_booking_carries_short_lived_locked_context(self):
         original = self.fake.get_doc.side_effect
         seen = []
