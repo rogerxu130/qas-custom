@@ -47,3 +47,27 @@ The bench has `qas-local.test` and `qas-restore.test` site configuration files (
 | Production behavior and deployment | Unverified | No production access or deployment check. |
 
 The baseline documentation and later test-isolation repair made no schema, data, API, or billing behavior change. Neither pushed, deployed, connected to a site, sent email, or charged a payment method.
+
+## Shared draft extraction verification (2026-09-23)
+
+Verification started from a clean worktree at HEAD `377303e9c15adf6511534368f0c4f0e04557239b`. The stage comprises `f04d625` (unsaved draft factory), `dcab5c5` (Course adoption), and `377303e` (Workshop adoption), following the test-isolation commit `a267810`. The earlier 56/57 result remains the historical pre-repair baseline; after `a267810`, the same original six-module command passed **57/57**. Neither historical result is a claim about the expanded suite below.
+
+The runtime was Python 3.11.15 from `/Users/ranxu/Documents/Project/frappe-bench/env/bin/python`. With no Frappe site initialized, the following mocked unit suite exercised the factory and both callers, earlier financial flows, Workshop invoice lookup/source handling, invoice correction source handling, parent invoice actions, cancellation, and overdue reminders:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD" /Users/ranxu/Documents/Project/frappe-bench/env/bin/python -m unittest qas_custom.tests.test_invoice_draft_factory qas_custom.tests.test_workshop_draft_boundary qas_custom.tests.test_invoice_account_mutation qas_custom.tests.test_invoice_amount_consistency qas_custom.tests.test_workshops qas_custom.tests.test_trial_invoice_dates qas_custom.tests.test_course_invoice_due_dates qas_custom.tests.test_school_admin_draft_invoice_adjustments qas_custom.tests.test_parent_invoice_portal_actions qas_custom.tests.test_direct_enrollment qas_custom.tests.test_invoice_corrections qas_custom.tests.test_parent_invoice_cancellation_notification qas_custom.tests.test_invoice_overdue_reminders -v
+```
+
+Result: **116 tests run, 115 passed, 1 errored** (`FAILED (errors=1)`). The sole error is `test_receipt_email_always_displays_invoice_portal_action` in `test_parent_invoice_portal_actions.py`: its fixture passes a `types.SimpleNamespace` as `invoice_doc`, but `_receipt_email_message` calls `invoice_doc.get("qas_stripe_test")`, raising `AttributeError`. Both that test file and `qas_custom/modules/notifications/commands.py` are unchanged by this stage. This is an existing fixture mismatch, not evidence of a regression in draft extraction or of real receipt delivery failure. No test or production code was changed here to fix it.
+
+The same suite was rerun with that one test excluded precisely: the first two `TestParentInvoicePortalActions` methods were named individually in place of the module. **All remaining 115 tests passed** (`Ran 115 tests`, `OK`):
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD" /Users/ranxu/Documents/Project/frappe-bench/env/bin/python -m unittest qas_custom.tests.test_invoice_draft_factory qas_custom.tests.test_workshop_draft_boundary qas_custom.tests.test_invoice_account_mutation qas_custom.tests.test_invoice_amount_consistency qas_custom.tests.test_workshops qas_custom.tests.test_trial_invoice_dates qas_custom.tests.test_course_invoice_due_dates qas_custom.tests.test_school_admin_draft_invoice_adjustments qas_custom.tests.test_parent_invoice_portal_actions.TestParentInvoicePortalActions.test_invoice_email_always_builds_and_displays_portal_action qas_custom.tests.test_parent_invoice_portal_actions.TestParentInvoicePortalActions.test_invoice_email_shows_optional_additional_description_below_invoice_items qas_custom.tests.test_direct_enrollment qas_custom.tests.test_invoice_corrections qas_custom.tests.test_parent_invoice_cancellation_notification qas_custom.tests.test_invoice_overdue_reminders -q
+```
+
+`new_invoice_draft` creates an **unsaved** Sales Invoice, assigns the customer, fills default dates, and conditionally sets parent and invoice type when those custom fields exist. It does not save, insert, submit, commit, or append items. The Course and Workshop **new-draft branches** now call it. Their draft-reuse branches load the existing document without calling the factory or resetting its due date, discount, or existing items; Workshop may append the requested enrollment item and save it through its existing business flow. Course retains its `modified desc` draft choice and Workshop its `creation asc` choice. The Workshop caller still sets source and student metadata for new drafts.
+
+Notification guarding, payment snapshot, authorization and Administrator-scoped persistence, and transaction commit remain with the business callers at their existing points. In particular, Course guards only its new-draft branch and snapshots that draft; Workshop guards before draft lookup, snapshots before invoice persistence, and commits after updating the enrollment. The factory adds no schema migration, commit, background task, or card-issuing logic.
+
+These mocked tests do **not** verify a site-backed draft creation → manual discount → sending → payment → receipt/PDF → overdue reminder journey, nor the Parent Portal frontend browser flow. No real Frappe site, database transaction, email delivery, payment, or deployment was exercised. Those flows remain unverified and must be checked on a designated disposable test site and in a browser before claiming end-to-end coverage.
