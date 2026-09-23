@@ -5,6 +5,8 @@ import json
 import runpy
 import sys
 import types
+from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 from unittest import TestCase
 from unittest.mock import Mock, patch
@@ -257,6 +259,7 @@ class TestPaygControllers(TestCase):
         controller.validate(entry)
         self.assertEqual(calls, [("QAS PAYG Booking", True), ("QAS PAYG Card", True),
                                  ("history", "for update")])
+        self.frappe.db.get_value.assert_not_called()
 
     def test_booking_rejects_cross_family(self):
         controller = self.controller("booking")
@@ -371,6 +374,34 @@ class TestPaygControllers(TestCase):
             op.reason = changed_reason
             with self.assertRaises(ValueError):
                 op.validate()
+
+    def test_operation_audit_survives_currency_and_datetime_db_reload(self):
+        controller = self.controller("operation")
+        before = self.doc(operation_type="Exchange", request_key="exchange-1",
+                          family_parent="P-1", customer="CUS-1", product="PROD-2",
+                          source_card="CARD-1", target_card=None, card=None,
+                          old_course="C-1", new_course="C-2", old_price=40.0,
+                          new_price=55.0, quantity=7, price_delta=105.0,
+                          actor="admin", created_at=datetime(2026, 9, 23, 12),
+                          status="Pending")
+        op = controller()
+        op.__dict__.update(before.__dict__)
+        op.old_price, op.new_price, op.price_delta = (Decimal("40"), Decimal("55"), Decimal("105"))
+        op.created_at = datetime(2026, 9, 23, 2, tzinfo=timezone.utc)
+        op.target_card, op.status = "CARD-2", "Completed"
+        op.get = lambda field: getattr(op, field, None)
+        op.is_new = lambda: False
+        op.get_doc_before_save = lambda: before
+        controller._validate_existing(op)
+        op.price_delta = Decimal("106")
+        with self.assertRaises(ValueError):
+            controller._validate_existing(op)
+        self.assertIn("price_delta", self.frappe.throw.call_args.args[0])
+        op.price_delta = Decimal("105")
+        op.created_at = datetime(2026, 9, 23, 3, tzinfo=timezone.utc)
+        with self.assertRaises(ValueError):
+            controller._validate_existing(op)
+        self.assertIn("created_at", self.frappe.throw.call_args.args[0])
 
     def test_card_identity_and_transferred_status_are_final(self):
         controller = self.controller("card")

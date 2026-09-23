@@ -1,6 +1,16 @@
 import frappe
+from decimal import Decimal
 from frappe.model.document import Document
+from qas_custom.modules.payg.rules import as_brisbane_datetime
 from qas_custom.qas_custom.doctype.payg_validation import nonnegative, integer
+
+
+def _audit_value(field, value):
+    if field in ("old_price", "new_price", "price_delta"):
+        return None if value is None or value == "" else Decimal(str(value))
+    if field == "created_at":
+        return None if value is None or value == "" else as_brisbane_datetime(value).replace(tzinfo=None)
+    return str(value or "")
 
 
 class QASPAYGOperation(Document):
@@ -46,7 +56,7 @@ class QASPAYGOperation(Document):
                       "product", "source_card", "old_course", "new_course",
                       "old_expiry", "new_expiry", "old_price", "new_price",
                       "quantity", "price_delta", "actor", "created_at", "reason"):
-            if str(self.get(field) or "") != str(before.get(field) or ""):
+            if _audit_value(field, self.get(field)) != _audit_value(field, before.get(field)):
                 frappe.throw(f"PAYG operation {field} cannot change")
         for field in ("card", "target_card", "invoice", "issue_request_key", "invoice_request_key"):
             old_value, new_value = before.get(field), self.get(field)

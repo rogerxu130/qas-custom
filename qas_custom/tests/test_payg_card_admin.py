@@ -116,6 +116,26 @@ class TestCardAdmin(TestCase):
         card_admin.change_expiry("CARD", date(2026, 9, 30),
                                  reason="Correction", request_key="shrink-1")
 
+    def test_all_session_timeslot_term_and_room_locks_have_stable_order(self):
+        self.add("QAS PAYG Booking", "B-1", card="CARD", student="S", status="Reserved",
+                 course_session="CS-Z")
+        self.add("QAS PAYG Booking", "B-2", card="CARD", student="S", status="Reserved",
+                 course_session="CS-A")
+        self.add("Course Sessions", "CS-Z", session_date=date(2026, 10, 2), weekly_timeslot="W-A")
+        self.add("Course Sessions", "CS-A", session_date=date(2026, 10, 3), weekly_timeslot="W-Z")
+        self.add("Weekly Timeslot", "W-Z", start_time="10:00", term="T-A", classroom="R-Z")
+        self.add("Weekly Timeslot", "W-A", start_time="10:00", term="T-Z", classroom="R-A")
+        for kind, names in (("Term", ("T-A", "T-Z")), ("Classroom", ("R-A", "R-Z"))):
+            for name in names:
+                self.add(kind, name)
+        card_admin.change_expiry("CARD", date(2027, 4, 1),
+                                 reason="Extension", request_key="order-1")
+        locked = [event for event in self.events if event.startswith((
+            "Course Sessions:", "Weekly Timeslot:", "Term:", "Classroom:"))]
+        self.assertEqual(locked, ["Course Sessions:CS-A", "Course Sessions:CS-Z",
+                                  "Weekly Timeslot:W-A", "Weekly Timeslot:W-Z",
+                                  "Term:T-A", "Term:T-Z", "Classroom:R-A", "Classroom:R-Z"])
+
     def test_exchange_positive_delta_transfers_all_available(self):
         op = card_admin.exchange_card("CARD", "PROD-NEW", "exchange-1")
         target = self.docs[("QAS PAYG Card", op.target_card)]

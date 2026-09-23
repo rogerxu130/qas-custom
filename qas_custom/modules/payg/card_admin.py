@@ -3,7 +3,7 @@
 Each command joins the caller's transaction. The positive exchange invoice is a
 separate Task 7 concern; this module never creates an invoice or credits a family.
 """
-from datetime import date, datetime
+from datetime import datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -69,12 +69,32 @@ def _lock_context(card_id, kind, request_key):
     return card, latest, operation
 
 
-def _booking_start(booking):
-    session = frappe.get_doc("Course Sessions", booking.course_session, for_update=True)
-    slot = frappe.get_doc("Weekly Timeslot", session.weekly_timeslot, for_update=True)
-    if not session.session_date or not slot.start_time:
-        frappe.throw(f"PAYG booking {booking.name} has no session start")
-    return as_brisbane_datetime(datetime.combine(getdate(session.session_date), get_time(slot.start_time)))
+def _booking_starts(bookings):
+    """Lock all linked schedule rows by type and name before reading starts."""
+    if any(not booking.course_session for booking in bookings):
+        frappe.throw("PAYG booking has no course session")
+    session_ids = sorted({booking.course_session for booking in bookings})
+    sessions = {name: frappe.get_doc("Course Sessions", name, for_update=True)
+                for name in session_ids}
+    if any(not session.weekly_timeslot for session in sessions.values()):
+        frappe.throw("PAYG course session has no weekly timeslot")
+    slot_ids = sorted({session.weekly_timeslot for session in sessions.values()})
+    slots = {name: frappe.get_doc("Weekly Timeslot", name, for_update=True)
+             for name in slot_ids}
+    for name in sorted({slot.term for slot in slots.values() if slot.term}):
+        frappe.get_doc("Term", name, for_update=True)
+    for name in sorted({slot.classroom for slot in slots.values() if slot.classroom}):
+        frappe.get_doc("Classroom", name, for_update=True)
+    starts = []
+    for booking in bookings:
+        session = sessions[booking.course_session]
+        slot = slots[session.weekly_timeslot]
+        if not session.session_date or not slot.start_time:
+            frappe.throw(f"PAYG booking {booking.name} has no session start")
+        start = as_brisbane_datetime(datetime.combine(getdate(session.session_date),
+                                                       get_time(slot.start_time)))
+        starts.append((booking.name, start))
+    return starts
 
 
 def _same_expiry(operation, card_id, expiry, reason):
@@ -109,7 +129,7 @@ def _change_expiry(card_id, expiry, reason, request_key):
         return _same_expiry(existing, card_id, expiry, reason)
     if expiry < getdate(card.issued_on):
         frappe.throw("PAYG card expiry cannot precede issue date")
-    starts = [(booking.name, _booking_start(booking)) for booking in bookings]
+    starts = _booking_starts(bookings)
     blockers = [f"{name} ({start.isoformat()})" for name, start in starts
                 if start.date() > expiry]
     if blockers:
@@ -167,8 +187,8 @@ def _exchange_card(card_id, target_product_id, request_key, issued_on, now, *, e
                               issued_on if explicit_date else None)
     if source.status not in ("Active", "Transferred"):
         frappe.throw("PAYG source card is unavailable for exchange")
-    future = [f"{booking.name} ({start.isoformat()})" for booking in bookings
-              if (start := _booking_start(booking)) > as_brisbane_datetime(now)]
+    future = [f"{name} ({start.isoformat()})" for name, start in _booking_starts(bookings)
+              if start > as_brisbane_datetime(now)]
     if future:
         frappe.throw("Cancel active future PAYG bookings manually before exchange: " + ", ".join(future))
     quantity = int(source.available_count)
