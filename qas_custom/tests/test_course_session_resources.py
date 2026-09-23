@@ -1,5 +1,6 @@
 """Behavior contract for shared course-session booking resources."""
 
+import re
 from datetime import datetime, time, timedelta
 from types import SimpleNamespace
 from unittest import TestCase
@@ -19,10 +20,15 @@ class TestCourseSessionResources(TestCase):
 		db.sql.assert_called_once()
 		query, parameters = db.sql.call_args.args
 		normalized_query = " ".join(query.lower().split())
+		projection = re.search(r"\bselect\b(.*?)\bfrom\b", normalized_query)
+		self.assertIsNotNone(projection)
+		for field in ("name", "student", "enrollment_type", "source_doctype", "makeup_voucher"):
+			with self.subTest(field=field):
+				self.assertRegex(projection.group(1), rf"\b(?:\w+\s*\.\s*)?{field}\b")
 		self.assertIn("from `tabclass attendance entry`", normalized_query)
-		self.assertIn("where course_session=%s", normalized_query)
-		self.assertIn("status not in ('cancelled', 'leave')", normalized_query)
-		self.assertIn("name != %s", normalized_query)
+		self.assertRegex(normalized_query, r"\b(?:\w+\s*\.\s*)?course_session\s*=\s*%s\b")
+		self.assertRegex(normalized_query, r"\b(?:\w+\s*\.\s*)?status\s+not\s+in\s*\(\s*'cancelled'\s*,\s*'leave'\s*\)")
+		self.assertRegex(normalized_query, r"\b(?:\w+\s*\.\s*)?name\s*!=\s*%s\b")
 		self.assertTrue(normalized_query.endswith("for update"))
 		self.assertEqual(parameters, ("CS-1", "ATT-1"))
 		self.assertEqual(db.sql.call_args.kwargs, {"as_dict": True})
