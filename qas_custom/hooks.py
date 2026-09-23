@@ -216,6 +216,7 @@ scheduler_events = {
 	},
 	"hourly": [
 		"qas_custom.tasks.adhoc_booking_tasks.lock_due_adhoc_bookings",
+		"qas_custom.tasks.payg_booking_tasks.lock_due_payg_bookings",
 	],
 	"daily": [
 		"qas_custom.tasks.maintenance_tasks.nightly_maintenance",
