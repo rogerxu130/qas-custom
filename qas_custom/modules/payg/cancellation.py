@@ -7,6 +7,7 @@ from frappe.utils import get_datetime_in_timezone
 
 from qas_custom.modules.course_schedule import session_resources
 from qas_custom.modules.payg.rules import as_brisbane_datetime
+from qas_custom.qas_custom.doctype.qas_payg_booking.qas_payg_booking import QASPAYGBooking
 from qas_custom.services.support_view import get_support_view_token
 
 
@@ -67,6 +68,14 @@ def _has_consume(booking_id):
         WHERE booking=%s AND kind='Consume' FOR UPDATE""", (booking_id,), as_dict=True))
 
 
+def _save_booking(booking):
+    booking.flags.payg_mutation_token = QASPAYGBooking._SERVICE_MUTATION_TOKEN
+    try:
+        booking.save(ignore_permissions=True)
+    finally:
+        booking.flags.payg_mutation_token = None
+
+
 def cancel_by_admin(booking_id, *, reason, request_key, admin=None):
     """Return a booking's single unit to its original card, including after class."""
     if get_support_view_token():
@@ -101,7 +110,7 @@ def cancel_by_admin(booking_id, *, reason, request_key, admin=None):
         booking.cancelled_at = now
         booking.cancelled_by = frappe.session.user
         booking.cancel_reason = reason.strip()
-        booking.save(ignore_permissions=True)
+        _save_booking(booking)
         # Preserve source, marked_by, marked_at and the historical row itself.
         frappe.db.set_value("Class Attendance Entry", booking.attendance_entry, "status", "Cancelled")
         return booking
@@ -128,7 +137,7 @@ def lock_due_booking(booking_id):
                         "consumed_delta": 1, "operation_key": f"consume:{booking.name}",
                         "actor": frappe.session.user, "occurred_at": now}).insert(ignore_permissions=True)
         booking.status = "Locked"
-        booking.save(ignore_permissions=True)
+        _save_booking(booking)
         return True
     except Exception:
         frappe.db.rollback(save_point=savepoint)

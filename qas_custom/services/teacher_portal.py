@@ -197,18 +197,36 @@ def update_teacher_attendance_data(course_session=None, updates=None):
     if not updates:
         frappe.throw(_("No attendance updates were provided."))
 
+    # One request can mark several students. Acquire Student locks in a stable
+    # order regardless of the payload order to avoid cross-request deadlocks.
+    pending = []
+    seen_rows = set()
     for update in updates:
         row_id = update.get("row_id")
         if not row_id:
             frappe.throw(_("Invalid attendance row."))
-        if _is_blocked_teacher_attendance_update(session["name"], row_id, update):
-            continue
+        if row_id in seen_rows:
+            frappe.throw(_("Duplicate attendance row in update request."))
+        seen_rows.add(row_id)
+        identifiers = frappe.db.get_value(
+            ATTENDANCE_DOCTYPE, row_id, ["student", "course_session"], as_dict=True,
+        )
+        if not identifiers or not identifiers.student or identifiers.course_session != session["name"]:
+            frappe.throw(_("Invalid attendance row."))
+        pending.append((identifiers.student, row_id, update))
+
+    for student, row_id, update in sorted(pending, key=lambda item: (item[0], item[1])):
+        def validate_mark(*, course_session, attendance_row, row):
+            _get_owned_session(course_session, teacher.name)
+            _is_blocked_teacher_attendance_update(course_session, attendance_row, update, current=row)
         update_attendance_status(
             course_session=session["name"],
             attendance_row=row_id,
             status=update.get("status"),
             actor=frappe.session.user,
             comment=update.get("comments"),
+            validate_access=validate_mark,
+            expected_student=student,
         )
 
     frappe.db.commit()
@@ -872,15 +890,16 @@ def _get_attendance_status_options():
     ]
 
 
-def _is_blocked_teacher_attendance_update(course_session, row_id, update):
+def _is_blocked_teacher_attendance_update(course_session, row_id, update, current=None):
     status = (update.get("status") or "").strip()
 
-    current = frappe.db.get_value(
-        ATTENDANCE_DOCTYPE,
-        {"name": row_id, "course_session": course_session},
-        ["status", "comments"],
-        as_dict=True,
-    )
+    if current is None:
+        current = frappe.db.get_value(
+            ATTENDANCE_DOCTYPE,
+            {"name": row_id, "course_session": course_session},
+            ["status", "comments"],
+            as_dict=True,
+        )
     if not current:
         return False
 

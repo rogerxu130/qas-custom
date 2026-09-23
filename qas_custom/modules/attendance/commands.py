@@ -64,7 +64,8 @@ def cancel_trial_inquiry_attendance_entries(inquiry):
 	return cancel_attendance_entries_by_source("Inquiry", inquiry)
 
 
-def update_attendance_status(course_session, attendance_row, status, actor=None, comment=None, validate_access=None):
+def update_attendance_status(course_session, attendance_row, status, actor=None, comment=None,
+		validate_access=None, expected_student=None):
 	"""Update one attendance row and run downstream business effects."""
 
 	if not course_session:
@@ -77,10 +78,21 @@ def update_attendance_status(course_session, attendance_row, status, actor=None,
 	comment = (comment or "").strip()
 
 	_validate_status(status)
+	# Discover identifiers without locking the attendance row, then serialize
+	# every mark with PAYG settlement on the Student row.
+	initial = frappe.db.get_value(
+		ATTENDANCE_DOCTYPE, attendance_row, ["student", "course_session"], as_dict=True,
+	)
+	if not initial or not initial.student or initial.course_session != course_session:
+		frappe.throw(_("Invalid attendance row."))
+	if expected_student and initial.student != expected_student:
+		frappe.throw(_("Attendance student changed; retry."))
+	frappe.db.sql("SELECT name FROM `tabStudent` WHERE name=%s FOR UPDATE", (initial.student,))
+	row = _get_attendance_entry(course_session, attendance_row, for_update=True)
+	if row.student != initial.student:
+		frappe.throw(_("Attendance student changed; retry."))
 	if validate_access:
-		validate_access(course_session=course_session, attendance_row=attendance_row)
-
-	row = _get_attendance_entry(course_session, attendance_row)
+		validate_access(course_session=course_session, attendance_row=attendance_row, row=row)
 	previous_status = row.get("status")
 
 	if previous_status == status and (row.get("comments") or "") == comment:
@@ -142,8 +154,8 @@ def _validate_status(status):
 		frappe.throw(_("Invalid attendance status: {0}").format(status))
 
 
-def _get_attendance_entry(course_session, attendance_entry):
-	row = frappe.get_doc(ATTENDANCE_DOCTYPE, attendance_entry)
+def _get_attendance_entry(course_session, attendance_entry, *, for_update=False):
+	row = frappe.get_doc(ATTENDANCE_DOCTYPE, attendance_entry, for_update=for_update)
 	if row.course_session != course_session:
 		frappe.throw(_("Invalid attendance row."))
 	return row

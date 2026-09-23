@@ -6,7 +6,9 @@ from unittest.mock import patch
 
 import frappe
 from qas_custom.modules.payg import booking, cancellation
+from qas_custom.modules.attendance import commands as attendance_commands
 from qas_custom.tasks import payg_booking_tasks
+from qas_custom.services import teacher_portal
 from qas_custom.tests import test_payg_booking as booking_fixture
 
 
@@ -25,7 +27,7 @@ class TestCancellation(TestCase):
         self.fake.db.set_value.side_effect = self.set_value
         self.add("QAS PAYG Booking", "PB-1", family_parent="P-1", student="S-1", card="A",
                  course_session="CS-1", status="Reserved", attendance_entry="ATT-1",
-                 cancellable_until=datetime(2026, 9, 24, 10))
+                 cancellable_until=datetime(2026, 9, 24, 10), flags=frappe._dict())
         self.add("QAS PAYG Entry", "RESERVE-1", card="A", booking="PB-1", kind="Reserve",
                  operation_key="reserve:PB-1", available_delta=-1, reserved_delta=1, consumed_delta=0)
         self.card.available_count = 9
@@ -189,6 +191,31 @@ class TestCancellation(TestCase):
         with self.assertRaisesRegex(ValueError, "attendance.*Cancelled"):
             cancellation.cancel_by_admin("PB-1", reason="Correction", request_key="k")
         self.assertEqual(self.entries("Return"), [])
+
+    def test_admin_cancelled_leave_cannot_be_reopened_by_teacher_mark(self):
+        self.attendance.status = "Leave"
+        cancellation.session_resources.active_rows.return_value = []
+        cancellation.cancel_by_admin("PB-1", reason="Leave correction", request_key="leave-k")
+        old_value = self.db.get_value.side_effect
+        def value(dt, name, fields, **kwargs):
+            if dt == "Class Attendance Entry" and isinstance(fields, list):
+                return frappe._dict(student="S-1", course_session="CS-1")
+            return old_value(dt, name, fields, **kwargs)
+        self.db.get_value.side_effect = value
+        def access(**kwargs):
+            teacher_portal._is_blocked_teacher_attendance_update(
+                "CS-1", "ATT-1", {"status": "Present", "comments": ""},
+                current=kwargs["row"],
+            )
+        with patch.object(attendance_commands, "frappe", self.fake), \
+             patch.object(attendance_commands, "_validate_status"), \
+             patch.object(teacher_portal, "frappe", self.fake):
+            with self.assertRaisesRegex(ValueError, "Teachers cannot change"):
+                attendance_commands.update_attendance_status(
+                    "CS-1", "ATT-1", "Present", validate_access=access,
+                )
+        self.assertEqual(self.attendance.status, "Cancelled")
+        self.assertEqual(len(self.entries("Return")), 1)
 
     def test_scheduler_advances_cursor_and_isolates_failed_booking(self):
         self.fake.log_error = self.db.rollback.__class__()
