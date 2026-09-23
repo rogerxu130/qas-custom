@@ -15,7 +15,8 @@ from qas_custom.modules.billing.commands import (
 	run_invoice_mutation_as_administrator,
 	sync_invoice_student_summary,
 )
-from qas_custom.modules.billing.invoice_settings import apply_default_invoice_dates, apply_invoice_payment_snapshot
+from qas_custom.modules.billing.drafts import new_invoice_draft
+from qas_custom.modules.billing.invoice_settings import apply_invoice_payment_snapshot
 from qas_custom.modules.billing.store_credit import get_invoice_payable_amount
 from qas_custom.modules.common import has_field, set_if_field
 from qas_custom.modules.notifications.guard import disable_sales_invoice_auto_notifications
@@ -210,12 +211,8 @@ def create_school_admin_workshop_invoice_data(workshop_enrollment=None):
 	disable_sales_invoice_auto_notifications()
 	invoice_name = _find_draft_workshop_invoice(parent=enrollment.parent, customer=customer)
 	created = not bool(invoice_name)
-	invoice = frappe.new_doc("Sales Invoice") if created else frappe.get_doc("Sales Invoice", invoice_name)
+	invoice = new_invoice_draft(customer=customer, parent=enrollment.parent, invoice_type="Workshop") if created else frappe.get_doc("Sales Invoice", invoice_name)
 	if created:
-		invoice.customer = customer
-		apply_default_invoice_dates(invoice)
-		set_if_field(invoice, "parent", enrollment.parent)
-		set_if_field(invoice, "qas_invoice_type", "Workshop")
 		set_if_field(invoice, "source_doctype", "Workshop Enrollment")
 		set_if_field(invoice, "source_document", enrollment.name)
 		set_if_field(invoice, "primary_student", enrollment.student)
