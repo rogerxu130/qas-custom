@@ -411,6 +411,7 @@ def get_parent_feed_photo_content(photo_post, photo_idx):
     parent_name = _require_parent()
 
     photo_post_doc = frappe.get_doc("Session Photo Post", photo_post)
+    _require_published_media_doc(photo_post_doc)
     course_session = photo_post_doc.get("course_session")
     _validate_parent_session_access(parent_name, course_session)
 
@@ -429,6 +430,7 @@ def get_parent_feed_video_content(video_post, download=False):
     parent_name = _require_parent()
 
     video_post_doc = frappe.get_doc("Session Video Post", video_post)
+    _require_published_media_doc(video_post_doc)
     _validate_parent_session_access(parent_name, video_post_doc.get("course_session"))
 
     if not video_post_doc.video:
@@ -442,10 +444,16 @@ def get_parent_feed_video_content(video_post, download=False):
 def get_parent_feed_homework_content(homework):
     parent_name = _require_parent()
     doc = frappe.get_doc("Session Homework", homework)
+    _require_published_media_doc(doc)
     _validate_parent_session_access(parent_name, doc.get("course_session"))
     if not doc.attachments:
         raise frappe.DoesNotExistError
     return _authorized_media(doc.attachments, display_content_as="attachment")
+
+
+def _require_published_media_doc(doc):
+    if doc.get("status") != "Published":
+        raise frappe.PermissionError
 
 
 def _authorized_media(saved_url, file_name=None, content_type=None, display_content_as="inline"):

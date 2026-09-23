@@ -57,7 +57,7 @@ class TestPaygContentAccess(TestCase):
         self.assertEqual(len(self._attendance("Present", None, source="Trial Inquiry")), 1)
 
     def test_media_download_checks_session_again(self):
-        fake = SimpleNamespace(get_doc=Mock(return_value=frappe._dict(course_session="CS-1")),
+        fake = SimpleNamespace(get_doc=Mock(return_value=frappe._dict(course_session="CS-1", status="Published")),
                                PermissionError=PermissionError)
         with patch.object(parent_feed, "frappe", fake), \
              patch.object(parent_feed, "_require_parent", return_value="P-1"), \
@@ -114,7 +114,7 @@ class TestPaygContentAccess(TestCase):
 
     def test_media_external_redirect_uses_current_doc_url_only(self):
         fake = SimpleNamespace(get_doc=Mock(return_value=frappe._dict(course_session="CS-1",
-                             video="https://cdn.example/file.mp4", file_name="clip.mp4", mime_type="video/mp4")))
+                             status="Published", video="https://cdn.example/file.mp4", file_name="clip.mp4", mime_type="video/mp4")))
         with patch.object(parent_feed, "frappe", fake), \
              patch.object(parent_feed, "_require_parent", return_value="P-1"), \
              patch.object(parent_feed, "_validate_parent_session_access"):
@@ -126,7 +126,7 @@ class TestPaygContentAccess(TestCase):
         file_doc.get_content = Mock(return_value=b"pdf")
         def get_doc(doctype, name):
             if doctype == "Session Homework":
-                return frappe._dict(course_session="CS-1", attachments="/private/files/homework.pdf")
+                return frappe._dict(course_session="CS-1", status="Published", attachments="/private/files/homework.pdf")
             if doctype == "File" and name == "FILE-1":
                 return file_doc
             raise AssertionError((doctype, name))
@@ -148,3 +148,50 @@ class TestPaygContentAccess(TestCase):
              patch.object(parent_portal.frappe.local, "response", response, create=True):
             parent_portal.parent_portal_get_feed_video("VIDEO-1")
         self.assertEqual((response.type, response.location), ("redirect", "https://cdn.example/file.mp4"))
+
+    def test_draft_media_ids_are_denied_even_for_attending_parent(self):
+        for kind, doc in (
+            ("photo", frappe._dict(course_session="CS-1", status="Draft",
+                                   photos=[frappe._dict(idx=1, image="/private/files/photo.jpg")])),
+            ("video", frappe._dict(course_session="CS-1", status="Draft",
+                                   video="https://cdn.example/draft.mp4")),
+            ("homework", frappe._dict(course_session="CS-1", status="Draft",
+                                      attachments="/private/files/draft.pdf")),
+        ):
+            fake = SimpleNamespace(get_doc=Mock(return_value=doc), PermissionError=PermissionError)
+            with self.subTest(kind=kind), patch.object(parent_feed, "frappe", fake), \
+                 patch.object(parent_feed, "_require_parent", return_value="P-1"), \
+                 patch.object(parent_feed, "_validate_parent_session_access"), \
+                 patch.object(parent_feed, "_authorized_media") as media:
+                with self.assertRaises(PermissionError):
+                    if kind == "photo":
+                        parent_feed.get_parent_feed_photo_content("PHOTO-DRAFT", 1)
+                    elif kind == "video":
+                        parent_feed.get_parent_feed_video_content("VIDEO-DRAFT")
+                    else:
+                        parent_feed.get_parent_feed_homework_content("HOMEWORK-DRAFT")
+                media.assert_not_called()
+
+    def test_published_media_ids_reauthorize_then_resolve_saved_url(self):
+        for kind, doc, expected_url in (
+            ("photo", frappe._dict(course_session="CS-1", status="Published",
+                                   photos=[frappe._dict(idx=1, image="/files/photo.jpg")]), "/files/photo.jpg"),
+            ("video", frappe._dict(course_session="CS-1", status="Published", video="https://cdn.example/video.mp4",
+                                   file_name="video.mp4", mime_type="video/mp4"), "https://cdn.example/video.mp4"),
+            ("homework", frappe._dict(course_session="CS-1", status="Published",
+                                      attachments="/private/files/homework.pdf"), "/private/files/homework.pdf"),
+        ):
+            fake = SimpleNamespace(get_doc=Mock(return_value=doc), PermissionError=PermissionError)
+            with self.subTest(kind=kind), patch.object(parent_feed, "frappe", fake), \
+                 patch.object(parent_feed, "_require_parent", return_value="P-1"), \
+                 patch.object(parent_feed, "_validate_parent_session_access") as authorize, \
+                 patch.object(parent_feed, "_authorized_media", return_value={"ok": True}) as media:
+                if kind == "photo":
+                    result = parent_feed.get_parent_feed_photo_content("PHOTO-PUBLISHED", 1)
+                elif kind == "video":
+                    result = parent_feed.get_parent_feed_video_content("VIDEO-PUBLISHED")
+                else:
+                    result = parent_feed.get_parent_feed_homework_content("HOMEWORK-PUBLISHED")
+                self.assertEqual(result, {"ok": True})
+                authorize.assert_called_once_with("P-1", "CS-1")
+                self.assertEqual(media.call_args.args[0], expected_url)
