@@ -1,6 +1,6 @@
 # Shared classroom foundation: pre-extraction baseline (2026-09-23)
 
-This records the isolated baseline before extracting shared session resources. This task changes documentation only: no data, schema, API, or business behavior changes.
+This records the isolated baseline before extracting shared session resources. The initial baseline task changed documentation only: no data, schema, API, or business behavior changed at that stage. The later extraction and test updates are recorded below.
 
 ## Checkouts and runtimes
 
@@ -98,14 +98,25 @@ The first command passed **75/75 tests** (`Ran 75 tests in 0.040s`, `OK`); the a
 ```sh
 PYTHONDONTWRITEBYTECODE=1 /Users/ranxu/Documents/Project/frappe-bench/env/bin/python - <<'PY'
 import subprocess
-from pathlib import Path
-files = subprocess.check_output(['git', 'diff', '--name-only', 'd3eec8e', 'HEAD', '--', '*.py'], text=True).splitlines()
+revision = '4d3328bec1433b736d2b8c45b984e46fee9a0bfe'
+files = subprocess.check_output(['git', 'diff', '--name-only', 'd3eec8e', revision, '--', '*.py'], text=True).splitlines()
 for name in files:
-    compile(Path(name).read_bytes(), name, 'exec')
+    source = subprocess.check_output(['git', 'show', f'{revision}:{name}'])
+    compile(source, name, 'exec')
     print('OK', name)
 print(f'Compiled {len(files)} changed Python files')
 PY
 ```
+
+The compile command is pinned to the extraction revision for reproducibility. Later test and documentation commits add no production Python, so the 7-file extraction compile result remains valid for that revision.
+
+Direct `active_rows` coverage was added after extraction. From the same backend checkout and bench Python environment, the following command passed **48/48 tests** (`Ran 48 tests in 0.029s`, `OK`):
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD" /Users/ranxu/Documents/Project/frappe-bench/env/bin/python -m unittest qas_custom.tests.test_course_session_resources qas_custom.tests.test_concentrated_makeup qas_custom.tests.test_direct_enrollment -v
+```
+
+The resource module now directly checks that `active_rows` returns the SQL result unchanged, queries the requested session, excludes `Cancelled` and `Leave` plus the specified attendance row, uses `as_dict=True`, adds `FOR UPDATE` only for a locked call, and substitutes an empty string for the default exclusion. Before these two tests, the resource module passed 6/6 tests; it now passes 8/8.
 
 Read-only environment discovery found `qas-local.test` and `qas-restore.test` bench site configurations, both with `allow_tests=true`; `qas-local.test` also has `developer_mode=1`. The bench sites directory has no `currentsite.txt`. Repository searches found a past reference to local `qas-restore.test` integration but no explicit designation of a disposable isolated site, safe test accounts, or browser test target for this batch. Neither site was connected to or mutated. No real database or browser workflow was run.
 
@@ -117,4 +128,4 @@ Read-only environment discovery found `qas-local.test` and `qas-restore.test` be
 | Parent makeup roster, leave choice, cancellation, and notification flow | Unverified | Requires isolated records and safe outbound-message controls. |
 | Browser parent/admin flows across desktop and mobile | Unverified | No designated safe browser URL or test accounts. |
 
-`active_rows` retains legacy coverage through concentrated makeup and consumer suites, but the new `test_course_session_resources.py` module has no dedicated `active_rows` unit test. This is a minor coverage gap for a future batch; no code was added here. This batch made no schema, data, or frontend behavior changes and performed no push or deployment.
+`active_rows` now has direct locked and unlocked query tests in `test_course_session_resources.py`, and the focused three-module run passed 48/48 tests. This follow-up changed only tests and this verification document. It made no schema, data, API, or frontend behavior changes and performed no push or deployment.

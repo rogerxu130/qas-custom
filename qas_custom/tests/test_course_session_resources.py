@@ -11,6 +11,34 @@ from qas_custom.modules.course_schedule import session_resources as resources
 
 
 class TestCourseSessionResources(TestCase):
+	def test_active_rows_returns_locked_query_results_unchanged(self):
+		rows = [object()]
+		db = SimpleNamespace(sql=Mock(return_value=rows))
+		with patch.object(resources, "frappe", SimpleNamespace(db=db)):
+			self.assertIs(resources.active_rows("CS-1", exclude="ATT-1", lock=True), rows)
+		db.sql.assert_called_once()
+		query, parameters = db.sql.call_args.args
+		normalized_query = " ".join(query.lower().split())
+		self.assertIn("from `tabclass attendance entry`", normalized_query)
+		self.assertIn("where course_session=%s", normalized_query)
+		self.assertIn("status not in ('cancelled', 'leave')", normalized_query)
+		self.assertIn("name != %s", normalized_query)
+		self.assertTrue(normalized_query.endswith("for update"))
+		self.assertEqual(parameters, ("CS-1", "ATT-1"))
+		self.assertEqual(db.sql.call_args.kwargs, {"as_dict": True})
+
+	def test_active_rows_default_exclusion_does_not_lock(self):
+		rows = [object()]
+		db = SimpleNamespace(sql=Mock(return_value=rows))
+		with patch.object(resources, "frappe", SimpleNamespace(db=db)):
+			self.assertIs(resources.active_rows("CS-2", lock=False), rows)
+		db.sql.assert_called_once()
+		query, parameters = db.sql.call_args.args
+		normalized_query = " ".join(query.lower().split())
+		self.assertNotIn("for update", normalized_query)
+		self.assertEqual(parameters, ("CS-2", ""))
+		self.assertEqual(db.sql.call_args.kwargs, {"as_dict": True})
+
 	def test_adjacent_classes_do_not_overlap_for_supported_time_values(self):
 		for start, end, overlap_start, next_end in (
 			("10:00", "11:00", "10:30", "12:00"),
