@@ -21,7 +21,7 @@ class TestConcentratedMakeup(TestCase):
         self.assertTrue(service.overlaps('10:00', '11:00', '10:30', '11:30'))
         self.assertTrue(service.overlaps('10:00', '12:00', '10:30', '11:00'))
 
-    @patch.object(service, 'now_datetime', return_value=datetime(2026, 9, 7, 10, 0))
+    @patch('qas_custom.modules.course_schedule.session_resources.now_datetime', return_value=datetime(2026, 9, 7, 10, 0))
     def test_started_and_completed_sessions_are_unavailable(self, _now):
         session = frappe._dict(status='Scheduled', session_date='2026-09-07')
         self.assertFalse(service.session_is_future(session, frappe._dict(start_time='10:00')))
