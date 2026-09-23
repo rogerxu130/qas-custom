@@ -7,7 +7,6 @@ from frappe import _
 from frappe.utils import add_days, flt, get_time, getdate, now_datetime, today
 
 from qas_custom.services.adhoc_attendance import (
-	add_adhoc_attendance_entry,
 	remove_adhoc_attendance_for_booking,
 )
 from qas_custom.services.adhoc_finance import (
@@ -15,6 +14,7 @@ from qas_custom.services.adhoc_finance import (
 	validate_booking_credit,
 )
 from qas_custom.services.support_view import get_support_view_parent, reject_support_view_write
+from qas_custom.modules.course_schedule.session_resources import reserve_regular_place
 
 MINIMUM_NOTICE_HOURS = 72
 PAY_AS_YOU_GO = "Pay-as-you-go"
@@ -118,6 +118,8 @@ def create_booking_data(student=None, course_session=None, confirmed_rules=0):
 	parent = require_parent()
 	students = get_adhoc_students_for_parent(parent.name)
 	selected_student = validate_student_filter(student, students)
+	# Hold the student lock through booking insertion and the session reservation.
+	frappe.db.sql("SELECT name FROM `tabStudent` WHERE name=%s FOR UPDATE", (selected_student,))
 	context = validate_booking_context(parent, selected_student, course_session)
 	session = context["session"]
 	timeslot = context["timeslot"]
@@ -150,7 +152,11 @@ def create_booking_data(student=None, course_session=None, confirmed_rules=0):
 
 	try:
 		validate_booking_credit(booking)
-		attendance_entry = add_adhoc_attendance_entry(session.name, selected_student, booking.name)
+		attendance_entry = reserve_regular_place(
+			selected_student, session.name, "Adhoc Booking", booking.name, PAY_AS_YOU_GO,
+			validate_business=lambda locked_session, locked_slot, _term, _rows: _validate_locked_adhoc_context(locked_session, locked_slot),
+			comments=f"Added from Adhoc Booking {booking.name}",
+		)
 		add_booking_history(booking.name, "attendance_entry_created", new_value=attendance_entry)
 		booking.save(ignore_permissions=True)
 	except Exception:
@@ -158,6 +164,11 @@ def create_booking_data(student=None, course_session=None, confirmed_rules=0):
 		raise
 
 	return {"booking": build_booking_item(booking), "rules": get_adhoc_rules()}
+
+
+def _validate_locked_adhoc_context(session, slot):
+	if not is_at_least_notice_period(get_session_start_datetime(session, slot)):
+		frappe.throw(_("Pay-as-you-go bookings must be made at least three days before class."))
 
 
 def get_bookings_data(student=None, status=None, include_history=0):

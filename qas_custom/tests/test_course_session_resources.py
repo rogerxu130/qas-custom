@@ -22,7 +22,7 @@ class TestCourseSessionResources(TestCase):
 		normalized_query = " ".join(query.lower().split())
 		projection = re.search(r"\bselect\b(.*?)\bfrom\b", normalized_query)
 		self.assertIsNotNone(projection)
-		for field in ("name", "student", "enrollment_type", "source_doctype", "makeup_voucher"):
+		for field in ("name", "student", "enrollment_type", "source_doctype", "source_document", "makeup_voucher"):
 			with self.subTest(field=field):
 				self.assertRegex(projection.group(1), rf"\b(?:\w+\s*\.\s*)?{field}\b")
 		self.assertIn("from `tabclass attendance entry`", normalized_query)
@@ -98,17 +98,60 @@ class TestCourseSessionResources(TestCase):
 				db = SimpleNamespace(sql=Mock(return_value=[row]))
 				with patch.object(resources, "frappe", SimpleNamespace(db=db)):
 					self.assertEqual(
-						resources.student_has_conflict("STU-1", session, slot, exclude="ATT-1", lock=True),
+						resources.student_has_conflict("STU-1", session, slot, exclude="ATT-1"),
 						expected,
 					)
 				query, parameters = db.sql.call_args.args
 				normalized_query = " ".join(query.lower().split())
-				self.assertIn("for update", normalized_query)
+				self.assertNotIn("for update", normalized_query)
 				self.assertIn("a.status not in ('cancelled', 'leave')", normalized_query)
 				self.assertIn("s.status != 'cancelled'", normalized_query)
 				self.assertIn("s.session_date=%s", normalized_query)
 				self.assertEqual(parameters, ("STU-1", "2026-09-23", "ATT-1"))
 				self.assertEqual(db.sql.call_args.kwargs, {"as_dict": True})
+
+	def test_locked_conflict_reads_only_attendance_under_lock_then_checks_times(self):
+		session = frappe._dict(name="CS-1", session_date="2026-09-23")
+		slot = frappe._dict(start_time="10:00", end_time="11:00")
+		for other_start, other_end, expected in (("10:30", "11:30", True), ("11:00", "12:00", False)):
+			with self.subTest(other_start=other_start):
+				# The newly committed attendance ID appears in the locking read.
+				db = SimpleNamespace(sql=Mock(side_effect=[
+					[frappe._dict(name="ATT-NEW", course_session="CS-2")],
+					[frappe._dict(course_session="CS-2", start_time=other_start, end_time=other_end)],
+				]))
+				with patch.object(resources, "frappe", SimpleNamespace(db=db)):
+					self.assertEqual(resources.student_has_conflict("STU-1", session, slot, exclude="ATT-OLD", lock=True), expected)
+				self.assertEqual(db.sql.call_count, 2)
+				locked, times = db.sql.call_args_list
+				self.assertIn("FOR UPDATE", locked.args[0])
+				self.assertIn("`tabClass Attendance Entry`", locked.args[0])
+				self.assertNotIn("JOIN", locked.args[0])
+				self.assertNotIn("`tabCourse Sessions`", locked.args[0])
+				self.assertNotIn("`tabWeekly Timeslot`", locked.args[0])
+				self.assertIn("status NOT IN ('Cancelled', 'Leave')", locked.args[0])
+				self.assertEqual(locked.args[1], ("STU-1", "ATT-OLD"))
+				self.assertNotIn("FOR UPDATE", times.args[0])
+				self.assertIn("s.status != 'Cancelled'", times.args[0])
+				self.assertIn("s.session_date=%s", times.args[0])
+				self.assertEqual(times.args[1], (("CS-2",), "2026-09-23"))
+
+	def test_locked_conflict_same_session_is_duplicate_even_if_times_differ(self):
+		db = SimpleNamespace(sql=Mock(side_effect=[
+			[frappe._dict(name="ATT-NEW", course_session="CS-1")],
+			[frappe._dict(course_session="CS-1", start_time="12:00", end_time="13:00")],
+		]))
+		with patch.object(resources, "frappe", SimpleNamespace(db=db)):
+			self.assertTrue(resources.student_has_conflict(
+				"STU-1", frappe._dict(name="CS-1", session_date="2026-09-23"),
+				frappe._dict(start_time="10:00", end_time="11:00"), lock=True,
+			))
+
+	def test_locked_conflict_with_no_attendance_skips_schedule_read(self):
+		db = SimpleNamespace(sql=Mock(return_value=[]))
+		with patch.object(resources, "frappe", SimpleNamespace(db=db)):
+			self.assertFalse(resources.student_has_conflict("STU-1", frappe._dict(session_date="2026-09-23"), frappe._dict(), lock=True))
+		db.sql.assert_called_once()
 
 	def test_session_context_fetches_session_then_timeslot_with_lock(self):
 		session = frappe._dict(name="CS-1", weekly_timeslot="WT-1")

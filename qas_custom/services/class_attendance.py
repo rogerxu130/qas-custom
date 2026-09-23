@@ -26,6 +26,7 @@ def create_attendance_entry(
 	first_class_after_transfer: bool = False,
 	prevent_student_duplicate: bool = False,
 	reactivate_cancelled_duplicate: bool = False,
+	active_only_source: bool = False,
 ):
 	if not course_session:
 		frappe.throw(_("Course session is required."))
@@ -52,7 +53,7 @@ def create_attendance_entry(
 			frappe.throw(_("This student is already listed for this session."))
 
 	existing = (
-		get_attendance_entry_by_source(source_doctype, source_document, course_session=course_session)
+		get_attendance_entry_by_source(source_doctype, source_document, course_session=course_session, active_only=active_only_source)
 		if source_doctype and source_document
 		else None
 	)
@@ -67,6 +68,7 @@ def create_attendance_entry(
 			"enrollment_type": enrollment_type,
 			"source_doctype": source_doctype,
 			"source_document": source_document,
+			**({"status": ["not in", ["Cancelled", "Leave"]]} if active_only_source else {}),
 		},
 		"name",
 	)
@@ -128,12 +130,14 @@ def remove_attendance_entry(attendance_entry: str | None):
 	return True
 
 
-def get_attendance_entry_by_source(source_doctype: str | None, source_document: str | None, course_session: str | None = None):
+def get_attendance_entry_by_source(source_doctype: str | None, source_document: str | None, course_session: str | None = None, *, active_only: bool = False):
 	if not source_doctype or not source_document:
 		return None
 	filters = {"source_doctype": source_doctype, "source_document": source_document}
 	if course_session:
 		filters["course_session"] = course_session
+	if active_only:
+		filters["status"] = ["not in", ["Cancelled", "Leave"]]
 	return frappe.db.get_value(
 		ATTENDANCE_DOCTYPE,
 		filters,
