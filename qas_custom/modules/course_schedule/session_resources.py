@@ -60,6 +60,15 @@ def classroom_capacity(slot, lock=False):
     return cint(frappe.db.get_value("Classroom", slot.classroom, "capacity", for_update=lock)) if slot.get("classroom") else 0
 
 
+def effective_capacity(slot, lock=False):
+    """The capacity enforced by regular reservations, including NDIS limits."""
+    capacity = classroom_capacity(slot, lock=lock)
+    if cint(slot.get("ndis_friendly")):
+        from qas_custom.services.ndis_friendly import NDIS_FRIENDLY_CAPACITY
+        capacity = min(capacity, NDIS_FRIENDLY_CAPACITY)
+    return capacity
+
+
 def session_is_future(session, slot):
     return session.status == "Scheduled" and datetime.combine(getdate(session.session_date), get_time(slot.start_time)) > now_datetime()
 
@@ -75,7 +84,7 @@ def reserve_regular_place(student, session_id, source_doctype, source_document, 
     session = frappe.get_doc("Course Sessions", session_id, for_update=True)
     slot = frappe.get_doc("Weekly Timeslot", session.weekly_timeslot, for_update=True)
     term = frappe.get_doc("Term", slot.term, for_update=True)
-    capacity = classroom_capacity(slot, lock=True)
+    capacity = effective_capacity(slot, lock=True)
     if slot.get("status") != "Active" or term.get("status") not in {"Upcoming", "Active"}:
         frappe.throw("This class or term is not open for booking.")
     if not term.get("start_date") or not term.get("end_date") or not (getdate(term.start_date) <= getdate(session.session_date) <= getdate(term.end_date)):
@@ -94,9 +103,6 @@ def reserve_regular_place(student, session_id, source_doctype, source_document, 
             frappe.throw("This student is already listed for this session.")
     if capacity <= 0:
         frappe.throw("Classroom capacity must be configured before booking.")
-    if cint(slot.get("ndis_friendly")):
-        from qas_custom.services.ndis_friendly import NDIS_FRIENDLY_CAPACITY
-        capacity = min(capacity, NDIS_FRIENDLY_CAPACITY)
     enrollments = frappe.db.sql(
         """SELECT student, enrollment_type FROM `tabEnrollment`
         WHERE weekly_timeslot=%s AND status IN ('Planned', 'Active') FOR UPDATE""",
