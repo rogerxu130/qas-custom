@@ -3,10 +3,15 @@ from frappe.model.document import Document
 from qas_custom.qas_custom.doctype.payg_validation import require_equal
 
 class QASPAYGBooking(Document):
+    # An object identity cannot be supplied through DocType JSON or a form post.
+    _SERVICE_CREATE_TOKEN = object()
+
     def validate(self):
-        if self.is_new():
+        creating = self.is_new()
+        if creating:
             if self.status != "Reserved":
                 frappe.throw("New PAYG booking must start Reserved")
+            QASPAYGBooking._validate_service_creation(self)
         else:
             before = self.get_doc_before_save()
             if not before:
@@ -35,10 +40,13 @@ class QASPAYGBooking(Document):
                 frappe.throw("PAYG cancellation requires time, actor, and reason")
         elif any(self.get(field) for field in ("cancelled_at", "cancelled_by", "cancel_reason")):
             frappe.throw("PAYG cancellation audit requires Cancelled status")
-        # These are current locking reads in the same Student -> Card -> Session ->
-        # Timeslot -> Attendance order as the PAYG service. The service already
-        # holds its Student/Card locks when creating a booking; repeat locks here
-        # are reentrant and keep controller validation safe under RR snapshots.
+        if creating:
+            # Document.insert has already acquired its autoname series lock.
+            # The service checked Student/Card under locks and will check the
+            # Session/Timeslot under locks before the transaction can commit.
+            return
+        # Existing booking mutations are made after callers lock related rows.
+        # Current reads avoid a stale RR snapshot on the saved relationships.
         guardian = frappe.db.get_value("Student", self.student, "guardian", for_update=True)
         require_equal(self, "family_parent", guardian)
         card = frappe.db.get_value("QAS PAYG Card", self.card,
@@ -70,3 +78,18 @@ class QASPAYGBooking(Document):
         if self.status == "Cancelled" and not frappe.db.exists(
                 "QAS PAYG Entry", {"booking": self.name, "kind": "Return"}):
             frappe.throw("PAYG booking must return its session before cancellation")
+
+    def _validate_service_creation(self):
+        flags = getattr(self, "flags", None)
+        context = flags.get("payg_create_context") if flags else None
+        if not isinstance(context, dict) or context.get("token") is not QASPAYGBooking._SERVICE_CREATE_TOKEN:
+            frappe.throw("PAYG bookings must be created by the reservation service")
+        for field in ("family_parent", "student", "card", "course_session",
+                      "course_snapshot", "card_expires_on_snapshot", "request_key",
+                      "cancellable_until"):
+            if not context.get(field) or str(self.get(field)) != str(context[field]):
+                frappe.throw(f"PAYG booking {field} does not match locked reservation context")
+        if context.get("card_family") != self.family_parent or context.get("card_course") != self.course_snapshot:
+            frappe.throw("PAYG booking card does not match its family and course")
+        if self.attendance_entry:
+            frappe.throw("New PAYG booking cannot pre-link attendance")

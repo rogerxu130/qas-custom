@@ -267,21 +267,27 @@ class TestPaygControllers(TestCase):
         with self.assertRaises(ValueError):
             controller.validate(booking)
 
-    def test_booking_resolves_session_course_through_timeslot(self):
+    def test_new_booking_requires_locked_service_context_and_no_post_series_reads(self):
         controller = self.controller("booking")
-        self.frappe.db.get_value.side_effect = [
-            "P-1", types.SimpleNamespace(family_parent="P-1", course="C-1", expires_on="2027-03-23"),
-            "WTS-1", "C-1"]
         booking = self.doc(card="CARD-1", family_parent="P-1", student="S-1",
                            course_session="SESSION-1", course_snapshot="C-1",
                            card_expires_on_snapshot="2027-03-23", attendance_entry=None,
+                           request_key="req-1", cancellable_until="2026-10-01",
                            status="Reserved")
+        with self.assertRaises(ValueError):
+            controller.validate(booking)
+        self.frappe.db.get_value.assert_not_called()
+        booking.flags = {"payg_create_context": {
+            "token": controller._SERVICE_CREATE_TOKEN,
+            "family_parent": "P-1", "student": "S-1", "card": "CARD-1",
+            "card_family": "P-1", "card_course": "C-1", "course_session": "SESSION-1",
+            "course_snapshot": "C-1", "card_expires_on_snapshot": "2027-03-23",
+            "request_key": "req-1", "cancellable_until": "2026-10-01"}}
         controller.validate(booking)
-        self.assertEqual(self.frappe.db.get_value.call_args_list[-2].args,
-                         ("Course Sessions", "SESSION-1", "weekly_timeslot"))
-        self.assertEqual(self.frappe.db.get_value.call_args_list[-1].args,
-                         ("Weekly Timeslot", "WTS-1", "course"))
-
+        self.frappe.db.get_value.assert_not_called()
+        booking.flags["payg_create_context"]["card_course"] = "OTHER"
+        with self.assertRaises(ValueError):
+            controller.validate(booking)
 
     def test_booking_links_use_current_reads_in_lock_order(self):
         controller = self.controller("booking")
@@ -296,10 +302,12 @@ class TestPaygControllers(TestCase):
                            course_session="SESSION-1", course_snapshot="C-1",
                            card_expires_on_snapshot="2027-03-23", attendance_entry=None,
                            status="Reserved")
+        booking.is_new = lambda: False
+        booking.get_doc_before_save = lambda: booking
         controller.validate(booking)
         calls = self.frappe.db.get_value.call_args_list
         self.assertEqual([call.args[0] for call in calls],
-                         ["Student", "QAS PAYG Card", "Course Sessions", "Weekly Timeslot"])
+                         ["Student", "QAS PAYG Card"])
         self.assertTrue(all(call.kwargs.get("for_update") is True for call in calls))
 
     def test_booking_identity_cannot_change_after_insert(self):

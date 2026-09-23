@@ -13,6 +13,7 @@ class Document(frappe._dict):
     def __init__(self, state, **values):
         super().__init__(values)
         self._state = state
+        self.flags = frappe._dict()
 
     def insert(self, **_kwargs):
         if not self.get("name"):
@@ -72,11 +73,10 @@ class TestIssue(TestCase):
 
     def test_purchase_key_lookup_is_current_locking_read(self):
         self.operation.request_key = "purchase-1"
-        self.fake.db.get_value.side_effect = lambda *_args: None
+        self.fake.db.get_value.side_effect = lambda dt, key, field: "OP-1" if dt == "QAS PAYG Operation" else self.value(dt, key, field)
         self.assertIs(issue.create_or_get_purchase_operation("P-1", "PROD-1", "purchase-1"), self.operation)
-        query = next(call.args[0] for call in self.fake.db.sql.call_args_list
-                     if "tabQAS PAYG Operation" in call.args[0])
-        self.assertIn("FOR UPDATE", query)
+        self.assertFalse(any("tabQAS PAYG Operation" in call.args[0]
+                             for call in self.fake.db.sql.call_args_list))
         self.fake.get_doc.assert_any_call("QAS PAYG Operation", "OP-1", for_update=True)
 
     def test_purchase_duplicate_retries_with_current_read(self):
@@ -85,7 +85,7 @@ class TestIssue(TestCase):
         def sql(query, params, **kwargs):
             if "tabQAS PAYG Operation" in query:
                 counts["lookup"] += 1
-                return [frappe._dict(name="OP-1")] if counts["lookup"] > 1 else []
+                return [frappe._dict(name="OP-1")] if counts["lookup"] >= 1 else []
             return []
         self.fake.db.sql.side_effect = sql
         class CollidingOperation(Document):
@@ -97,8 +97,15 @@ class TestIssue(TestCase):
             return original(dt, name, **kwargs)
         self.fake.get_doc.side_effect = collide
         self.assertIs(issue.create_or_get_purchase_operation("P-1", "PROD-1", "purchase-1"), self.operation)
-        self.assertEqual(counts["lookup"], 2)
+        self.assertEqual(counts["lookup"], 1)
         self.fake.db.rollback.assert_called_once()
+
+
+    def test_missing_purchase_key_does_not_take_gap_lock(self):
+        created = issue.create_or_get_purchase_operation("P-1", "PROD-1", "new-key")
+        self.assertEqual(created.request_key, "new-key")
+        self.assertFalse(any("tabQAS PAYG Operation" in call.args[0]
+                             for call in self.fake.db.sql.call_args_list))
 
     def test_prior_invoice_and_same_issue_key_reuse_one_card(self):
         first = issue.issue_card("OP-1", "issue-1")

@@ -116,11 +116,11 @@ class TestBooking(TestCase):
     def test_request_key_current_read_beats_old_snapshot(self):
         existing = self.add("QAS PAYG Booking", "PB-EXIST", family_parent="P-1",
                             student="S-1", course_session="CS-1", request_key="req-1")
-        self.db.get_value.side_effect = lambda dt, key, field, **kw: None if dt == "QAS PAYG Booking" and isinstance(key, dict) else self.value(dt, key, field, **kw)
+        self.db.get_value.side_effect = lambda dt, key, field, **kw: "PB-EXIST" if dt == "QAS PAYG Booking" and isinstance(key, dict) else self.value(dt, key, field, **kw)
         found = booking.confirm_booking("S-1", "CS-1", "A", "req-1", confirmed_rules=True)
         self.assertIs(found, existing)
-        self.assertTrue(any("tabQAS PAYG Booking" in call.args[0] and "FOR UPDATE" in call.args[0]
-                            for call in self.db.sql.call_args_list))
+        self.assertFalse(any("tabQAS PAYG Booking" in call.args[0]
+                             for call in self.db.sql.call_args_list))
         self.assertLess(self.events.index("Student:S-1"), self.events.index("QAS PAYG Booking:PB-EXIST"))
 
     def test_duplicate_retry_rechecks_request_key_with_lock(self):
@@ -140,7 +140,7 @@ class TestBooking(TestCase):
         self.assertEqual(found.name, "PB-OTHER")
         self.db.rollback.assert_called_once()
         reads = [call for call in self.db.sql.call_args_list if "tabQAS PAYG Booking" in call.args[0]]
-        self.assertEqual(len(reads), 2)
+        self.assertEqual(len(reads), 1)
         self.assertTrue(all("FOR UPDATE" in call.args[0] for call in reads))
 
     def test_card_name_discovery_is_current_and_sorted(self):
@@ -151,6 +151,51 @@ class TestBooking(TestCase):
         query = next(call.args[0] for call in self.db.sql.call_args_list if "tabQAS PAYG Card" in call.args[0])
         self.assertIn("ORDER BY name FOR UPDATE", query)
         self.assertEqual(self.events[-2:], ["QAS PAYG Card:A", "QAS PAYG Card:B"])
+
+
+    def test_missing_request_key_does_not_take_gap_lock(self):
+        booking.confirm_booking("S-1", "CS-1", "A", "req-1", confirmed_rules=True)
+        self.assertFalse(any("tabQAS PAYG Booking" in call.args[0]
+                             for call in self.db.sql.call_args_list))
+        self.assertTrue(any(call.args[0] == "QAS PAYG Booking"
+                            and isinstance(call.args[1], dict)
+                            for call in self.db.get_value.call_args_list))
+
+
+    def test_later_entry_unique_error_never_locks_missing_booking_key(self):
+        original = self.fake.get_doc.side_effect
+        class CollidingEntry(Document):
+            def insert(self, **_options):
+                raise frappe.DuplicateEntryError("entry key")
+        def get_doc(dt, name=None, **kwargs):
+            if isinstance(dt, dict) and dt.get("doctype") == "QAS PAYG Entry":
+                return CollidingEntry(self.state, **dt)
+            return original(dt, name, **kwargs)
+        self.fake.get_doc.side_effect = get_doc
+        with self.assertRaises(frappe.DuplicateEntryError):
+            booking.confirm_booking("S-1", "CS-1", "A", "req-1", confirmed_rules=True)
+        self.db.rollback.assert_called_once()
+        self.assertFalse(any("tabQAS PAYG Booking" in call.args[0]
+                             for call in self.db.sql.call_args_list))
+
+    def test_new_booking_carries_short_lived_locked_context(self):
+        original = self.fake.get_doc.side_effect
+        seen = []
+        class CheckedBooking(Document):
+            def insert(self, **options):
+                seen.append((options, dict(self.flags.payg_create_context)))
+                return super().insert(**options)
+        def get_doc(dt, name=None, **kwargs):
+            if isinstance(dt, dict) and dt.get("doctype") == "QAS PAYG Booking":
+                return CheckedBooking(self.state, **dt)
+            return original(dt, name, **kwargs)
+        self.fake.get_doc.side_effect = get_doc
+        saved = booking.confirm_booking("S-1", "CS-1", "A", "req-1", confirmed_rules=True)
+        self.assertEqual(len(seen), 1)
+        self.assertTrue(seen[0][0]["ignore_links"])
+        self.assertEqual((seen[0][1]["student"], seen[0][1]["card_family"]), ("S-1", "P-1"))
+        self.assertIsNone(saved.flags.payg_create_context)
+        self.assertFalse(saved.flags.ignore_links)
 
     def test_rules_must_be_explicitly_confirmed(self):
         with self.assertRaisesRegex(ValueError, "confirm.*rules"):

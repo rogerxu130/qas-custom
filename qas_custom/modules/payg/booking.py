@@ -12,6 +12,7 @@ from qas_custom.modules.course_schedule import session_resources
 from qas_custom.modules.payg.rules import (as_brisbane_datetime, can_book, can_parent_cancel,
                                             choose_card, confirm_preview_card)
 from qas_custom.services.adhoc_booking import require_parent
+from qas_custom.qas_custom.doctype.qas_payg_booking.qas_payg_booking import QASPAYGBooking
 from qas_custom.services.support_view import get_support_view_token
 
 
@@ -217,10 +218,16 @@ def preview_booking(student, session, parent=None):
             "session": session, "student": student}
 
 
-def _booking_by_request_key(request_key):
-    rows = frappe.db.sql("""SELECT name FROM `tabQAS PAYG Booking`
-        WHERE request_key=%s FOR UPDATE""", (request_key,), as_dict=True)
-    return frappe.get_doc(BOOKING, rows[0].name, for_update=True) if rows else None
+def _booking_by_request_key(request_key, *, after_duplicate=False):
+    if after_duplicate:
+        # Only a proven existing unique-key winner is read with a row lock.
+        rows = frappe.db.sql("""SELECT name FROM `tabQAS PAYG Booking`
+            WHERE request_key=%s FOR UPDATE""", (request_key,), as_dict=True)
+        name = rows[0].name if rows else None
+    else:
+        # A missing-key FOR UPDATE takes a gap lock under MariaDB RR.
+        name = frappe.db.get_value(BOOKING, {"request_key": request_key}, "name")
+    return frappe.get_doc(BOOKING, name, for_update=True) if name else None
 
 
 def _same_booking(booking, family, student, session):
@@ -237,6 +244,7 @@ def confirm_booking(student, session, preview_card, request_key, *, confirmed_ru
         frappe.throw("Student, session, preview card and request key are required")
     savepoint = "payg_confirm_" + uuid4().hex
     frappe.db.savepoint(savepoint)
+    booking_insert_conflict = False
     try:
         pupil = _student(student, family.name, lock=True)
         existing = _booking_by_request_key(request_key)
@@ -276,7 +284,24 @@ def confirm_booking(student, session, preview_card, request_key, *, confirmed_ru
                                   "course_snapshot": course_id, "card_expires_on_snapshot": selected.expires_on,
                                   "status": "Reserved", "cancellable_until": start - timedelta(hours=72),
                                   "request_key": request_key})
-        booking.insert(ignore_permissions=True)
+        booking.flags.payg_create_context = {
+            "token": QASPAYGBooking._SERVICE_CREATE_TOKEN,
+            "family_parent": pupil.guardian, "student": pupil.name,
+            "card": selected.name, "card_family": selected.family_parent,
+            "card_course": selected.course, "course_session": session,
+            "course_snapshot": course_id,
+            "card_expires_on_snapshot": selected.expires_on,
+            "request_key": request_key, "cancellable_until": start - timedelta(hours=72),
+        }
+        try:
+            # Frappe checks Links before autoname. Locked service context is the
+            # authority here; a stale RR snapshot can miss a just-issued card.
+            booking.insert(ignore_permissions=True, ignore_links=True)
+        except (frappe.DuplicateEntryError, frappe.UniqueValidationError):
+            booking_insert_conflict = True
+            raise
+        finally:
+            booking.flags.payg_create_context = None
         attendance = session_resources.reserve_regular_place(
             student, session, BOOKING, booking.name, "Pay-as-you-go", validate_business=validate)
         frappe.get_doc({"doctype": ENTRY, "card": selected.name, "booking": booking.name,
@@ -284,14 +309,16 @@ def confirm_booking(student, session, preview_card, request_key, *, confirmed_ru
                         "consumed_delta": 0, "operation_key": f"reserve:{booking.name}",
                         "actor": frappe.session.user, "occurred_at": now}).insert(ignore_permissions=True)
         booking.attendance_entry = attendance
-        booking.save(ignore_permissions=True)
+        booking.save(ignore_permissions=True, ignore_links=True)
+        booking.flags.ignore_links = False
         return booking
     except (frappe.DuplicateEntryError, frappe.UniqueValidationError):
         frappe.db.rollback(save_point=savepoint)
-        _student(student, family.name, lock=True)
-        existing = _booking_by_request_key(request_key)
-        if existing:
-            return _same_booking(existing, family.name, student, session)
+        if booking_insert_conflict:
+            _student(student, family.name, lock=True)
+            existing = _booking_by_request_key(request_key, after_duplicate=True)
+            if existing:
+                return _same_booking(existing, family.name, student, session)
         raise
     except Exception:
         frappe.db.rollback(save_point=savepoint)

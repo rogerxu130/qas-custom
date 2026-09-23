@@ -17,11 +17,17 @@ def _now():
     return get_datetime_in_timezone("Australia/Brisbane")
 
 
-def _purchase_by_request_key(request_key):
-    rows = frappe.db.sql("""SELECT name FROM `tabQAS PAYG Operation`
-        WHERE operation_type='Purchase' AND request_key=%s FOR UPDATE""",
-        (request_key,), as_dict=True)
-    return frappe.get_doc("QAS PAYG Operation", rows[0].name, for_update=True) if rows else None
+def _purchase_by_request_key(request_key, *, after_duplicate=False):
+    if after_duplicate:
+        rows = frappe.db.sql("""SELECT name FROM `tabQAS PAYG Operation`
+            WHERE operation_type='Purchase' AND request_key=%s FOR UPDATE""",
+            (request_key,), as_dict=True)
+        name = rows[0].name if rows else None
+    else:
+        # Missing-key locking reads take RR gap locks and can deadlock inserts.
+        name = frappe.db.get_value("QAS PAYG Operation",
+                                   {"operation_type": "Purchase", "request_key": request_key}, "name")
+    return frappe.get_doc("QAS PAYG Operation", name, for_update=True) if name else None
 
 
 def create_or_get_purchase_operation(family_parent, product, purchase_request_key):
@@ -48,7 +54,7 @@ def create_or_get_purchase_operation(family_parent, product, purchase_request_ke
         return operation
     except (frappe.DuplicateEntryError, frappe.UniqueValidationError):
         frappe.db.rollback(save_point=savepoint)
-        operation = _purchase_by_request_key(purchase_request_key)
+        operation = _purchase_by_request_key(purchase_request_key, after_duplicate=True)
         if operation:
             if (operation.family_parent, operation.product) != (family_parent, product):
                 frappe.throw("Purchase request key belongs to another purchase")
