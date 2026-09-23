@@ -289,26 +289,20 @@ class TestPaygControllers(TestCase):
         with self.assertRaises(ValueError):
             controller.validate(booking)
 
-    def test_booking_links_use_current_reads_in_lock_order(self):
+    def test_existing_booking_requires_service_mutation_token_without_relation_locks(self):
         controller = self.controller("booking")
-        values = {
-            "Student": "P-1",
-            "QAS PAYG Card": types.SimpleNamespace(family_parent="P-1", course="C-1", expires_on="2027-03-23"),
-            "Course Sessions": "WTS-1",
-            "Weekly Timeslot": "C-1",
-        }
-        self.frappe.db.get_value.side_effect = lambda dt, *_args, **_kwargs: values[dt]
         booking = self.doc(card="CARD-1", family_parent="P-1", student="S-1",
                            course_session="SESSION-1", course_snapshot="C-1",
                            card_expires_on_snapshot="2027-03-23", attendance_entry=None,
                            status="Reserved")
         booking.is_new = lambda: False
         booking.get_doc_before_save = lambda: booking
+        with self.assertRaises(ValueError):
+            controller.validate(booking)
+        booking.flags = {"payg_mutation_token": controller._SERVICE_MUTATION_TOKEN}
         controller.validate(booking)
-        calls = self.frappe.db.get_value.call_args_list
-        self.assertEqual([call.args[0] for call in calls],
-                         ["Student", "QAS PAYG Card"])
-        self.assertTrue(all(call.kwargs.get("for_update") is True for call in calls))
+        self.frappe.db.get_value.assert_not_called()
+        self.frappe.db.sql.assert_not_called()
 
     def test_booking_identity_cannot_change_after_insert(self):
         controller = self.controller("booking")
@@ -322,6 +316,7 @@ class TestPaygControllers(TestCase):
                            card_expires_on_snapshot="2027-03-23", request_key="req-1",
                            attendance_entry=None, new=False)
         booking.get_doc_before_save = lambda: before
+        booking.flags = {"payg_mutation_token": controller._SERVICE_MUTATION_TOKEN}
         with self.assertRaises(ValueError):
             controller.validate(booking)
 
@@ -335,11 +330,12 @@ class TestPaygControllers(TestCase):
                               "cancelled_at": "2026-09-23", "cancelled_by": "ADMIN",
                               "cancel_reason": "Closure"})
         booking.get_doc_before_save = lambda: before
-        self.frappe.db.get_value.side_effect = [
-            "P-1", types.SimpleNamespace(family_parent="P-1", course="C-1", expires_on="2027-03-23")]
+        booking.flags = {"payg_mutation_token": controller._SERVICE_MUTATION_TOKEN}
         self.frappe.db.exists.return_value = False
         with self.assertRaises(ValueError):
             controller.validate(booking)
+        self.frappe.db.exists.assert_called_once_with(
+            "QAS PAYG Entry", {"booking": booking.name, "kind": "Return"})
 
     def test_operation_action_key_cannot_be_replaced(self):
         controller = self.controller("operation")

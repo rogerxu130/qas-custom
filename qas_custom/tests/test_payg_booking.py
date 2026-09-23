@@ -196,6 +196,7 @@ class TestBooking(TestCase):
         self.assertEqual((seen[0][1]["student"], seen[0][1]["card_family"]), ("S-1", "P-1"))
         self.assertIsNone(saved.flags.payg_create_context)
         self.assertFalse(saved.flags.ignore_links)
+        self.assertIsNone(saved.flags.payg_mutation_token)
 
     def test_rules_must_be_explicitly_confirmed(self):
         with self.assertRaisesRegex(ValueError, "confirm.*rules"):

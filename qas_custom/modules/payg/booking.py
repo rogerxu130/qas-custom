@@ -309,8 +309,12 @@ def confirm_booking(student, session, preview_card, request_key, *, confirmed_ru
                         "consumed_delta": 0, "operation_key": f"reserve:{booking.name}",
                         "actor": frappe.session.user, "occurred_at": now}).insert(ignore_permissions=True)
         booking.attendance_entry = attendance
-        booking.save(ignore_permissions=True, ignore_links=True)
-        booking.flags.ignore_links = False
+        booking.flags.payg_mutation_token = QASPAYGBooking._SERVICE_MUTATION_TOKEN
+        try:
+            booking.save(ignore_permissions=True, ignore_links=True)
+        finally:
+            booking.flags.payg_mutation_token = None
+            booking.flags.ignore_links = False
         return booking
     except (frappe.DuplicateEntryError, frappe.UniqueValidationError):
         frappe.db.rollback(save_point=savepoint)
@@ -365,7 +369,11 @@ def cancel_booking(booking_id, parent=None):
         booking.cancelled_at = now
         booking.cancelled_by = frappe.session.user
         booking.cancel_reason = "Parent cancellation"
-        booking.save(ignore_permissions=True)
+        booking.flags.payg_mutation_token = QASPAYGBooking._SERVICE_MUTATION_TOKEN
+        try:
+            booking.save(ignore_permissions=True)
+        finally:
+            booking.flags.payg_mutation_token = None
         frappe.db.set_value("Class Attendance Entry", booking.attendance_entry, "status", "Cancelled")
         return booking
     except Exception:
