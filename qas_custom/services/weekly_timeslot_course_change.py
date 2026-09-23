@@ -5,7 +5,7 @@ import json
 
 import frappe
 from frappe import _
-from frappe.utils import getdate, today
+from frappe.utils import getdate, get_datetime, now_datetime, today
 
 from qas_custom.services.class_record_labels import refresh_linked_course_session_labels
 from qas_custom.services.school_admin import (
@@ -36,6 +36,14 @@ def _normal_value(fieldname, value):
 	return value or ""
 
 
+def _session_has_started(session, start_time, current_time):
+	if session.get("status") == "Completed":
+		return True
+	# Use the saved start time, never the proposed time, to protect today's history.
+	start = _format_time_for_message(start_time) or "00:00"
+	return get_datetime(f"{getdate(session.get('session_date'))} {start}") <= current_time
+
+
 def _intended_payload(doc, new_course, payload=None):
 	payload = _get_payload(payload) if payload is not None else {}
 	unknown = sorted(set(payload) - set(EDITABLE_FIELDS) - {"term"})
@@ -55,6 +63,7 @@ def _intended_payload(doc, new_course, payload=None):
 
 def _state_token(report):
 	state = {
+		"teacher_change_policy": report["teacher_change_policy"],
 		"weekly_timeslot": report["weekly_timeslot"],
 		"changes": report["changes"],
 		"intended_payload": report["intended_payload"],
@@ -120,21 +129,25 @@ def _preview(weekly_timeslot, new_course, payload=None, effective_date=None):
 	trial_inquiries = frappe.get_all("Inquiry", filters=trial_filters, pluck="name", limit_page_length=0) if trial_filters else []
 	draft_invoices = sorted({row.invoice for row in enrollments if row.get("invoice") and row.get("invoice_status") == "Draft"})
 	blocking_errors = []
-	if term.get("status") != "Upcoming":
+	if "course" in changes and term.get("status") != "Upcoming":
 		blocking_errors.append(_("The class course can only be changed while the term is Upcoming."))
-	if any(row.get("status") == "Completed" or getdate(row.get("session_date")) < getdate(today()) for row in sessions):
-		blocking_errors.append(_("A linked course session has already started or completed."))
+	current_time = now_datetime()
+	if any(_session_has_started(row, doc.get("start_time"), current_time) for row in sessions):
+		blocking_errors.append(_("A linked course session has already started or completed. Use Change weekly teacher from the Classes workspace to change the teacher."))
 	if session_names and frappe.db.exists(
 		"Class Attendance Entry",
 		{"course_session": ["in", session_names], "status": ["not in", ["Scheduled", "Not Marked", "To be started", "Cancelled"]]},
 	):
-		blocking_errors.append(_("Attendance has already been marked for a linked session."))
+		blocking_errors.append(_("Attendance has already been marked for a linked session. Use Change weekly teacher from the Classes workspace to change the teacher."))
 	if intended["teacher"]:
 		_assert_active_teacher(intended["teacher"])
 
 	schedule_changed = bool({"day_of_week", "start_time", "end_time"}.intersection(changes))
 	teacher_changed = "teacher" in changes
 	effective = getdate(effective_date) if effective_date else None
+	# All sessions must inherit this change, including sessions before a supplied term start.
+	if teacher_changed:
+		effective = getdate(today())
 	if sessions and (schedule_changed or teacher_changed) and not effective:
 		blocking_errors.append(_("An effective date is required for combined schedule or teacher changes."))
 	if effective and effective < getdate(today()):
@@ -167,6 +180,7 @@ def _preview(weekly_timeslot, new_course, payload=None, effective_date=None):
 	old_duration = frappe.db.get_value("Course", before["course"], "duration_mins") or 0
 	new_duration = frappe.db.get_value("Course", new_course, "duration_mins") or 0
 	report = {
+		"teacher_change_policy": "all_unstarted_sessions",
 		"weekly_timeslot": doc.name, "term": doc.term,
 		"old_course": before["course"], "new_course": new_course,
 		"intended_payload": intended, "changes": changes,
@@ -207,28 +221,28 @@ def execute(weekly_timeslot=None, new_course=None, confirmation_token=None, payl
 
 	try:
 		doc = frappe.get_doc("Weekly Timeslot", weekly_timeslot)
-		previous_teacher = doc.get("teacher") or ""
 		intended = report["intended_payload"]
-		if "teacher" in report["changes"] and report["effective_date"] and previous_teacher:
+		if "teacher" in report["changes"]:
 			for session in report["sessions"]:
-				if getdate(session["session_date"]) < getdate(report["effective_date"]) and not session.get("teacher_override"):
-					frappe.db.set_value("Course Sessions", session["name"], "teacher_override", previous_teacher, update_modified=True)
+				if session.get("teacher_override"):
+					frappe.db.set_value("Course Sessions", session["name"], "teacher_override", "", update_modified=True)
 		_apply_weekly_timeslot_payload(doc, intended)
 		doc.save(ignore_permissions=True)
 		for mapping in report["session_date_mapping"]:
 			frappe.db.set_value("Course Sessions", mapping["session"], "session_date", mapping["after"], update_modified=True)
-		for row in report["enrollments"]:
+		changed_enrollments = report["enrollments"] if "course" in report["changes"] else []
+		for row in changed_enrollments:
 			frappe.db.set_value("Enrollment", row["name"], "course", new_course, update_modified=True)
 			_add_comment("Enrollment", row["name"], _("Course synchronized from {0} to {1} after reviewed class change.").format(report["old_course"], new_course))
 		refresh_linked_course_session_labels(doc)
 		_add_comment(
 			"Weekly Timeslot", doc.name,
 			_("Reviewed combined class change: {0}. Synchronized {1} enrollment(s); invoices, trial inquiries and attendance were not modified.").format(
-				", ".join(sorted(report["changes"])), len(report["enrollments"])
+				", ".join(sorted(report["changes"])), len(changed_enrollments)
 			),
 		)
 		frappe.db.commit()
 	except Exception:
 		frappe.db.rollback()
 		raise
-	return {**report, "updated_enrollment_count": len(report["enrollments"]), "completed": True}
+	return {**report, "updated_enrollment_count": len(changed_enrollments), "completed": True}

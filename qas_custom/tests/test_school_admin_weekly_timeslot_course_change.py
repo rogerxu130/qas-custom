@@ -1,12 +1,84 @@
 from unittest import TestCase
 from unittest.mock import Mock, patch
+from contextlib import ExitStack
+from datetime import datetime
 
 import frappe
 
-from qas_custom.services.weekly_timeslot_course_change import _intended_payload, _preview, _teacher_conflict, execute
+from qas_custom.services.weekly_timeslot_course_change import _intended_payload, _preview, _session_has_started, _teacher_conflict, execute
 
 
 class TestSchoolAdminWeeklyTimeslotCourseChange(TestCase):
+	def setUp(self):
+		clock = patch("qas_custom.services.weekly_timeslot_course_change.now_datetime", return_value=datetime(2026, 9, 21, 10, 0))
+		clock.start()
+		self.addCleanup(clock.stop)
+
+	def test_start_boundary_uses_saved_time_and_completed_status(self):
+		current = datetime(2026, 9, 21, 10, 0)
+		for date, time, status, expected in [
+			("2026-09-21", "10:01", "Scheduled", False),
+			("2026-09-21", "10:00", "Scheduled", True),
+			("2026-09-21", "09:00", "Scheduled", True),
+			("2026-09-20", "11:00", "Scheduled", True),
+			("2026-09-22", "09:00", "Completed", True),
+		]:
+			with self.subTest(date=date, time=time, status=status):
+				self.assertEqual(_session_has_started({"session_date": date, "status": status}, time, current), expected)
+
+	def test_teacher_preview_allows_active_term_but_blocks_started_or_attended_sessions(self):
+		module = "qas_custom.services.weekly_timeslot_course_change."
+		for date, attended, blocked in [("2026-09-22", False, False), ("2026-09-21", False, True), ("2026-09-22", True, True)]:
+			with self.subTest(date=date, attended=attended), ExitStack() as stack:
+				doc = frappe._dict(name="WTS-1", term="Term", course="Course A", teacher="Old", start_time="09:00", end_time="10:00")
+				session = frappe._dict(name="CS-1", session_date=date, status="Scheduled", teacher_override="Substitute")
+				db = Mock()
+				db.exists.side_effect = lambda dt, filters=None: True if dt == "Course" else attended
+				db.get_value.side_effect = [frappe._dict(status="Active"), 60, 60]
+				for name, kwargs in {
+					"frappe.db": {"new": db}, "frappe.get_doc": {"return_value": doc},
+					"frappe.get_all": {"side_effect": [[session], [], []]},
+					"today": {"return_value": "2026-09-21"}, "_": {"side_effect": lambda text: text},
+					"_validate_weekly_timeslot_change": {}, "_apply_weekly_timeslot_payload": {},
+				}.items():
+					stack.enter_context(patch(module + name, **kwargs))
+				report = _preview("WTS-1", "Course A", {"teacher": ""}, "2026-10-05")
+				self.assertEqual(bool(report["blocking_errors"]), blocked)
+				self.assertEqual(report["effective_date"], "2026-09-21")
+				self.assertEqual(report["teacher_change_policy"], "all_unstarted_sessions")
+				db.set_value.assert_not_called()
+
+	def test_teacher_only_execute_clears_overrides_without_rewriting_enrollments(self):
+		module = "qas_custom.services.weekly_timeslot_course_change."
+		report = {"blocking_errors": [], "confirmation_token": "token", "effective_date": "2026-09-21",
+			"intended_payload": {"teacher": ""}, "changes": {"teacher": {}},
+			"sessions": [{"name": "CS-1", "teacher_override": "Substitute"}, {"name": "CS-2", "teacher_override": ""}],
+			"session_date_mapping": [], "enrollments": [{"name": "ENR-1"}], "old_course": "Course A"}
+		with ExitStack() as stack:
+			db = Mock()
+			for name, kwargs in {"_preview": {"return_value": report}, "_require_school_admin": {},
+				"_apply_weekly_timeslot_payload": {}, "_add_comment": {}, "refresh_linked_course_session_labels": {},
+				"frappe.get_doc": {"return_value": Mock()}, "frappe.db": {"new": db},
+				"_": {"side_effect": lambda text: text}}.items():
+				stack.enter_context(patch(module + name, **kwargs))
+			result = execute.__wrapped__("WTS-1", "Course A", "token", {"teacher": ""})
+			db.set_value.assert_called_once_with("Course Sessions", "CS-1", "teacher_override", "", update_modified=True)
+			db.commit.assert_called_once()
+			self.assertEqual(result["updated_enrollment_count"], 0)
+
+	def test_execute_rechecks_started_sessions_and_rejects_stale_confirmation_before_writing(self):
+		module = "qas_custom.services.weekly_timeslot_course_change."
+		for errors, token in [(["Use Change weekly teacher"], "token"), ([], "changed-token")]:
+			with self.subTest(errors=errors, token=token), ExitStack() as stack:
+				stack.enter_context(patch(module + "_require_school_admin"))
+				stack.enter_context(patch(module + "_preview", return_value={"blocking_errors": errors, "confirmation_token": token}))
+				stack.enter_context(patch(module + "frappe.throw", side_effect=RuntimeError))
+				stack.enter_context(patch(module + "_", side_effect=lambda text: text))
+				get_doc = stack.enter_context(patch(module + "frappe.get_doc"))
+				with self.assertRaises(RuntimeError):
+					execute.__wrapped__("WTS-1", "Course A", "token", {"teacher": "New"})
+				get_doc.assert_not_called()
+
 	@patch("qas_custom.services.weekly_timeslot_course_change.today", return_value="2026-09-21")
 	@patch("qas_custom.services.weekly_timeslot_course_change.frappe.get_all")
 	@patch("qas_custom.services.weekly_timeslot_course_change.frappe.get_doc")
