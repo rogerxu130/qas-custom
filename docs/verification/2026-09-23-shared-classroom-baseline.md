@@ -79,3 +79,42 @@ The existing rule is intentional: a concentrated makeup quota **may exceed class
 ## Verification limits
 
 Real database concurrency and lock behavior, browser UI, test-site end-to-end flows, and production behavior remain unverified. This baseline does not imply a Frappe Cloud or frontend deployment. The successful build required temporary reuse of the existing dependency directory, as described above. The additional backend run has one baseline test error; it is not a clean suite pass.
+
+## Post-extraction verification (2026-09-23)
+
+Verification ran from `/private/tmp/qas-shared-foundation` on branch `codex/qas-shared-foundation` at `4d3328bec1433b736d2b8c45b984e46fee9a0bfe`, with a clean working tree before this update. Implementation commits are `d225cd7` (test mock repair), `28cdf3f` (shared resource extraction), and `4d3328b` (direct enrollment import). The earlier 21-test error above is preserved as the historical pre-extraction result; the repaired test now passes.
+
+The production change moved six identical helpers (`session_context`, `active_rows`, `overlaps`, `student_has_conflict`, `classroom_capacity`, `session_is_future`) from `concentrated_makeup.py` to `modules/course_schedule/session_resources.py`. Concentrated makeup re-exports them by import, and direct enrollment imports its four used helpers from the new module. SQL, lock flags, time boundaries, capacity rules, and booking logic are unchanged. Commit `d225cd7` changes only `test_parent_makeup_session_roster.py`: its `frappe.get_all` mock now returns `Weekly Timeslot` names for that doctype instead of session dictionaries for every query. This fixes the baseline mock mismatch and is not product behavior.
+
+These commands used the real bench Python and Frappe imports. Their tests mock database boundaries, so passing results do not establish live database behavior.
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD" /Users/ranxu/Documents/Project/frappe-bench/env/bin/python -m unittest qas_custom.tests.test_course_session_resources qas_custom.tests.test_concentrated_makeup qas_custom.tests.test_direct_enrollment qas_custom.tests.test_parent_leave_makeup_choice qas_custom.tests.test_school_admin_makeup_cancellation qas_custom.tests.test_parent_makeup_session_roster qas_custom.tests.test_cancelled_trial_attendance_reactivation -v
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD" /Users/ranxu/Documents/Project/frappe-bench/env/bin/python -m unittest qas_custom.tests.test_makeup_parent_notifications qas_custom.tests.test_invoice_account_mutation -v
+```
+
+The first command passed **75/75 tests** (`Ran 75 tests in 0.040s`, `OK`); the adjacent command passed **15/15 tests** (`Ran 15 tests in 0.035s`, `OK`). Combined post-extraction result: **90/90 passed**. A syntax compile using the bench Python and `compile(source, filename, 'exec')` passed for all **7 changed Python files** since `d3eec8e`, without writing bytecode:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 /Users/ranxu/Documents/Project/frappe-bench/env/bin/python - <<'PY'
+import subprocess
+from pathlib import Path
+files = subprocess.check_output(['git', 'diff', '--name-only', 'd3eec8e', 'HEAD', '--', '*.py'], text=True).splitlines()
+for name in files:
+    compile(Path(name).read_bytes(), name, 'exec')
+    print('OK', name)
+print(f'Compiled {len(files)} changed Python files')
+PY
+```
+
+Read-only environment discovery found `qas-local.test` and `qas-restore.test` bench site configurations, both with `allow_tests=true`; `qas-local.test` also has `developer_mode=1`. The bench sites directory has no `currentsite.txt`. Repository searches found a past reference to local `qas-restore.test` integration but no explicit designation of a disposable isolated site, safe test accounts, or browser test target for this batch. Neither site was connected to or mutated. No real database or browser workflow was run.
+
+| Planned real database/browser case | Status | Reason |
+| --- | --- | --- |
+| Ordinary enrollment capacity, duplicate attendance, and invoice transaction on a test site | Unverified | No explicitly designated isolated site and test family/account records. |
+| Concentrated makeup booking quota, classroom capacity separation, and attendance/voucher rollback | Unverified | No explicitly designated isolated site and safe records. |
+| Concurrent booking and direct enrollment lock ordering under live database contention | Unverified | Requires controlled concurrent writes on an isolated site. |
+| Parent makeup roster, leave choice, cancellation, and notification flow | Unverified | Requires isolated records and safe outbound-message controls. |
+| Browser parent/admin flows across desktop and mobile | Unverified | No designated safe browser URL or test accounts. |
+
+`active_rows` retains legacy coverage through concentrated makeup and consumer suites, but the new `test_course_session_resources.py` module has no dedicated `active_rows` unit test. This is a minor coverage gap for a future batch; no code was added here. This batch made no schema, data, or frontend behavior changes and performed no push or deployment.
