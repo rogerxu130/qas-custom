@@ -160,7 +160,7 @@ def family_booking_history(student=None, limit=100):
         filters["student"] = student
     return frappe.get_all(BOOKING, filters=filters,
                           fields=["name", "student", "card", "course_session", "attendance_entry",
-                                  "status", "cancellable_until", "cancelled_at"],
+                                  "status", "cancellable_until", "cancelled_at", "card_expires_on_snapshot"],
                           order_by="creation desc", limit_page_length=count)
 
 
