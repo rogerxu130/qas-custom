@@ -221,6 +221,17 @@ class TestBooking(TestCase):
         result = booking.confirm_booking("S-1", "CS-1", "A", "req-1", confirmed_rules=True)
         self.assertEqual(result.status, "Reserved")
 
+    def test_payg_reservation_isolated_from_legacy_adhoc_and_enrollment(self):
+        result = booking.confirm_booking("S-1", "CS-1", "A", "req-payg", confirmed_rules=True)
+        reservation = booking.session_resources.reserve_regular_place.call_args
+        self.assertEqual(reservation.args[:3], ("S-1", "CS-1", "QAS PAYG Booking"))
+        self.assertEqual((reservation.args[3], reservation.args[4]),
+                         (result.name, "Pay-as-you-go"))
+        self.assertFalse(any(kind in ("Adhoc Booking", "Enrollment")
+                             for kind, _ in self.state["docs"]))
+        self.assertEqual(len([doc for (kind, _), doc in self.state["docs"].items()
+                              if kind == "QAS PAYG Entry" and doc.kind == "Reserve"]), 1)
+
 
     def test_age_filter_advances_cursor_across_raw_batches(self):
         course = self.state["docs"][("Course", "C-1")]

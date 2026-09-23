@@ -11,6 +11,42 @@ from qas_custom.services import adhoc_booking as subject
 
 
 class TestAdhocBooking(TestCase):
+    def test_discovery_keeps_legacy_60_day_and_100_row_window(self):
+        timeslot = frappe._dict(name="W-1", course="Art", campus="Campus", start_time="10:00")
+        get_all = Mock(side_effect=[[timeslot], []])
+        fake = SimpleNamespace(get_all=get_all)
+        with patch.object(subject, "frappe", fake), \
+             patch.object(subject, "require_parent", return_value=frappe._dict(name="P-1")), \
+             patch.object(subject, "get_adhoc_students_for_parent", return_value=[frappe._dict(name="S-1")]), \
+             patch.object(subject, "validate_student_filter", return_value="S-1"), \
+             patch.object(subject, "today", return_value="2026-09-24"):
+            self.assertEqual(subject.get_available_sessions_data(student="S-1", course="Art"), {"items": []})
+        self.assertEqual([call.args[0] for call in get_all.call_args_list],
+                         ["Weekly Timeslot", "Course Sessions"])
+        session_query = get_all.call_args_list[1].kwargs
+        self.assertEqual(session_query["filters"]["session_date"],
+                         ["between", [subject.getdate("2026-09-24"), subject.getdate("2026-11-23")]])
+        self.assertEqual(session_query["limit"], 100)
+
+    def test_preview_keeps_trial_fee_and_customer_balance(self):
+        parent = frappe._dict(name="P-1", customer="CUST-1")
+        pupil = frappe._dict(name="S-1")
+        context = {"session": frappe._dict(name="CS-1"),
+                   "timeslot": frappe._dict(course="Art")}
+        with patch.object(subject, "require_parent", return_value=parent), \
+             patch.object(subject, "get_adhoc_students_for_parent", return_value=[pupil]), \
+             patch.object(subject, "validate_student_filter", return_value="S-1"), \
+             patch.object(subject, "validate_booking_context", return_value=context), \
+             patch.object(subject, "get_trial_class_fee", return_value=25) as fee, \
+             patch.object(subject, "get_customer_balance_summary", return_value={"available": 42}) as balance, \
+             patch.object(subject, "build_student_summary", return_value={"id": "S-1"}), \
+             patch.object(subject, "build_session_item", return_value={"id": "CS-1"}), \
+             patch.object(subject, "get_adhoc_rules", return_value={}):
+            result = subject.preview_booking_data("S-1", "CS-1")
+        self.assertEqual((result["fee_amount"], result["balance"]), (25, {"available": 42}))
+        fee.assert_called_once_with("Art")
+        balance.assert_called_once_with("CUST-1")
+
     def test_confirm_uses_locked_reservation_after_credit_check(self):
         events = []
         parent = frappe._dict(name="P-1", customer="CUST-1")

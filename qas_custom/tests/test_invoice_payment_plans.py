@@ -32,7 +32,8 @@ def invoice(**overrides):
 class TestInvoicePaymentPlans(TestCase):
 	def test_invoice_pdf_includes_active_payment_plan_schedule(self):
 		plan = payment_plan_payload(invoice(), today=date(2026, 7, 12))
-		html = _invoice_pdf_payment_plan_block({"payment_plan": plan})
+		with patch("qas_custom.modules.notifications.commands.formatdate", side_effect=str):
+			html = _invoice_pdf_payment_plan_block({"payment_plan": plan})
 
 		self.assertIn("Payment plan", html)
 		self.assertIn("Installment 1", html)
