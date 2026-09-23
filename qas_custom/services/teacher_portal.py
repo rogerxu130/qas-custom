@@ -148,7 +148,7 @@ def get_teacher_session_detail_data(course_session=None):
                 "parent_name": parent.get("parent_name") or "",
                 "parent_phone": parent.get("parent_phone") or "",
                 "parent_email": parent.get("parent_email") or "",
-                "enrollment_type": row.get("enrollment_type"),
+                "enrollment_type": "Pay-as-you-go" if row.get("source_doctype") == "QAS PAYG Booking" else row.get("enrollment_type"),
                 "status": row.get("status"),
                 "comments": row.get("comments") or "",
                 "makeup_voucher": row.get("makeup_voucher"),
@@ -871,7 +871,7 @@ def _count_special_students(attendance_rows: list[dict]):
     return {
         "trial": counter.get("Trial", 0),
         "makeup": counter.get("Makeup", 0),
-        "pay_as_you_go": counter.get("Pay-as-you-go", 0),
+        "pay_as_you_go": sum(1 for row in attendance_rows if row.get("source_doctype") == "QAS PAYG Booking" or row.get("enrollment_type") == "Pay-as-you-go"),
         "first_class_after_transfer": sum(
             bool(cint(row.get("qas_first_class_after_transfer"))) for row in attendance_rows
         ),

@@ -39,12 +39,7 @@ def get_parent_feed_data(student=None, page=1, page_length=10):
             frappe.throw(_("The requested student does not belong to the current parent account."))
         student_ids = [student]
 
-    attendance_rows = frappe.get_all(
-        ATTENDANCE_DOCTYPE,
-        filters={"student": ["in", student_ids]},
-        fields=["course_session", "student"],
-        order_by="course_session asc",
-    )
+    attendance_rows = _accessible_parent_attendance(parent_name, student_ids=student_ids)
 
     if not attendance_rows:
         return {"items": [], "page": page, "page_length": page_length, "has_more": False}
@@ -368,22 +363,43 @@ def _require_parent():
     return parent_name
 
 
+def _accessible_parent_attendance(parent_name, course_session=None, student_ids=None):
+    """Keep legacy attendance access; require proven participation for PAYG rows."""
+    owned_students = frappe.get_all("Student", filters={"guardian": parent_name}, pluck="name")
+    selected = list(set(owned_students) & set(student_ids)) if student_ids is not None else owned_students
+    if not selected:
+        return []
+    filters = {"student": ["in", selected]}
+    if course_session:
+        filters["course_session"] = course_session
+    rows = frappe.get_all(ATTENDANCE_DOCTYPE, filters=filters,
+                          fields=["name", "course_session", "student", "status",
+                                  "source_doctype", "source_document"],
+                          order_by="course_session asc")
+    if not rows:
+        return []
+    bookings = frappe.get_all("QAS PAYG Booking",
+                              filters={"attendance_entry": ["in", [row.name for row in rows]]},
+                              fields=["name", "attendance_entry", "student", "course_session", "status"])
+    booking_by_attendance = {booking.attendance_entry: booking for booking in bookings}
+    allowed = []
+    for row in rows:
+        booking = booking_by_attendance.get(row.name)
+        if row.source_doctype == "QAS PAYG Booking" or booking:
+            if (booking and row.source_doctype == "QAS PAYG Booking" and
+                    row.source_document == booking.name and booking.attendance_entry == row.name and
+                    booking.student == row.student and booking.course_session == row.course_session and
+                    booking.status in ("Locked", "Completed") and row.status in ("Present", "Late")):
+                allowed.append(row)
+        else:
+            allowed.append(row)
+    return allowed
+
+
 def _validate_parent_session_access(parent_name, course_session):
     if not course_session:
         raise frappe.PermissionError
-
-    student_ids = frappe.get_all("Student", filters={"guardian": parent_name}, pluck="name")
-    if not student_ids:
-        raise frappe.PermissionError
-
-    has_access = frappe.db.exists(
-        ATTENDANCE_DOCTYPE,
-        {
-            "course_session": course_session,
-            "student": ["in", student_ids],
-        },
-    )
-    if not has_access:
+    if not _accessible_parent_attendance(parent_name, course_session=course_session):
         raise frappe.PermissionError
 
 

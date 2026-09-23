@@ -6,6 +6,7 @@ from qas_custom.services.parent_feed import (
     get_parent_feed_photo_content,
     get_parent_feed_video_content,
 )
+from qas_custom.services.parent_classroom_messages import get_parent_classroom_messages_data
 from qas_custom.services.parent_info import get_parent_info_data
 from qas_custom.services.material_orders import (
     create_parent_store_order_data,
@@ -78,6 +79,11 @@ def parent_portal_confirm_password_reset(token=None, new_password=None):
 @frappe.whitelist()
 def get_parent_feed(student=None, page=1, page_length=10):
     return get_parent_feed_data(student=student, page=page, page_length=page_length)
+
+
+@frappe.whitelist()
+def parent_portal_get_classroom_messages(student=None, limit=50):
+    return get_parent_classroom_messages_data(student=student, limit=limit)
 
 
 @frappe.whitelist()

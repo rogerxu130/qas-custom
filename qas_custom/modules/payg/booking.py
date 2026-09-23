@@ -140,6 +140,20 @@ def family_cards(student=None, parent=None):
     return {"students": students, "cards": _cards(family.name)}
 
 
+def family_booking_history(student=None, limit=100):
+    family = _family()
+    if student:
+        _student(student, family.name)
+    count = max(1, min(int(limit), 200))
+    filters = {"family_parent": family.name}
+    if student:
+        filters["student"] = student
+    return frappe.get_all(BOOKING, filters=filters,
+                          fields=["name", "student", "card", "course_session", "attendance_entry",
+                                  "status", "cancellable_until", "cancelled_at"],
+                          order_by="creation desc", limit_page_length=count)
+
+
 def available_sessions(student, course, cursor=None, limit=30, parent=None):
     """Page all open terms using the stable (session_date, name) cursor."""
     family = _family(parent)

@@ -26,6 +26,26 @@ MAX_MESSAGE_LENGTH = 2000
 ADMIN_ROLES = {"School Admin", "System Manager"}
 
 
+def get_parent_classroom_messages_data(student=None, limit=50):
+	"""Read only messages tied to this family's accessible attendance rows."""
+	from qas_custom.services.adhoc_booking import require_parent
+	from qas_custom.services.parent_feed import _accessible_parent_attendance
+
+	parent = require_parent()
+	if student and frappe.db.get_value("Student", student, "guardian") != parent.name:
+		frappe.throw(_("The student does not belong to this parent."), frappe.PermissionError)
+	allowed = {row.name for row in _accessible_parent_attendance(
+		parent.name, student_ids=[student] if student else None)}
+	if not allowed:
+		return {"items": []}
+	rows = frappe.get_all(MESSAGE_DOCTYPE,
+		filters={"parent": parent.name, "attendance_entry": ["in", sorted(allowed)]},
+		fields=["name", "course_session", "attendance_entry", "student", "teacher",
+			"category", "message", "creation"],
+		order_by="creation desc", limit_page_length=_limit(limit, 50, 100))
+	return {"items": rows}
+
+
 def create_teacher_parent_classroom_message_data(
 	course_session=None,
 	attendance_entry=None,
