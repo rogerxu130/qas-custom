@@ -63,18 +63,18 @@ def _not_implemented_response(endpoint_name: str):
 
 
 @frappe.whitelist(allow_guest=True)
-def parent_portal_request_password_reset(email=None):
-    return request_password_reset(email)
+def parent_portal_request_password_reset(email=None, portal=None):
+    return request_password_reset(email, portal=portal) if portal else request_password_reset(email)
 
 
 @frappe.whitelist(allow_guest=True)
-def parent_portal_validate_password_reset_token(token=None):
-    return validate_password_reset_token(token)
+def parent_portal_validate_password_reset_token(token=None, portal=None):
+    return validate_password_reset_token(token, portal=portal) if portal else validate_password_reset_token(token)
 
 
 @frappe.whitelist(allow_guest=True)
-def parent_portal_confirm_password_reset(token=None, new_password=None):
-    return confirm_password_reset(token, new_password)
+def parent_portal_confirm_password_reset(token=None, new_password=None, portal=None):
+    return confirm_password_reset(token, new_password, portal=portal) if portal else confirm_password_reset(token, new_password)
 
 
 @frappe.whitelist()

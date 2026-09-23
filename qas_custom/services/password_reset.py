@@ -12,11 +12,23 @@ PASSWORD_RESET_EXPIRY_MINUTES = 30
 PASSWORD_RESET_PATH = "/reset-password"
 DEFAULT_PARENT_PORTAL_ALLOWED_ROLES = ("Parent",)
 PORTAL_PARENT = "parent"
+PORTAL_PSUGO = "psugo"
 PORTAL_TEACHER = "teacher"
 PORTAL_CAMPUS_ADMIN = "campus_admin"
 
 
-def request_password_reset(email: str | None) -> dict:
+def _parent_reset_context(portal):
+    if portal in (None, "", PORTAL_PARENT):
+        return None
+    if portal == PORTAL_PSUGO:
+        return PORTAL_PSUGO
+    raise frappe.PermissionError("Unsupported parent password reset portal")
+
+
+def request_password_reset(email: str | None, portal: str | None = None) -> dict:
+    context = _parent_reset_context(portal)
+    if context:
+        return _request_password_reset(email, portal=PORTAL_PARENT, return_portal=context)
     return _request_password_reset(email, portal=PORTAL_PARENT)
 
 
@@ -28,7 +40,8 @@ def request_campus_admin_password_reset(email: str | None) -> dict:
     return _request_password_reset(email, portal=PORTAL_CAMPUS_ADMIN)
 
 
-def _request_password_reset(email: str | None, portal: str = PORTAL_PARENT) -> dict:
+def _request_password_reset(email: str | None, portal: str = PORTAL_PARENT,
+                            return_portal: str | None = None) -> dict:
     normalized_email = (email or "").strip().lower()
     generic_response = {
         "ok": True,
@@ -68,14 +81,15 @@ def _request_password_reset(email: str | None, portal: str = PORTAL_PARENT) -> d
     )
     doc.insert(ignore_permissions=True)
 
-    reset_link = _build_password_reset_link(reset_token, portal=portal)
+    reset_link = _build_password_reset_link(reset_token, portal=portal, return_portal=return_portal)
     _send_password_reset_email(normalized_email, reset_link, expires_at, doc.name, portal=portal)
 
     frappe.db.commit()
     return generic_response
 
 
-def validate_password_reset_token(token: str | None) -> dict:
+def validate_password_reset_token(token: str | None, portal: str | None = None) -> dict:
+    _parent_reset_context(portal)
     return _validate_password_reset_token(token, portal=PORTAL_PARENT)
 
 
@@ -151,7 +165,9 @@ def _validate_password_reset_token(token: str | None, portal: str = PORTAL_PAREN
     }
 
 
-def confirm_password_reset(token: str | None, new_password: str | None) -> dict:
+def confirm_password_reset(token: str | None, new_password: str | None,
+                           portal: str | None = None) -> dict:
+    _parent_reset_context(portal)
     return _confirm_password_reset(token, new_password, portal=PORTAL_PARENT)
 
 
@@ -207,9 +223,12 @@ def _confirm_password_reset(token: str | None, new_password: str | None, portal:
     }
 
 
-def _build_password_reset_link(reset_token: str, portal: str = PORTAL_PARENT) -> str:
+def _build_password_reset_link(reset_token: str, portal: str = PORTAL_PARENT,
+                               return_portal: str | None = None) -> str:
+    if return_portal and (portal != PORTAL_PARENT or _parent_reset_context(return_portal) != PORTAL_PSUGO):
+        raise frappe.PermissionError("Unsupported password reset return portal")
     portal_base_url = _get_portal_base_url(portal)
-    portal_query = f"&portal={portal}" if portal == PORTAL_CAMPUS_ADMIN else ""
+    portal_query = f"&portal={return_portal or portal}" if return_portal or portal == PORTAL_CAMPUS_ADMIN else ""
     if portal_base_url:
         return f"{portal_base_url.rstrip('/')}{PASSWORD_RESET_PATH}?token={reset_token}{portal_query}"
 
