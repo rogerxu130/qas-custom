@@ -88,11 +88,19 @@ def update_attendance_status(course_session, attendance_row, status, actor=None,
 	if expected_student and initial.student != expected_student:
 		frappe.throw(_("Attendance student changed; retry."))
 	frappe.db.sql("SELECT name FROM `tabStudent` WHERE name=%s FOR UPDATE", (initial.student,))
+	# Marking does not need capacity/term/classroom checks. Keep the locks it
+	# shares with reservation in the same Student→Session→Timeslot→Attendance order.
+	session = frappe.get_doc("Course Sessions", course_session, for_update=True)
+	slot = frappe.get_doc("Weekly Timeslot", session.weekly_timeslot, for_update=True)
+	if validate_access:
+		validate_access(course_session=course_session, attendance_row=attendance_row,
+			session=session, slot=slot, row=None)
 	row = _get_attendance_entry(course_session, attendance_row, for_update=True)
 	if row.student != initial.student:
 		frappe.throw(_("Attendance student changed; retry."))
 	if validate_access:
-		validate_access(course_session=course_session, attendance_row=attendance_row, row=row)
+		validate_access(course_session=course_session, attendance_row=attendance_row,
+			session=session, slot=slot, row=row)
 	previous_status = row.get("status")
 
 	if previous_status == status and (row.get("comments") or "") == comment:

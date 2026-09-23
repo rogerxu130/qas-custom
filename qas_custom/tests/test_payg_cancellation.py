@@ -203,6 +203,8 @@ class TestCancellation(TestCase):
             return old_value(dt, name, fields, **kwargs)
         self.db.get_value.side_effect = value
         def access(**kwargs):
+            if kwargs["row"] is None:
+                return
             teacher_portal._is_blocked_teacher_attendance_update(
                 "CS-1", "ATT-1", {"status": "Present", "comments": ""},
                 current=kwargs["row"],

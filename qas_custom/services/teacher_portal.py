@@ -215,10 +215,17 @@ def update_teacher_attendance_data(course_session=None, updates=None):
             frappe.throw(_("Invalid attendance row."))
         pending.append((identifiers.student, row_id, update))
 
+    # Reserve every Student lock before touching any attendance row. PAYG
+    # settlement can hold one Student while locking the session's active rows.
+    for student in sorted({item[0] for item in pending}):
+        frappe.db.sql("SELECT name FROM `tabStudent` WHERE name=%s FOR UPDATE", (student,))
+
     for student, row_id, update in sorted(pending, key=lambda item: (item[0], item[1])):
-        def validate_mark(*, course_session, attendance_row, row):
-            _get_owned_session(course_session, teacher.name)
-            _is_blocked_teacher_attendance_update(course_session, attendance_row, update, current=row)
+        def validate_mark(*, course_session, attendance_row, session, slot, row):
+            if _resolved_session_teacher(session, slot) != teacher.name:
+                frappe.throw(_("You do not have access to this course session."), frappe.PermissionError)
+            if row is not None:
+                _is_blocked_teacher_attendance_update(course_session, attendance_row, update, current=row)
         update_attendance_status(
             course_session=session["name"],
             attendance_row=row_id,

@@ -23,6 +23,8 @@ class TestAttendanceLockOrder(TestCase):
         self.row = Row(self.events, name="ATT-1", student="S-1", course_session="CS-1",
                        status="Leave", comments="", source_doctype="QAS PAYG Booking",
                        source_document="PB-1")
+        self.session = frappe._dict(name="CS-1", weekly_timeslot="W-1", teacher_override=None)
+        self.slot = frappe._dict(name="W-1", teacher="T-1")
         def get_value(_doctype, _name, _fields, **_kwargs):
             self.events.append("read-identifiers")
             return frappe._dict(student="S-1", course_session="CS-1")
@@ -30,9 +32,15 @@ class TestAttendanceLockOrder(TestCase):
             self.events.append("Student:" + params[0])
             self.assertIn("FOR UPDATE", query)
             return [(params[0],)]
-        def get_doc(_doctype, _name, **kwargs):
-            self.events.append("attendance-current")
+        def get_doc(doctype, _name, **kwargs):
             self.assertTrue(kwargs.get("for_update"))
+            if doctype == "Course Sessions":
+                self.events.append("Session:CS-1")
+                return self.session
+            if doctype == "Weekly Timeslot":
+                self.events.append("Timeslot:W-1")
+                return self.slot
+            self.events.append("attendance-current")
             return self.row
         self.fake = SimpleNamespace(
             db=SimpleNamespace(get_value=Mock(side_effect=get_value), sql=Mock(side_effect=sql)),
@@ -51,10 +59,14 @@ class TestAttendanceLockOrder(TestCase):
     def test_student_lock_precedes_current_attendance_read_and_save(self):
         def access(**kwargs):
             self.events.append("access")
-            self.assertIs(kwargs["row"], self.row)
+            self.assertIs(kwargs["session"], self.session)
+            self.assertIs(kwargs["slot"], self.slot)
+            if kwargs["row"] is not None:
+                self.assertIs(kwargs["row"], self.row)
         result = commands.update_attendance_status("CS-1", "ATT-1", "Present", validate_access=access)
         self.assertTrue(result["changed"])
-        self.assertEqual(self.events[:5], ["read-identifiers", "Student:S-1",
+        self.assertEqual(self.events[:8], ["read-identifiers", "Student:S-1",
+                                          "Session:CS-1", "Timeslot:W-1", "access",
                                           "attendance-current", "access", "save"])
 
     def test_rejects_student_and_session_changed_while_waiting(self):
@@ -79,6 +91,8 @@ class TestAttendanceLockOrder(TestCase):
                 self.row.status = blocked
                 def access(**kwargs):
                     self.events.append("teacher-access")
+                    if kwargs["row"] is None:
+                        return
                     teacher_portal._is_blocked_teacher_attendance_update(
                         "CS-1", "ATT-1", {"status": "Present", "comments": ""},
                         current=kwargs["row"],
@@ -90,6 +104,17 @@ class TestAttendanceLockOrder(TestCase):
         self.assertNotIn("save", self.events)
         self.assertLess(self.events.index("Student:S-1"), self.events.index("teacher-access"))
 
+    def test_locked_session_assignment_is_checked_before_attendance_lock(self):
+        self.session.teacher_override = "T-2"
+        def access(**kwargs):
+            if kwargs["row"] is None and teacher_portal._resolved_session_teacher(
+                    kwargs["session"], kwargs["slot"]) != "T-1":
+                raise PermissionError("Teacher reassigned")
+        with self.assertRaisesRegex(PermissionError, "reassigned"):
+            commands.update_attendance_status("CS-1", "ATT-1", "Present", validate_access=access)
+        self.assertNotIn("attendance-current", self.events)
+        self.assertNotIn("save", self.events)
+
 
 class TestTeacherBatchLockOrder(TestCase):
     def setUp(self):
@@ -99,12 +124,16 @@ class TestTeacherBatchLockOrder(TestCase):
             return frappe._dict(student=student, course_session=session)
         self.fake = SimpleNamespace(
             session=SimpleNamespace(user="teacher@example.com"),
-            db=SimpleNamespace(get_value=Mock(side_effect=get_value), commit=Mock()),
+            db=SimpleNamespace(get_value=Mock(side_effect=get_value), commit=Mock(),
+                               sql=Mock(side_effect=self.lock_student)),
             throw=lambda message, *_args: (_ for _ in ()).throw(ValueError(message)),
+            PermissionError=PermissionError,
         )
         self.calls = []
+        self.events = []
         def mark(**kwargs):
             self.calls.append((kwargs["expected_student"], kwargs["attendance_row"]))
+            self.events.append("Attendance:" + kwargs["attendance_row"])
         self.patches = [patch.object(teacher_portal, "frappe", self.fake),
                         patch.object(teacher_portal, "reject_support_view_write"),
                         patch.object(teacher_portal, "_require_teacher", return_value=SimpleNamespace(name="T-1")),
@@ -116,13 +145,21 @@ class TestTeacherBatchLockOrder(TestCase):
         for item in self.patches:
             item.start(); self.addCleanup(item.stop)
 
+    def lock_student(self, query, params):
+        self.assertIn("FOR UPDATE", query)
+        self.events.append("Student:" + params[0])
+        return [(params[0],)]
+
     def test_reverse_payloads_acquire_same_student_order(self):
         a = {"row_id": "ATT-A", "status": "Present"}
         b = {"row_id": "ATT-B", "status": "Present"}
         for updates in ([a, b], [b, a]):
             self.calls.clear()
+            self.events.clear()
             teacher_portal.update_teacher_attendance_data("CS-1", updates)
             self.assertEqual(self.calls, [("S-1", "ATT-B"), ("S-2", "ATT-A")])
+            self.assertEqual(self.events, ["Student:S-1", "Student:S-2",
+                                           "Attendance:ATT-B", "Attendance:ATT-A"])
 
     def test_duplicate_row_rejected_before_any_write(self):
         updates = [{"row_id": "ATT-A", "status": "Present"},
@@ -135,10 +172,26 @@ class TestTeacherBatchLockOrder(TestCase):
         def invoke_guard(**kwargs):
             kwargs["validate_access"](
                 course_session="CS-1", attendance_row="ATT-A",
+                session=frappe._dict(name="CS-1", teacher_override=None),
+                slot=frappe._dict(teacher="T-1"),
                 row=frappe._dict(status="Leave", comments=""),
             )
         teacher_portal.update_attendance_status.side_effect = invoke_guard
         with self.assertRaisesRegex(ValueError, "Teachers cannot change"):
+            teacher_portal.update_teacher_attendance_data(
+                "CS-1", [{"row_id": "ATT-A", "status": "Present"}],
+            )
+        self.fake.db.commit.assert_not_called()
+
+    def test_teacher_endpoint_rejects_current_reassignment_after_preview(self):
+        def invoke_guard(**kwargs):
+            kwargs["validate_access"](
+                course_session="CS-1", attendance_row="ATT-A",
+                session=frappe._dict(name="CS-1", teacher_override="T-2"),
+                slot=frappe._dict(teacher="T-1"), row=None,
+            )
+        teacher_portal.update_attendance_status.side_effect = invoke_guard
+        with self.assertRaisesRegex(ValueError, "do not have access"):
             teacher_portal.update_teacher_attendance_data(
                 "CS-1", [{"row_id": "ATT-A", "status": "Present"}],
             )
