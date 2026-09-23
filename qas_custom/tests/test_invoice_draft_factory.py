@@ -1,9 +1,10 @@
 from types import SimpleNamespace
 from unittest import TestCase
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 import frappe
 
+from qas_custom.modules.billing.commands import get_or_create_course_invoice
 from qas_custom.modules.billing.drafts import new_invoice_draft
 
 
@@ -85,3 +86,78 @@ class TestInvoiceDraftFactory(TestCase):
 		invoice.insert.assert_not_called()
 		invoice.submit.assert_not_called()
 		commit.assert_not_called()
+
+
+class TestCourseInvoiceDraftAdoption(TestCase):
+	def test_new_course_invoice_uses_shared_factory_without_saving(self):
+		invoice = _Invoice({"parent", "qas_invoice_type"})
+		frappe_stub = SimpleNamespace(
+			get_all=Mock(return_value=[]), new_doc=Mock(return_value=invoice), db=SimpleNamespace(commit=Mock())
+		)
+		with patch("qas_custom.modules.billing.commands.frappe", frappe_stub), patch(
+			"qas_custom.modules.billing.commands.has_field", return_value=True
+		), patch(
+			"qas_custom.modules.billing.commands.disable_sales_invoice_auto_notifications"
+		) as guard, patch(
+			"qas_custom.modules.billing.commands.new_invoice_draft", return_value=invoice,
+		) as factory, patch(
+			"qas_custom.modules.billing.commands.apply_invoice_payment_snapshot"
+		) as snapshot:
+			sequence = Mock()
+			sequence.attach_mock(guard, "guard")
+			sequence.attach_mock(factory, "factory")
+			sequence.attach_mock(snapshot, "snapshot")
+			result = get_or_create_course_invoice("CUSTOMER", "PARENT")
+
+		self.assertIs(result, invoice)
+		self.assertEqual(sequence.mock_calls, [
+			call.guard(),
+			call.factory(customer="CUSTOMER", parent="PARENT", invoice_type="Course"),
+			call.snapshot(invoice),
+		])
+		guard.assert_called_once_with()
+		factory.assert_called_once_with(customer="CUSTOMER", parent="PARENT", invoice_type="Course")
+		snapshot.assert_called_once_with(invoice)
+		frappe_stub.new_doc.assert_not_called()
+		invoice.save.assert_not_called()
+		invoice.insert.assert_not_called()
+		invoice.submit.assert_not_called()
+		frappe_stub.db.commit.assert_not_called()
+
+	def test_existing_course_draft_keeps_lookup_and_contents_without_factory_side_effects(self):
+		invoice = _Invoice({"parent", "qas_invoice_type"})
+		invoice.due_date = "2026-10-01"
+		invoice.discount_amount = 25
+		invoice["items"] = [{"item_code": "COURSE"}]
+		frappe_stub = SimpleNamespace(
+			get_all=Mock(return_value=[SimpleNamespace(name="SINV-001")]),
+			get_doc=Mock(return_value=invoice), db=SimpleNamespace(commit=Mock()),
+		)
+		with patch("qas_custom.modules.billing.commands.frappe", frappe_stub), patch(
+			"qas_custom.modules.billing.commands.has_field", return_value=True
+		), patch(
+			"qas_custom.modules.billing.commands.disable_sales_invoice_auto_notifications"
+		) as guard, patch(
+			"qas_custom.modules.billing.commands.new_invoice_draft"
+		) as factory, patch(
+			"qas_custom.modules.billing.commands.apply_invoice_payment_snapshot"
+		) as snapshot:
+			result = get_or_create_course_invoice("CUSTOMER", "PARENT")
+
+		self.assertIs(result, invoice)
+		frappe_stub.get_all.assert_called_once_with(
+			"Sales Invoice",
+			filters={"customer": "CUSTOMER", "docstatus": 0, "parent": "PARENT", "qas_invoice_type": "Course", "status": ["!=", "Cancelled"]},
+			fields=["name"], order_by="modified desc", limit=1,
+		)
+		frappe_stub.get_doc.assert_called_once_with("Sales Invoice", "SINV-001")
+		factory.assert_not_called()
+		guard.assert_not_called()
+		snapshot.assert_not_called()
+		self.assertEqual(invoice.due_date, "2026-10-01")
+		self.assertEqual(invoice.discount_amount, 25)
+		self.assertEqual(invoice["items"], [{"item_code": "COURSE"}])
+		invoice.save.assert_not_called()
+		invoice.insert.assert_not_called()
+		invoice.submit.assert_not_called()
+		frappe_stub.db.commit.assert_not_called()

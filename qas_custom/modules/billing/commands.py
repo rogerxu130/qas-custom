@@ -4,9 +4,10 @@ import frappe
 from frappe import _
 from frappe.utils import flt
 
-from qas_custom.modules.common import has_field, is_new_doc, set_if_field
+from qas_custom.modules.billing.drafts import new_invoice_draft
 from qas_custom.modules.billing.presentation import build_course_invoice_description, invoice_item_schedule
-from qas_custom.modules.billing.invoice_settings import apply_default_invoice_dates, apply_invoice_payment_snapshot, apply_course_invoice_dates
+from qas_custom.modules.billing.invoice_settings import apply_invoice_payment_snapshot, apply_course_invoice_dates
+from qas_custom.modules.common import has_field, is_new_doc, set_if_field
 from qas_custom.modules.notifications.guard import disable_sales_invoice_auto_notifications
 from qas_custom.services.display_labels import (
 	get_course_session_snapshot_label,
@@ -138,11 +139,7 @@ def get_or_create_course_invoice(customer: str, parent: str | None = None):
 		return frappe.get_doc("Sales Invoice", rows[0].name)
 
 	disable_sales_invoice_auto_notifications()
-	invoice = frappe.new_doc("Sales Invoice")
-	invoice.customer = customer
-	apply_default_invoice_dates(invoice)
-	set_if_field(invoice, "parent", parent)
-	set_if_field(invoice, "qas_invoice_type", "Course")
+	invoice = new_invoice_draft(customer=customer, parent=parent, invoice_type="Course")
 	apply_invoice_payment_snapshot(invoice)
 	return invoice
 
