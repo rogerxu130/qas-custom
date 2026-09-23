@@ -103,6 +103,12 @@ class TestCardAdmin(TestCase):
                                      reason="Different", request_key="extend-1")
         self.assertLess(self.events.index("Student:S"), self.events.index("Parent:P"))
 
+    def test_absent_operation_key_lookup_does_not_gap_lock(self):
+        self.assertIsNone(card_admin._operation_by_key("Exchange", "missing"))
+        query = self.fake.db.sql.call_args.args[0]
+        self.assertIn("tabQAS PAYG Operation", query)
+        self.assertNotIn("FOR UPDATE", query)
+
     def test_shrinking_expiry_lists_non_cancelled_booking_and_rechecks_under_lock(self):
         self.add("QAS PAYG Booking", "B-1", card="CARD", student="S", status="Reserved",
                  course_session="CS")
@@ -157,6 +163,99 @@ class TestCardAdmin(TestCase):
             card_admin.exchange_card("CARD", "PROD-OLD", "exchange-1")
         with self.assertRaisesRegex(ValueError, "request key"):
             card_admin.exchange_card("CARD", "PROD-NEW", "exchange-1", at="2026-09-24")
+
+    def test_explicit_exchange_date_uses_current_read_and_rejects_missing_target(self):
+        op = card_admin.exchange_card("CARD", "PROD-NEW", "date-1", at="2026-09-23")
+        original = self.fake.db.get_value.side_effect
+        def stale_value(doctype, name, field, **kwargs):
+            if doctype == "QAS PAYG Card" and name == op.target_card and field == "issued_on":
+                return original(doctype, name, field) if kwargs.get("for_update") else None
+            return original(doctype, name, field, **kwargs)
+        self.fake.db.get_value.side_effect = stale_value
+        self.assertIs(card_admin.exchange_card("CARD", "PROD-NEW", "date-1", at="2026-09-23"), op)
+        self.assertTrue(any(call.args[:3] == ("QAS PAYG Card", op.target_card, "issued_on")
+                            and call.kwargs.get("for_update")
+                            for call in self.fake.db.get_value.call_args_list))
+        del self.docs[("QAS PAYG Card", op.target_card)]
+        with self.assertRaisesRegex(ValueError, "target card"):
+            card_admin.exchange_card("CARD", "PROD-NEW", "date-1", at="2026-09-23")
+
+    def test_only_operation_insert_collision_reads_winner(self):
+        original = self.fake.get_doc.side_effect
+        class CollidingOperation(Document):
+            def insert(inner, **_kwargs):
+                self.add("QAS PAYG Operation", "WIN", operation_type="Exchange",
+                         request_key="collision", source_card="CARD", product="PROD-NEW",
+                         target_card="TARGET", status="Completed")
+                raise frappe.DuplicateEntryError("operation key collision")
+        def collide(doctype, name=None, **kwargs):
+            if isinstance(doctype, dict) and doctype.get("doctype") == "QAS PAYG Operation":
+                return CollidingOperation({"docs": self.docs}, **doctype)
+            return original(doctype, name, **kwargs)
+        self.fake.get_doc.side_effect = collide
+        winner = card_admin.exchange_card("CARD", "PROD-NEW", "collision")
+        self.assertEqual(winner.name, "WIN")
+        lookups = [call.args[0] for call in self.fake.db.sql.call_args_list
+                   if "tabQAS PAYG Operation" in call.args[0]]
+        self.assertEqual(len(lookups), 2)
+        self.assertNotIn("FOR UPDATE", lookups[0])
+        self.assertIn("FOR UPDATE", lookups[1])
+        self.assertEqual(self.fake.db.rollback.call_count, 1)
+        self.assertEqual(self.entries(), [])
+
+    def test_expiry_operation_collision_reuses_only_matching_winner(self):
+        original = self.fake.get_doc.side_effect
+        class CollidingOperation(Document):
+            def insert(inner, **_kwargs):
+                self.add("QAS PAYG Operation", "WIN-EXPIRY", operation_type="ExpiryChange",
+                         request_key="expiry-collision", card="CARD",
+                         new_expiry=date(2027, 4, 1), reason="Extension", status="Completed")
+                raise frappe.UniqueValidationError("operation key collision")
+        def collide(doctype, name=None, **kwargs):
+            if isinstance(doctype, dict) and doctype.get("doctype") == "QAS PAYG Operation":
+                return CollidingOperation({"docs": self.docs}, **doctype)
+            return original(doctype, name, **kwargs)
+        self.fake.get_doc.side_effect = collide
+        winner = card_admin.change_expiry("CARD", date(2027, 4, 1),
+                                          reason="Extension", request_key="expiry-collision")
+        self.assertEqual(winner.name, "WIN-EXPIRY")
+        self.assertEqual(self.card.expires_on, date(2027, 3, 1))
+        lookups = [call.args[0] for call in self.fake.db.sql.call_args_list
+                   if "tabQAS PAYG Operation" in call.args[0]]
+        self.assertEqual(len(lookups), 2)
+        self.assertNotIn("FOR UPDATE", lookups[0])
+        self.assertIn("FOR UPDATE", lookups[1])
+
+    def test_entry_unique_failure_is_not_treated_as_operation_collision(self):
+        original = self.fake.get_doc.side_effect
+        def collide_entry(doctype, name=None, **kwargs):
+            if isinstance(doctype, dict) and doctype.get("kind") == "Transfer In":
+                raise frappe.DuplicateEntryError("entry key collision")
+            return original(doctype, name, **kwargs)
+        self.fake.get_doc.side_effect = collide_entry
+        with self.assertRaises(frappe.DuplicateEntryError):
+            card_admin.exchange_card("CARD", "PROD-NEW", "entry-failure")
+        lookups = [call.args[0] for call in self.fake.db.sql.call_args_list
+                   if "tabQAS PAYG Operation" in call.args[0]]
+        self.assertEqual(len(lookups), 1)
+        self.assertEqual(self.fake.db.rollback.call_count, 1)
+
+    def test_exchange_quantizes_nine_decimal_currency_before_persistence(self):
+        self.docs[("QAS PAYG Product", "PROD-NEW")].standard_card_price = Decimal("1.000000001")
+        self.card.unit_price_snapshot = Decimal("0.099999999")
+        positive = card_admin.exchange_card("CARD", "PROD-NEW", "fraction-positive")
+        self.assertEqual((positive.old_price, positive.new_price, positive.price_delta),
+                         (Decimal("0.099999999"), Decimal("0.100000000"), Decimal("0.000000007")))
+        self.assertEqual(self.docs[("QAS PAYG Card", positive.target_card)].unit_price_snapshot,
+                         positive.new_price)
+        self.add("QAS PAYG Card", "CARD2", family_parent="P", customer="C",
+                 product="PROD-OLD", course="OLD", status="Active",
+                 issued_on=date(2026, 9, 1), expires_on=date(2027, 3, 1),
+                 unit_price_snapshot=Decimal("0.100000001"), available_count=1,
+                 reserved_count=0, consumed_count=9)
+        negative = card_admin.exchange_card("CARD2", "PROD-NEW", "fraction-negative")
+        self.assertEqual((negative.new_price, negative.price_delta),
+                         (Decimal("0.100000000"), Decimal("-0.000000001")))
 
     def test_exchange_negative_zero_and_late_return_reexchange(self):
         self.docs[("QAS PAYG Product", "PROD-NEW")].standard_card_price = Decimal("300")

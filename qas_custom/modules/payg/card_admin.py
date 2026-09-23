@@ -10,6 +10,7 @@ from uuid import uuid4
 import frappe
 from frappe.utils import getdate, get_time, get_datetime_in_timezone
 
+from qas_custom.modules.payg.money import stored_currency
 from qas_custom.modules.payg.rules import add_six_months, as_brisbane_datetime
 from qas_custom.services.support_view import get_support_view_token
 
@@ -18,6 +19,11 @@ CARD = "QAS PAYG Card"
 BOOKING = "QAS PAYG Booking"
 OPERATION = "QAS PAYG Operation"
 ENTRY = "QAS PAYG Entry"
+
+
+class _OperationInsertCollision(Exception):
+    def __init__(self, original):
+        self.original = original
 
 
 def _now():
@@ -31,9 +37,9 @@ def _admin():
         frappe.throw("School Admin access is required", frappe.PermissionError)
 
 
-def _operation_by_key(kind, request_key):
+def _operation_by_key(kind, request_key, *, current=False):
     rows = frappe.db.sql("""SELECT name FROM `tabQAS PAYG Operation`
-        WHERE operation_type=%s AND request_key=%s FOR UPDATE""",
+        WHERE operation_type=%s AND request_key=%s""" + (" FOR UPDATE" if current else ""),
         (kind, request_key), as_dict=True)
     return frappe.get_doc(OPERATION, rows[0].name, for_update=True) if rows else None
 
@@ -114,10 +120,12 @@ def change_expiry(card_id, new_expiry, *, reason, request_key):
     frappe.db.savepoint(savepoint)
     try:
         return _change_expiry(card_id, expiry, reason, request_key)
-    except (frappe.DuplicateEntryError, frappe.UniqueValidationError):
+    except _OperationInsertCollision as collision:
         frappe.db.rollback(save_point=savepoint)
-        # The unique key may have been won by an identical concurrent request.
-        return _change_expiry(card_id, expiry, reason, request_key)
+        winner = _operation_by_key("ExpiryChange", request_key, current=True)
+        if not winner:
+            raise collision.original
+        return _same_expiry(winner, card_id, expiry, reason)
     except Exception:
         frappe.db.rollback(save_point=savepoint)
         raise
@@ -141,7 +149,10 @@ def _change_expiry(card_id, expiry, reason, request_key):
                                 "old_expiry": old, "new_expiry": expiry, "reason": reason,
                                 "quantity": 0, "actor": frappe.session.user,
                                 "created_at": _now(), "status": "Pending"})
-    operation.insert(ignore_permissions=True)
+    try:
+        operation.insert(ignore_permissions=True)
+    except (frappe.DuplicateEntryError, frappe.UniqueValidationError) as error:
+        raise _OperationInsertCollision(error) from error
     card.expires_on = expiry
     card.save(ignore_permissions=True)
     operation.status = "Completed"
@@ -153,7 +164,11 @@ def _same_exchange(operation, card_id, target_product_id, requested_issue_date=N
     if (operation.source_card, operation.product) != (card_id, target_product_id):
         frappe.throw("Exchange request key belongs to another change")
     if requested_issue_date is not None:
-        issued = frappe.db.get_value(CARD, operation.target_card, "issued_on")
+        if not operation.target_card:
+            frappe.throw("Exchange target card is missing")
+        issued = frappe.db.get_value(CARD, operation.target_card, "issued_on", for_update=True)
+        if issued is None:
+            frappe.throw("Exchange target card is missing")
         if getdate(issued) != requested_issue_date:
             frappe.throw("Exchange request key belongs to another issue date")
     return operation
@@ -171,10 +186,12 @@ def exchange_card(card_id, target_product_id, request_key, *, at=None):
     try:
         return _exchange_card(card_id, target_product_id, request_key, issued_on, now,
                               explicit_date=at is not None)
-    except (frappe.DuplicateEntryError, frappe.UniqueValidationError):
+    except _OperationInsertCollision as collision:
         frappe.db.rollback(save_point=savepoint)
-        return _exchange_card(card_id, target_product_id, request_key, issued_on, now,
-                              explicit_date=at is not None)
+        winner = _operation_by_key("Exchange", request_key, current=True)
+        if not winner:
+            raise collision.original
+        return _same_exchange(winner, card_id, target_product_id, issued_on if at is not None else None)
     except Exception:
         frappe.db.rollback(save_point=savepoint)
         raise
@@ -200,9 +217,9 @@ def _exchange_card(card_id, target_product_id, request_key, issued_on, now, *, e
     course = frappe.get_doc("Course", product.course)
     if course.get("status") not in (None, "Active"):
         frappe.throw("Exchange target course is inactive")
-    old_price = Decimal(str(source.unit_price_snapshot))
-    new_price = Decimal(str(product.standard_card_price)) / Decimal(10)
-    delta = (new_price - old_price) * quantity
+    old_price = stored_currency(source.unit_price_snapshot)
+    new_price = stored_currency(Decimal(str(product.standard_card_price)) / Decimal(10))
+    delta = stored_currency((new_price - old_price) * quantity)
     operation = frappe.get_doc({"doctype": OPERATION, "operation_type": "Exchange",
                                 "request_key": request_key, "source_card": source.name,
                                 "family_parent": source.family_parent, "customer": source.customer,
@@ -211,7 +228,10 @@ def _exchange_card(card_id, target_product_id, request_key, issued_on, now, *, e
                                 "new_price": new_price, "quantity": quantity,
                                 "price_delta": delta, "actor": frappe.session.user,
                                 "created_at": now, "status": "Pending"})
-    operation.insert(ignore_permissions=True)
+    try:
+        operation.insert(ignore_permissions=True)
+    except (frappe.DuplicateEntryError, frappe.UniqueValidationError) as error:
+        raise _OperationInsertCollision(error) from error
     target = frappe.get_doc({"doctype": CARD, "family_parent": source.family_parent,
                              "customer": source.customer, "product": product.name,
                              "course": product.course, "issued_on": issued_on,

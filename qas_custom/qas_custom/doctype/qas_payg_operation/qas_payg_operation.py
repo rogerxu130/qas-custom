@@ -1,13 +1,13 @@
 import frappe
-from decimal import Decimal
 from frappe.model.document import Document
+from qas_custom.modules.payg.money import stored_currency
 from qas_custom.modules.payg.rules import as_brisbane_datetime
 from qas_custom.qas_custom.doctype.payg_validation import nonnegative, integer
 
 
 def _audit_value(field, value):
     if field in ("old_price", "new_price", "price_delta"):
-        return None if value is None or value == "" else Decimal(str(value))
+        return None if value is None or value == "" else stored_currency(value)
     if field == "created_at":
         return None if value is None or value == "" else as_brisbane_datetime(value).replace(tzinfo=None)
     return str(value or "")

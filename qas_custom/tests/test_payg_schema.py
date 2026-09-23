@@ -403,6 +403,24 @@ class TestPaygControllers(TestCase):
             controller._validate_existing(op)
         self.assertIn("created_at", self.frappe.throw.call_args.args[0])
 
+    def test_operation_currency_audit_uses_persisted_nine_decimal_precision(self):
+        controller = self.controller("operation")
+        before = self.doc(old_price=0.1, new_price=0.100000001, price_delta=-0.000000001,
+                          status="Pending")
+        op = controller()
+        op.__dict__.update(before.__dict__)
+        op.old_price = Decimal("0.100000000")
+        op.new_price = Decimal("0.1000000009")  # Persists as 0.100000001.
+        op.price_delta = Decimal("-0.000000001")
+        op.get = lambda field: getattr(op, field, None)
+        op.is_new = lambda: False
+        op.get_doc_before_save = lambda: before
+        controller._validate_existing(op)
+        op.new_price = Decimal("0.1000000015")  # Persists as 0.100000002.
+        with self.assertRaises(ValueError):
+            controller._validate_existing(op)
+        self.assertIn("new_price", self.frappe.throw.call_args.args[0])
+
     def test_card_identity_and_transferred_status_are_final(self):
         controller = self.controller("card")
         before = self.doc(family_parent="P-1", customer="CUS-1", product="PROD-1",
