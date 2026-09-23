@@ -107,7 +107,7 @@ def _match_schedule(payload):
 def _context(doc, course_session, allow_unresolved=False):
     """Lock student then all remaining sessions, matching the attendance booking lock order."""
     from qas_custom.modules.course_schedule.queries import get_remaining_sessions
-    from qas_custom.services.concentrated_makeup import active_rows, classroom_capacity, session_is_future, student_has_conflict
+    from qas_custom.modules.course_schedule.session_resources import active_rows, classroom_capacity, session_is_future, student_has_conflict
     if (not doc.get("student") and not allow_unresolved) or not doc.get("parent"):
         raise ReviewRequired("Select a parent and student before completing enrollment.")
     if doc.get("student"):

@@ -123,20 +123,20 @@ class TestCapacity(DatabaseTestCase):
                    patch.object(subject.frappe.db, 'sql'), patch.object(subject.frappe, 'get_doc', side_effect=lambda doctype, name, **kw: objects[name]),
                    patch.object(subject.frappe, 'get_all', return_value=['ENROLLED']),
                    patch('qas_custom.modules.course_schedule.queries.get_remaining_sessions', return_value=[self.first, self.second]),
-                   patch('qas_custom.services.concentrated_makeup.classroom_capacity', return_value=3),
-                   patch('qas_custom.services.concentrated_makeup.session_is_future', return_value=True),
-                   patch('qas_custom.services.concentrated_makeup.student_has_conflict', return_value=False)]
+                   patch('qas_custom.modules.course_schedule.session_resources.classroom_capacity', return_value=3),
+                   patch('qas_custom.modules.course_schedule.session_resources.session_is_future', return_value=True),
+                   patch('qas_custom.modules.course_schedule.session_resources.student_has_conflict', return_value=False)]
         for item in patches:
             item.start()
             self.addCleanup(item.stop)
 
     def test_later_full_session_blocks_whole_enrollment(self):
-        with patch('qas_custom.services.concentrated_makeup.active_rows', side_effect=lambda name, **kw: [] if name == 'S1' else [Doc(student='A'), Doc(student='B')]):
+        with patch('qas_custom.modules.course_schedule.session_resources.active_rows', side_effect=lambda name, **kw: [] if name == 'S1' else [Doc(student='A'), Doc(student='B')]):
             with self.assertRaisesRegex(subject.ReviewRequired, '2026-09-26'):
                 subject._context(self.doc, 'S1')
 
     def test_duplicate_attendance_counts_child_once(self):
-        with patch('qas_custom.services.concentrated_makeup.active_rows', return_value=[Doc(student='ENROLLED'), Doc(student='ENROLLED')]):
+        with patch('qas_custom.modules.course_schedule.session_resources.active_rows', return_value=[Doc(student='ENROLLED'), Doc(student='ENROLLED')]):
             self.assertEqual(len(subject._context(self.doc, 'S1')[2]), 2)
 
     def test_closed_term_blocks(self):
@@ -150,17 +150,17 @@ class TestCapacity(DatabaseTestCase):
                 subject._context(self.doc, 'S1')
 
     def test_missing_capacity_requires_review(self):
-        with patch('qas_custom.services.concentrated_makeup.classroom_capacity', return_value=0):
+        with patch('qas_custom.modules.course_schedule.session_resources.classroom_capacity', return_value=0):
             with self.assertRaisesRegex(subject.ReviewRequired, 'capacity must be configured'):
                 subject._context(self.doc, 'S1')
 
     def test_started_session_requires_review(self):
-        with patch('qas_custom.services.concentrated_makeup.session_is_future', return_value=False):
+        with patch('qas_custom.modules.course_schedule.session_resources.session_is_future', return_value=False):
             with self.assertRaisesRegex(subject.ReviewRequired, 'must not have started'):
                 subject._context(self.doc, 'S1')
 
     def test_existing_attendance_conflict_requires_review(self):
-        with patch('qas_custom.services.concentrated_makeup.active_rows', return_value=[]), patch('qas_custom.services.concentrated_makeup.student_has_conflict', return_value=True):
+        with patch('qas_custom.modules.course_schedule.session_resources.active_rows', return_value=[]), patch('qas_custom.modules.course_schedule.session_resources.student_has_conflict', return_value=True):
             with self.assertRaisesRegex(subject.ReviewRequired, 'already has a class'):
                 subject._context(self.doc, 'S1')
 
