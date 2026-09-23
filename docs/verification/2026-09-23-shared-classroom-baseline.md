@@ -48,7 +48,7 @@ The Node command passed **12/12 tests** (`# pass 12`, `# fail 0`). This detached
 )
 ```
 
-The build passed (`2184 modules transformed`, `built in 1.34s`). Vite warned that some generated chunks exceed 500 kB after minification. The temporary symlink was removed after verification. No package manifest or lockfile was changed. A future build in this detached checkout must recreate that link or otherwise supply dependencies; the checkout has no local installation.
+The build passed (`2184 modules transformed`, `built in 1.34s`). Vite warned that some generated chunks exceed 500 kB after minification. The temporary symlink was removed after verification. No package manifest or lockfile was changed. A future build in this detached checkout must recreate that link or otherwise supply dependencies; the checkout has no local installation. The absolute paths above are a machine-specific historical snapshot and must be adapted on another machine.
 
 ## Caller inventory
 
