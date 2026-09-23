@@ -53,14 +53,7 @@ def export_school_admin_timetable_data(term=None):
 	teachers = frappe.get_all("Teacher", fields=["name", "teacher_name", "status"], limit_page_length=0)
 	rooms = frappe.get_all("Classroom", fields=["name", "classroom_name", "campus"], limit_page_length=0)
 	campuses = frappe.get_all("Campus", fields=["name", "campus_name"], limit_page_length=0)
-	enrollment_counts = frappe.get_all(
-		"Enrollment",
-		filters={"term": term, "weekly_timeslot": ["in", [row["name"] for row in sessions]],
-			"status": ["in", ["Planned", "Active"]]},
-		fields=["weekly_timeslot", "count(distinct student) as student_count"],
-		group_by="weekly_timeslot", limit_page_length=0,
-	)
-	student_counts = {row["weekly_timeslot"]: cint(row["student_count"]) for row in enrollment_counts}
+	student_counts = _class_student_counts(term, [row["name"] for row in sessions])
 	try:
 		content = build_timetable_zip(sessions, courses, teachers, rooms, campuses, trial_field, student_counts)
 	except ValueError as error:
@@ -72,6 +65,42 @@ def export_school_admin_timetable_data(term=None):
 	frappe.local.response.content_type = "application/zip"
 	frappe.local.response.display_content_as = "attachment"
 	frappe.local.response.type = "download"
+
+
+def _class_student_counts(term, weekly_timeslots):
+	"""Union enrollment and current trial links, never infer identity from names.
+
+	The legacy CSV column name stays unchanged for planner compatibility.
+	This is distinct students linked to a class, not peak session attendance.
+	"""
+	students = {name: set() for name in weekly_timeslots}
+	enrollments = frappe.get_all(
+		"Enrollment",
+		filters={"term": term, "weekly_timeslot": ["in", weekly_timeslots],
+			"status": ["in", ["Planned", "Active"]]},
+		fields=["weekly_timeslot", "student"], limit_page_length=0,
+	)
+	for row in enrollments:
+		if row.get("student"):
+			students[row["weekly_timeslot"]].add(row["student"])
+	classes = frappe.get_all(
+		"Course Sessions", filters={"weekly_timeslot": ["in", weekly_timeslots],
+			"status": ["!=", "Cancelled"]},
+		fields=["name", "weekly_timeslot"], limit_page_length=0,
+	)
+	class_map = {row["name"]: row["weekly_timeslot"] for row in classes}
+	if class_map:
+		trials = frappe.get_all(
+			"Inquiry", filters={"inquiry_type": "Trial Lesson",
+				"course_session": ["in", list(class_map)],
+				"status": ["not in", ["Cancelled", "Inactive"]]},
+			fields=["name", "course_session", "student"], limit_page_length=0,
+		)
+		for row in trials:
+			if not row.get("student"):
+				frappe.throw(_("Trial inquiry {0} has no linked student. Link the student before exporting.").format(row["name"]))
+			students[class_map[row["course_session"]]].add(row["student"])
+	return {name: len(ids) for name, ids in students.items()}
 
 
 def build_timetable_zip(sessions, courses, teachers, rooms, campuses, trial_field=None, student_counts=None):

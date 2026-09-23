@@ -175,7 +175,9 @@ class TestTimetableExport(TestCase):
 		fake.db.get_value.return_value = "2026 Term 4"
 		records = {"Weekly Timeslot": [self.session], "Course": [self.course], "Teacher": [self.teacher],
 			"Classroom": [self.room], "Campus": [self.campus],
-			"Enrollment": [{"weekly_timeslot": self.session["name"], "student_count": 5}]}
+			"Enrollment": [{"weekly_timeslot": self.session["name"], "student": f"S-{i}"} for i in range(5)],
+			"Course Sessions": [{"name": "CS-1", "weekly_timeslot": self.session["name"]}],
+			"Inquiry": [{"name": "I-1", "course_session": "CS-1", "student": "TRIAL-ONLY"}]}
 		fake.get_all.side_effect = lambda doctype, **kwargs: records[doctype]
 		with patch.object(export, "frappe", fake), patch.object(export, "_", lambda s: s), \
 			patch("qas_custom.modules.billing.commands.get_trial_class_fee_field", return_value="trial_fee"):
@@ -189,9 +191,48 @@ class TestTimetableExport(TestCase):
 			"term": "TERM-4", "weekly_timeslot": ["in", [self.session["name"]]],
 			"status": ["in", ["Planned", "Active"]],
 		})
-		self.assertEqual(enrollment_query.kwargs["fields"], ["weekly_timeslot", "count(distinct student) as student_count"])
-		self.assertEqual(enrollment_query.kwargs["group_by"], "weekly_timeslot")
-		self.assertEqual(self.rows(fake.local.response.filecontent, "qas_session_table.csv")[0]["planned_active_student_count"], "5")
+		self.assertEqual(enrollment_query.kwargs["fields"], ["weekly_timeslot", "student"])
+		trial_query = next(call for call in calls if call.args[0] == "Inquiry")
+		self.assertEqual(trial_query.kwargs["filters"], {
+			"inquiry_type": "Trial Lesson", "course_session": ["in", ["CS-1"]],
+			"status": ["not in", ["Cancelled", "Inactive"]],
+		})
+		class_query = next(call for call in calls if call.args[0] == "Course Sessions")
+		self.assertEqual(class_query.kwargs["filters"], {
+			"weekly_timeslot": ["in", [self.session["name"]]], "status": ["!=", "Cancelled"],
+		})
+		self.assertEqual(self.rows(fake.local.response.filecontent, "qas_session_table.csv")[0]["planned_active_student_count"], "6")
 		self.assertEqual(fake.local.response.filename, "2026_Term_4_timetable.zip")
 		self.assertEqual(fake.local.response.content_type, "application/zip")
 		self.assertEqual(len(self.rows(fake.local.response.filecontent, "qas_session_table.csv")), 1)
+
+	def test_trials_and_enrollments_deduplicate_per_class_not_globally(self):
+		fake = self.fake_frappe()
+		fake.get_all.side_effect = [
+			[{"weekly_timeslot": "W1", "student": "S1"}] * 2,
+			[{"name": "C1", "weekly_timeslot": "W1"},
+			 {"name": "C2", "weekly_timeslot": "W1"},
+			 {"name": "C3", "weekly_timeslot": "W2"}],
+			[{"name": "I1", "course_session": "C1", "student": "S1"},
+			 {"name": "I2", "course_session": "C1", "student": "S2"},
+			 {"name": "I3", "course_session": "C2", "student": "S2"},
+			 {"name": "I4", "course_session": "C3", "student": "S1"}],
+		]
+		with patch.object(export, "frappe", fake):
+			self.assertEqual(export._class_student_counts("TERM", ["W1", "W2", "W3"]),
+				{"W1": 2, "W2": 1, "W3": 0})
+
+	def test_no_sessions_does_not_query_unlinked_trials(self):
+		fake = self.fake_frappe()
+		fake.get_all.side_effect = [[], []]
+		with patch.object(export, "frappe", fake):
+			self.assertEqual(export._class_student_counts("TERM", ["W1"]), {"W1": 0})
+		self.assertEqual(fake.get_all.call_count, 2)
+
+	def test_trial_without_student_fails_instead_of_silently_exporting_zero(self):
+		fake = self.fake_frappe()
+		fake.get_all.side_effect = [[], [{"name": "C1", "weekly_timeslot": "W1"}],
+			[{"name": "I-MISSING", "course_session": "C1", "student": None}]]
+		with patch.object(export, "frappe", fake), patch.object(export, "_", lambda s: s):
+			with self.assertRaisesRegex(ValueError, "I-MISSING.*no linked student"):
+				export._class_student_counts("TERM", ["W1"])
