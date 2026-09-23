@@ -28,8 +28,12 @@ class TestParentMakeupSessionRoster(TestCase):
 
     def test_parent_list_hides_empty_sessions_and_admin_list_keeps_them(self):
         sessions = [dict(name=name, weekly_timeslot="W", status="Scheduled") for name in ("occupied", "empty")]
+
+        def get_all(doctype, **_kwargs):
+            return {"Course Sessions": sessions, "Term": ["T"], "Weekly Timeslot": ["W"]}[doctype]
+
         with ExitStack() as stack:
-            stack.enter_context(patch.object(commands.frappe, "get_all", return_value=sessions))
+            stack.enter_context(patch.object(commands.frappe, "get_all", side_effect=get_all))
             stack.enter_context(patch.object(commands, "today", return_value="2026-09-09"))
             stack.enter_context(patch.object(commands, "get_weekly_timeslot_map", return_value={"W": {"course": "Art"}}))
             stack.enter_context(patch.object(commands, "get_teacher_name_map", return_value={}))
