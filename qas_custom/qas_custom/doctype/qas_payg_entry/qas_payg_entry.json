@@ -1,0 +1,132 @@
+{
+ "creation": "2026-09-23 00:00:00.000000",
+ "modified": "2026-09-23 00:00:00.000000",
+ "modified_by": "Administrator",
+ "owner": "Administrator",
+ "doctype": "DocType",
+ "document_type": "Document",
+ "engine": "InnoDB",
+ "module": "QAS Custom",
+ "allow_rename": 0,
+ "istable": 0,
+ "track_changes": 1,
+ "actions": [],
+ "links": [],
+ "states": [],
+ "name": "QAS PAYG Entry",
+ "autoname": "PAYGE-.YYYY.-.#####",
+ "fields": [
+  {
+   "fieldname": "card",
+   "fieldtype": "Link",
+   "label": "Card",
+   "options": "QAS PAYG Card",
+   "reqd": 1
+  },
+  {
+   "fieldname": "booking",
+   "fieldtype": "Link",
+   "label": "Booking",
+   "options": "QAS PAYG Booking"
+  },
+  {
+   "fieldname": "operation",
+   "fieldtype": "Link",
+   "label": "Operation",
+   "options": "QAS PAYG Operation"
+  },
+  {
+   "fieldname": "kind",
+   "fieldtype": "Select",
+   "label": "Kind",
+   "options": "Issue\nReserve\nConsume\nReturn\nCorrection\nTransfer Out\nTransfer In",
+   "reqd": 1
+  },
+  {
+   "fieldname": "available_delta",
+   "fieldtype": "Int",
+   "label": "Available Delta",
+   "default": "0"
+  },
+  {
+   "fieldname": "reserved_delta",
+   "fieldtype": "Int",
+   "label": "Reserved Delta",
+   "default": "0"
+  },
+  {
+   "fieldname": "consumed_delta",
+   "fieldtype": "Int",
+   "label": "Consumed Delta",
+   "default": "0"
+  },
+  {
+   "fieldname": "operation_key",
+   "fieldtype": "Data",
+   "label": "Operation Key",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "actor",
+   "fieldtype": "Link",
+   "label": "Actor",
+   "options": "User",
+   "reqd": 1
+  },
+  {
+   "fieldname": "occurred_at",
+   "fieldtype": "Datetime",
+   "label": "Occurred At",
+   "reqd": 1
+  },
+  {
+   "fieldname": "reason",
+   "fieldtype": "Small Text",
+   "label": "Reason"
+  }
+ ],
+ "field_order": [
+  "card",
+  "booking",
+  "operation",
+  "kind",
+  "available_delta",
+  "reserved_delta",
+  "consumed_delta",
+  "operation_key",
+  "actor",
+  "occurred_at",
+  "reason"
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "select": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1,
+   "create": 1,
+   "write": 1,
+   "delete": 0,
+   "share": 0,
+   "email": 0
+  },
+  {
+   "role": "School Admin",
+   "read": 1,
+   "select": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1,
+   "create": 1,
+   "write": 1,
+   "delete": 0,
+   "share": 0,
+   "email": 0
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC"
+}

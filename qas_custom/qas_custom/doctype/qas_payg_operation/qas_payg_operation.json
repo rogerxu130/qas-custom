@@ -1,0 +1,212 @@
+{
+ "creation": "2026-09-23 00:00:00.000000",
+ "modified": "2026-09-23 00:00:00.000000",
+ "modified_by": "Administrator",
+ "owner": "Administrator",
+ "doctype": "DocType",
+ "document_type": "Document",
+ "engine": "InnoDB",
+ "module": "QAS Custom",
+ "allow_rename": 0,
+ "istable": 0,
+ "track_changes": 1,
+ "actions": [],
+ "links": [],
+ "states": [],
+ "name": "QAS PAYG Operation",
+ "autoname": "PAYGO-.YYYY.-.#####",
+ "fields": [
+  {
+   "fieldname": "operation_type",
+   "fieldtype": "Select",
+   "label": "Operation Type",
+   "options": "Purchase\nExchange\nExpiryChange",
+   "reqd": 1
+  },
+  {
+   "fieldname": "request_key",
+   "fieldtype": "Data",
+   "label": "Request Key",
+   "reqd": 1
+  },
+  {
+   "fieldname": "issue_request_key",
+   "fieldtype": "Data",
+   "label": "Issue Request Key",
+   "unique": 1
+  },
+  {
+   "fieldname": "invoice_request_key",
+   "fieldtype": "Data",
+   "label": "Invoice Request Key",
+   "unique": 1
+  },
+  {
+   "fieldname": "source_card",
+   "fieldtype": "Link",
+   "label": "Source Card",
+   "options": "QAS PAYG Card"
+  },
+  {
+   "fieldname": "target_card",
+   "fieldtype": "Link",
+   "label": "Target Card",
+   "options": "QAS PAYG Card"
+  },
+  {
+   "fieldname": "card",
+   "fieldtype": "Link",
+   "label": "Card",
+   "options": "QAS PAYG Card"
+  },
+  {
+   "fieldname": "family_parent",
+   "fieldtype": "Link",
+   "label": "Family Parent",
+   "options": "Parent",
+   "reqd": 1
+  },
+  {
+   "fieldname": "customer",
+   "fieldtype": "Link",
+   "label": "Customer",
+   "options": "Customer"
+  },
+  {
+   "fieldname": "product",
+   "fieldtype": "Link",
+   "label": "Product",
+   "options": "QAS PAYG Product"
+  },
+  {
+   "fieldname": "old_course",
+   "fieldtype": "Link",
+   "label": "Old Course",
+   "options": "Course"
+  },
+  {
+   "fieldname": "new_course",
+   "fieldtype": "Link",
+   "label": "New Course",
+   "options": "Course"
+  },
+  {
+   "fieldname": "old_expiry",
+   "fieldtype": "Date",
+   "label": "Old Expiry"
+  },
+  {
+   "fieldname": "new_expiry",
+   "fieldtype": "Date",
+   "label": "New Expiry"
+  },
+  {
+   "fieldname": "old_price",
+   "fieldtype": "Currency",
+   "label": "Old Price"
+  },
+  {
+   "fieldname": "new_price",
+   "fieldtype": "Currency",
+   "label": "New Price"
+  },
+  {
+   "fieldname": "quantity",
+   "fieldtype": "Int",
+   "label": "Quantity",
+   "default": "0"
+  },
+  {
+   "fieldname": "price_delta",
+   "fieldtype": "Currency",
+   "label": "Price Delta"
+  },
+  {
+   "fieldname": "invoice",
+   "fieldtype": "Link",
+   "label": "Invoice",
+   "options": "Sales Invoice"
+  },
+  {
+   "fieldname": "actor",
+   "fieldtype": "Link",
+   "label": "Actor",
+   "options": "User",
+   "reqd": 1
+  },
+  {
+   "fieldname": "reason",
+   "fieldtype": "Small Text",
+   "label": "Reason"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Pending\nCompleted\nCancelled",
+   "default": "Pending",
+   "reqd": 1
+  },
+  {
+   "fieldname": "created_at",
+   "fieldtype": "Datetime",
+   "label": "Created At",
+   "reqd": 1
+  }
+ ],
+ "field_order": [
+  "operation_type",
+  "request_key",
+  "issue_request_key",
+  "invoice_request_key",
+  "source_card",
+  "target_card",
+  "card",
+  "family_parent",
+  "customer",
+  "product",
+  "old_course",
+  "new_course",
+  "old_expiry",
+  "new_expiry",
+  "old_price",
+  "new_price",
+  "quantity",
+  "price_delta",
+  "invoice",
+  "actor",
+  "reason",
+  "status",
+  "created_at"
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "select": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1,
+   "create": 1,
+   "write": 1,
+   "delete": 0,
+   "share": 0,
+   "email": 0
+  },
+  {
+   "role": "School Admin",
+   "read": 1,
+   "select": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1,
+   "create": 1,
+   "write": 1,
+   "delete": 0,
+   "share": 0,
+   "email": 0
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC"
+}

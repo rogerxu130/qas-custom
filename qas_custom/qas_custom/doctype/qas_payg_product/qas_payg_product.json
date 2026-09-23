@@ -1,0 +1,91 @@
+{
+ "creation": "2026-09-23 00:00:00.000000",
+ "modified": "2026-09-23 00:00:00.000000",
+ "modified_by": "Administrator",
+ "owner": "Administrator",
+ "doctype": "DocType",
+ "document_type": "Document",
+ "engine": "InnoDB",
+ "module": "QAS Custom",
+ "allow_rename": 0,
+ "istable": 0,
+ "track_changes": 1,
+ "actions": [],
+ "links": [],
+ "states": [],
+ "name": "QAS PAYG Product",
+ "autoname": "PAYGP-.YYYY.-.#####",
+ "fields": [
+  {
+   "fieldname": "course",
+   "fieldtype": "Link",
+   "label": "Course",
+   "options": "Course",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "standard_card_price",
+   "fieldtype": "Currency",
+   "label": "Standard Card Price",
+   "reqd": 1
+  },
+  {
+   "fieldname": "sessions_per_card",
+   "fieldtype": "Int",
+   "label": "Sessions Per Card",
+   "default": "10",
+   "reqd": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "invoice_item",
+   "fieldtype": "Link",
+   "label": "Invoice Item",
+   "options": "Item"
+  },
+  {
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled",
+   "default": "1"
+  }
+ ],
+ "field_order": [
+  "course",
+  "standard_card_price",
+  "sessions_per_card",
+  "invoice_item",
+  "enabled"
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "select": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1,
+   "create": 1,
+   "write": 1,
+   "delete": 0,
+   "share": 0,
+   "email": 0
+  },
+  {
+   "role": "School Admin",
+   "read": 1,
+   "select": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1,
+   "create": 1,
+   "write": 1,
+   "delete": 0,
+   "share": 0,
+   "email": 0
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC"
+}

@@ -1,0 +1,149 @@
+{
+ "creation": "2026-09-23 00:00:00.000000",
+ "modified": "2026-09-23 00:00:00.000000",
+ "modified_by": "Administrator",
+ "owner": "Administrator",
+ "doctype": "DocType",
+ "document_type": "Document",
+ "engine": "InnoDB",
+ "module": "QAS Custom",
+ "allow_rename": 0,
+ "istable": 0,
+ "track_changes": 1,
+ "actions": [],
+ "links": [],
+ "states": [],
+ "name": "QAS PAYG Booking",
+ "autoname": "PAYGB-.YYYY.-.#####",
+ "fields": [
+  {
+   "fieldname": "family_parent",
+   "fieldtype": "Link",
+   "label": "Family Parent",
+   "options": "Parent",
+   "reqd": 1
+  },
+  {
+   "fieldname": "student",
+   "fieldtype": "Link",
+   "label": "Student",
+   "options": "Student",
+   "reqd": 1
+  },
+  {
+   "fieldname": "card",
+   "fieldtype": "Link",
+   "label": "Card",
+   "options": "QAS PAYG Card",
+   "reqd": 1
+  },
+  {
+   "fieldname": "course_session",
+   "fieldtype": "Link",
+   "label": "Course Session",
+   "options": "Course Sessions",
+   "reqd": 1
+  },
+  {
+   "fieldname": "attendance_entry",
+   "fieldtype": "Link",
+   "label": "Attendance Entry",
+   "options": "Class Attendance Entry"
+  },
+  {
+   "fieldname": "course_snapshot",
+   "fieldtype": "Link",
+   "label": "Course Snapshot",
+   "options": "Course",
+   "reqd": 1
+  },
+  {
+   "fieldname": "card_expires_on_snapshot",
+   "fieldtype": "Date",
+   "label": "Card Expires On Snapshot",
+   "reqd": 1
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Reserved\nLocked\nCancelled\nCompleted",
+   "default": "Reserved",
+   "reqd": 1
+  },
+  {
+   "fieldname": "cancellable_until",
+   "fieldtype": "Datetime",
+   "label": "Cancellable Until",
+   "reqd": 1
+  },
+  {
+   "fieldname": "request_key",
+   "fieldtype": "Data",
+   "label": "Request Key",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "cancelled_at",
+   "fieldtype": "Datetime",
+   "label": "Cancelled At"
+  },
+  {
+   "fieldname": "cancelled_by",
+   "fieldtype": "Link",
+   "label": "Cancelled By",
+   "options": "User"
+  },
+  {
+   "fieldname": "cancel_reason",
+   "fieldtype": "Small Text",
+   "label": "Cancel Reason"
+  }
+ ],
+ "field_order": [
+  "family_parent",
+  "student",
+  "card",
+  "course_session",
+  "attendance_entry",
+  "course_snapshot",
+  "card_expires_on_snapshot",
+  "status",
+  "cancellable_until",
+  "request_key",
+  "cancelled_at",
+  "cancelled_by",
+  "cancel_reason"
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "select": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1,
+   "create": 1,
+   "write": 1,
+   "delete": 0,
+   "share": 0,
+   "email": 0
+  },
+  {
+   "role": "School Admin",
+   "read": 1,
+   "select": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1,
+   "create": 1,
+   "write": 1,
+   "delete": 0,
+   "share": 0,
+   "email": 0
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC"
+}

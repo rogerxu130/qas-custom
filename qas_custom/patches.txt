@@ -82,3 +82,4 @@ qas_custom.patches.v2026_09_17_repair_trial_amendment_links
 qas_custom.patches.v2026_09_17_stripe_full_test_flow
 
 qas_custom.patches.v2026_09_19_configurable_course_due_days
+qas_custom.patches.v2026_09_23_payg_indexes

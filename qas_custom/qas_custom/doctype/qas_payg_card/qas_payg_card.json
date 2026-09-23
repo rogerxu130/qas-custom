@@ -1,0 +1,138 @@
+{
+ "creation": "2026-09-23 00:00:00.000000",
+ "modified": "2026-09-23 00:00:00.000000",
+ "modified_by": "Administrator",
+ "owner": "Administrator",
+ "doctype": "DocType",
+ "document_type": "Document",
+ "engine": "InnoDB",
+ "module": "QAS Custom",
+ "allow_rename": 0,
+ "istable": 0,
+ "track_changes": 1,
+ "actions": [],
+ "links": [],
+ "states": [],
+ "name": "QAS PAYG Card",
+ "autoname": "PAYGC-.YYYY.-.#####",
+ "fields": [
+  {
+   "fieldname": "family_parent",
+   "fieldtype": "Link",
+   "label": "Family Parent",
+   "options": "Parent",
+   "reqd": 1
+  },
+  {
+   "fieldname": "customer",
+   "fieldtype": "Link",
+   "label": "Customer",
+   "options": "Customer",
+   "reqd": 1
+  },
+  {
+   "fieldname": "product",
+   "fieldtype": "Link",
+   "label": "Product",
+   "options": "QAS PAYG Product",
+   "reqd": 1
+  },
+  {
+   "fieldname": "course",
+   "fieldtype": "Link",
+   "label": "Course",
+   "options": "Course",
+   "reqd": 1
+  },
+  {
+   "fieldname": "issued_on",
+   "fieldtype": "Date",
+   "label": "Issued On",
+   "reqd": 1
+  },
+  {
+   "fieldname": "expires_on",
+   "fieldtype": "Date",
+   "label": "Expires On",
+   "reqd": 1
+  },
+  {
+   "fieldname": "unit_price_snapshot",
+   "fieldtype": "Currency",
+   "label": "Unit Price Snapshot",
+   "reqd": 1
+  },
+  {
+   "fieldname": "available_count",
+   "fieldtype": "Int",
+   "label": "Available Count",
+   "default": "0",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reserved_count",
+   "fieldtype": "Int",
+   "label": "Reserved Count",
+   "default": "0",
+   "read_only": 1
+  },
+  {
+   "fieldname": "consumed_count",
+   "fieldtype": "Int",
+   "label": "Consumed Count",
+   "default": "0",
+   "read_only": 1
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Active\nPaused\nTransferred",
+   "default": "Active",
+   "reqd": 1
+  }
+ ],
+ "field_order": [
+  "family_parent",
+  "customer",
+  "product",
+  "course",
+  "issued_on",
+  "expires_on",
+  "unit_price_snapshot",
+  "available_count",
+  "reserved_count",
+  "consumed_count",
+  "status"
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "select": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1,
+   "create": 1,
+   "write": 1,
+   "delete": 0,
+   "share": 0,
+   "email": 0
+  },
+  {
+   "role": "School Admin",
+   "read": 1,
+   "select": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1,
+   "create": 1,
+   "write": 1,
+   "delete": 0,
+   "share": 0,
+   "email": 0
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC"
+}
