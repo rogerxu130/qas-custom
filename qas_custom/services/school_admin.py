@@ -2022,6 +2022,15 @@ def delete_school_admin_draft_invoice_data(invoice=None, allow_campus_admin=Fals
 	_require_invoice_cancellation_actor(allow_campus_admin=allow_campus_admin)
 	if not invoice:
 		frappe.throw(_("Invoice is required."))
+	payg_operations = lock_payg_operations_for_invoices([invoice])
+	reject_payg_support_view_write(payg_operations)
+	if payg_operations:
+		# Match the PAYG Operation → Invoice lock order. A linked draft needs a
+		# new operation or explicit correction chain; deleting it would orphan
+		# the immutable invoice request key and audit line.
+		payg_doc = _lock_school_admin_draft_invoice(invoice)
+		validate_payg_bindings(payg_doc, payg_operations)
+		frappe.throw(_("PAYG invoice draft cannot be deleted. Create a new operation or correction chain."))
 	doc = frappe.get_doc("Sales Invoice", invoice)
 	if cint(doc.docstatus) != 0:
 		frappe.throw(_("Only draft invoices can be deleted. Cancel submitted invoices instead."))

@@ -112,6 +112,8 @@ class TestSchoolAdminInvoiceCancellation(TestCase):
 		with patch("qas_custom.services.school_admin._require_school_admin"), patch(
 			"qas_custom.services.school_admin._doctype_available", return_value=True,
 		), patch(
+			"qas_custom.services.school_admin.lock_payg_operations_for_invoices", return_value={},
+		), patch(
 			"qas_custom.services.school_admin._", side_effect=lambda message, *args, **kwargs: message,
 		), patch(
 			"qas_custom.services.school_admin._clear_deleted_invoice_enrollment_snapshot",

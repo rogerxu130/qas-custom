@@ -9,6 +9,7 @@ from qas_custom.modules.billing.drafts import new_invoice_draft
 from qas_custom.modules.billing.invoice_settings import apply_invoice_payment_snapshot
 from qas_custom.modules.notifications.guard import disable_sales_invoice_auto_notifications
 from qas_custom.modules.payg.invoice_links import allow_invoice_relink
+from qas_custom.modules.payg.money import stored_currency
 from qas_custom.services.support_view import get_support_view_token
 
 
@@ -133,7 +134,9 @@ def _create_payg_draft(operation_id, invoice_request_key):
         line_type = "PAYG Exchange"
         description = f"PAYG course exchange to {course} ({operation.quantity} sessions)"
     else:
-        course = None
+        course = operation.new_course
+        if not course:
+            frappe.throw("Purchase operation course snapshot is missing")
         line_type = "PAYG Card"
         description = None
     frappe.db.sql("SELECT name FROM `tabParent` WHERE name=%s FOR UPDATE",
@@ -148,9 +151,9 @@ def _create_payg_draft(operation_id, invoice_request_key):
     if operation.operation_type == "Purchase":
         if not product.enabled:
             frappe.throw("PAYG purchase product is disabled")
-        rate = Decimal(str(product.standard_card_price or 0))
+        rate = stored_currency(stored_currency(operation.new_price or 0) * 10)
         if rate <= 0:
-            frappe.throw("PAYG standard card price must be positive")
+            frappe.throw("Purchase operation price snapshot is missing")
         description = f"PAYG 10-session card for {course}"
     if product.invoice_item:
         if not frappe.db.exists("Item", product.invoice_item):

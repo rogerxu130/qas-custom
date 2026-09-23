@@ -5,6 +5,7 @@ from uuid import uuid4
 import frappe
 from frappe.utils import get_datetime_in_timezone
 
+from qas_custom.modules.payg.money import stored_currency
 from qas_custom.modules.payg.rules import add_six_months
 
 
@@ -36,19 +37,24 @@ def create_or_get_purchase_operation(family_parent, product, purchase_request_ke
         frappe.throw("Family, product and purchase request key are required")
     operation = _purchase_by_request_key(purchase_request_key)
     if operation:
-        if (operation.family_parent, operation.product) != (family_parent, product):
+        if (operation.family_parent, operation.product, operation.customer) != (
+                family_parent, product, frappe.db.get_value("Parent", family_parent, "customer")):
             frappe.throw("Purchase request key belongs to another purchase")
         return operation
     customer = frappe.db.get_value("Parent", family_parent, "customer")
-    enabled = frappe.db.get_value("QAS PAYG Product", product, "enabled")
-    if not customer or not enabled:
+    product_doc = frappe.get_doc("QAS PAYG Product", product, for_update=True)
+    if not customer or not product_doc.enabled or not product_doc.course:
         frappe.throw("Family customer and enabled PAYG product are required")
+    unit_price = stored_currency(Decimal(str(product_doc.standard_card_price or 0)) / 10)
+    if unit_price <= 0:
+        frappe.throw("PAYG standard card price must be positive")
     savepoint = "payg_purchase_" + uuid4().hex
     frappe.db.savepoint(savepoint)
     try:
         operation = frappe.get_doc({"doctype": "QAS PAYG Operation", "operation_type": "Purchase",
                                     "request_key": purchase_request_key, "family_parent": family_parent,
                                     "customer": customer, "product": product, "quantity": 10,
+                                    "new_price": unit_price, "new_course": product_doc.course,
                                     "actor": frappe.session.user, "created_at": _now(), "status": "Pending"})
         operation.insert(ignore_permissions=True)
         return operation
@@ -56,7 +62,8 @@ def create_or_get_purchase_operation(family_parent, product, purchase_request_ke
         frappe.db.rollback(save_point=savepoint)
         operation = _purchase_by_request_key(purchase_request_key, after_duplicate=True)
         if operation:
-            if (operation.family_parent, operation.product) != (family_parent, product):
+            if (operation.family_parent, operation.product, operation.customer) != (
+                    family_parent, product, customer):
                 frappe.throw("Purchase request key belongs to another purchase")
             return operation
         raise
@@ -92,14 +99,18 @@ def _issue_card(operation_id, issue_request_key):
     frappe.db.sql("SELECT name FROM `tabParent` WHERE name=%s FOR UPDATE", (operation.family_parent,))
     customer = frappe.db.get_value("Parent", operation.family_parent, "customer")
     product = frappe.get_doc("QAS PAYG Product", operation.product, for_update=True)
-    if not customer or customer != operation.customer or not product.enabled or not product.course:
+    if (not customer or customer != operation.customer or not product.enabled
+            or not product.course or product.course != operation.new_course):
         frappe.throw("Purchase family/customer/product is no longer valid")
+    unit_price = stored_currency(operation.new_price or 0)
+    if unit_price <= 0:
+        frappe.throw("Purchase operation price snapshot is missing")
     now = _now()
     issued_on = now.date()
     card = frappe.get_doc({"doctype": "QAS PAYG Card", "family_parent": operation.family_parent,
                            "customer": customer, "product": operation.product, "course": product.course,
                            "issued_on": issued_on, "expires_on": add_six_months(issued_on),
-                           "unit_price_snapshot": Decimal(str(product.standard_card_price)) / 10,
+                           "unit_price_snapshot": unit_price,
                            "available_count": 0, "reserved_count": 0, "consumed_count": 0,
                            "status": "Active"})
     card.insert(ignore_permissions=True)

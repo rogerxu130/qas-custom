@@ -12,6 +12,7 @@ from qas_custom.services.school_admin import (
 	_apply_invoice_items,
 	_invoice_edit_totals,
 	update_school_admin_draft_invoice_data,
+	delete_school_admin_draft_invoice_data,
 	submit_school_admin_invoice_data,
 )
 
@@ -50,6 +51,57 @@ class _Invoice(frappe._dict):
 
 
 class TestSchoolAdminDraftInvoiceAdjustments(TestCase):
+	def test_payg_draft_delete_has_explicit_business_error_without_detach(self):
+		invoice = _Invoice(name="SINV-PAYG", docstatus=0, customer="CUS-1", parent="PAR-1",
+			qas_invoice_type="PAYG Card", items=[_Child(name="ROW-1", qas_source_doctype="QAS PAYG Operation",
+				qas_source_document="OP-1")])
+		operation = frappe._dict(name="OP-1", invoice=invoice.name, family_parent="PAR-1", customer="CUS-1")
+		fake_db = SimpleNamespace(savepoint=Mock(), rollback=Mock(), commit=Mock())
+		fake_frappe = SimpleNamespace(db=fake_db, delete_doc=Mock(),
+			throw=lambda message, *_args: (_ for _ in ()).throw(ValueError(message)))
+		order = []
+		with patch("qas_custom.services.school_admin.frappe", fake_frappe), patch(
+			"qas_custom.services.school_admin._require_invoice_cancellation_actor"
+		), patch(
+			"qas_custom.services.school_admin.lock_payg_operations_for_invoices",
+			side_effect=lambda _names: (order.append("operation"), {"OP-1": operation})[1]
+		), patch(
+			"qas_custom.services.school_admin.reject_payg_support_view_write"
+		), patch(
+			"qas_custom.services.school_admin._lock_school_admin_draft_invoice",
+			side_effect=lambda _name: (order.append("invoice"), invoice)[1]
+		), patch(
+			"qas_custom.services.school_admin._detach_invoice_operation_report_links"
+		) as detach, patch(
+			"qas_custom.services.school_admin._clear_deleted_invoice_enrollment_snapshot"
+		) as clear:
+			with self.assertRaisesRegex(ValueError, "PAYG.*cannot be deleted"):
+				delete_school_admin_draft_invoice_data("SINV-PAYG")
+		self.assertEqual(order, ["operation", "invoice"])
+		detach.assert_not_called()
+		clear.assert_not_called()
+		fake_frappe.delete_doc.assert_not_called()
+		fake_db.commit.assert_not_called()
+
+	def test_support_view_cannot_delete_linked_payg_draft(self):
+		from qas_custom.modules.billing import payg_drafts
+		fake_frappe = SimpleNamespace(db=SimpleNamespace(commit=Mock()), delete_doc=Mock())
+		with patch("qas_custom.services.school_admin.frappe", fake_frappe), patch(
+			"qas_custom.services.school_admin._require_invoice_cancellation_actor"
+		), patch(
+			"qas_custom.services.school_admin.lock_payg_operations_for_invoices", return_value={"OP-1": object()}
+		), patch(
+			"qas_custom.services.school_admin._lock_school_admin_draft_invoice"
+		) as invoice_lock, patch.object(
+			payg_drafts, "get_support_view_token", return_value="support-token"
+		), patch.object(
+			payg_drafts.frappe, "throw", side_effect=lambda message, *_args: (_ for _ in ()).throw(PermissionError(message))
+		):
+			with self.assertRaisesRegex(PermissionError, "Support View"):
+				delete_school_admin_draft_invoice_data("SINV-PAYG")
+		invoice_lock.assert_not_called()
+		fake_frappe.delete_doc.assert_not_called()
+		fake_frappe.db.commit.assert_not_called()
 	def test_support_view_blocks_payg_draft_save_and_submit_before_invoice_lock(self):
 		from qas_custom.modules.billing import payg_drafts
 		fake_db = SimpleNamespace(savepoint=Mock(), rollback=Mock(), commit=Mock())

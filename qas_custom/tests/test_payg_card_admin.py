@@ -98,6 +98,10 @@ class TestCardAdmin(TestCase):
         self.assertEqual(self.entries(), [])
         self.assertIs(card_admin.change_expiry("CARD", date(2027, 4, 1),
                                               reason="Parent request", request_key="extend-1"), op)
+        self.events.clear()
+        card_admin.change_expiry("CARD", date(2027, 4, 1),
+                                 reason="Parent request", request_key="extend-1")
+        self.assertLess(self.events.index(f"QAS PAYG Operation:{op.name}"), self.events.index("Student:S"))
         with self.assertRaisesRegex(ValueError, "request key"):
             card_admin.change_expiry("CARD", date(2027, 5, 1),
                                      reason="Different", request_key="extend-1")
@@ -159,6 +163,14 @@ class TestCardAdmin(TestCase):
                           ("Transfer In", 7, f"transfer-in:{op.name}")])
         self.assertIs(card_admin.exchange_card("CARD", "PROD-NEW", "exchange-1"), op)
         self.assertEqual(len(self.entries()), 2)
+        self.events.clear()
+        card_admin.exchange_card("CARD", "PROD-NEW", "exchange-1")
+        self.assertLess(self.events.index(f"QAS PAYG Operation:{op.name}"), self.events.index("Student:S"))
+        self.events.clear()
+        with self.assertRaisesRegex(ValueError, "available sessions"):
+            card_admin.exchange_card("CARD", "PROD-NEW", "exchange-other-key")
+        self.assertEqual(self.events[0], "Student:S")
+        self.assertFalse(any(event.startswith("QAS PAYG Operation:") for event in self.events))
         with self.assertRaisesRegex(ValueError, "request key"):
             card_admin.exchange_card("CARD", "PROD-OLD", "exchange-1")
         with self.assertRaisesRegex(ValueError, "request key"):

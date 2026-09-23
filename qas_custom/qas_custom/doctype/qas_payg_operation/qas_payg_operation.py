@@ -75,9 +75,11 @@ class QASPAYGOperation(Document):
             frappe.throw("Purchase requires family customer and product")
         if self.source_card:
             frappe.throw("Purchase cannot have a source card")
+        if self.new_price is None or stored_currency(self.new_price) <= 0:
+            frappe.throw("Purchase requires a positive unit price snapshot")
         product_course = frappe.db.get_value("QAS PAYG Product", self.product, "course")
-        if not product_course:
-            frappe.throw("Purchase product is required")
+        if not product_course or not self.new_course or self.new_course != product_course:
+            frappe.throw("Purchase product/course snapshot is required and must match")
         for field in ("card", "target_card"):
             linked = cards.get(field)
             if linked and (linked.product != self.product or linked.course != product_course):

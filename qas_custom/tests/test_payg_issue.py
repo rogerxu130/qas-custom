@@ -36,7 +36,7 @@ class TestIssue(TestCase):
         self.operation = Document(self.state, doctype="QAS PAYG Operation", name="OP-1",
                                   operation_type="Purchase", status="Pending", family_parent="P-1",
                                   customer="C-1", product="PROD-1", invoice="INV-1", card=None,
-                                  issue_request_key=None)
+                                  issue_request_key=None, new_price=Decimal("40"), new_course="COURSE-1")
         self.state["docs"][(self.operation.doctype, self.operation.name)] = self.operation
         self.product = Document(self.state, doctype="QAS PAYG Product", name="PROD-1",
                                 enabled=1, course="COURSE-1", standard_card_price=Decimal("400"))
@@ -121,6 +121,29 @@ class TestIssue(TestCase):
         with self.assertRaisesRegex(ValueError, "already issued"):
             issue.issue_card("OP-1", "issue-2")
 
+    def test_purchase_price_is_snapshotted_before_card_issue(self):
+        created = issue.create_or_get_purchase_operation("P-1", "PROD-1", "snapshot-buy")
+        self.assertEqual(created.new_price, Decimal("40.000000000"))
+        self.assertEqual(created.new_course, "COURSE-1")
+        self.fake.get_doc.assert_any_call("QAS PAYG Product", "PROD-1", for_update=True)
+        self.product.standard_card_price = Decimal("900")
+        self.fake.db.get_value.side_effect = lambda dt, key, field: (
+            created.name if dt == "QAS PAYG Operation" else self.value(dt, key, field))
+        self.assertIs(issue.create_or_get_purchase_operation("P-1", "PROD-1", "snapshot-buy"), created)
+        self.assertEqual(created.new_price, Decimal("40.000000000"))
+        card = issue.issue_card(created.name, "snapshot-issue")
+        self.assertEqual(card.unit_price_snapshot, Decimal("40.000000000"))
+
+    def test_purchase_requires_positive_product_price(self):
+        self.product.standard_card_price = Decimal("0")
+        with self.assertRaisesRegex(ValueError, "price"):
+            issue.create_or_get_purchase_operation("P-1", "PROD-1", "zero-buy")
+
+    def test_issue_rejects_product_course_changed_since_purchase(self):
+        self.product.course = "COURSE-OTHER"
+        with self.assertRaisesRegex(ValueError, "product"):
+            issue.issue_card("OP-1", "issue-changed-course")
+
     def test_school_admin_and_customer_are_required(self):
         self.fake.get_roles = lambda _user: []
         with self.assertRaisesRegex(ValueError, "School Admin"):
@@ -149,3 +172,5 @@ class TestIssue(TestCase):
         self.assertIs(issue.create_or_get_purchase_operation("P-1", "PROD-1", "purchase-1"), self.operation)
         with self.assertRaisesRegex(ValueError, "another purchase"):
             issue.create_or_get_purchase_operation("P-2", "PROD-1", "purchase-1")
+        with self.assertRaisesRegex(ValueError, "another purchase"):
+            issue.create_or_get_purchase_operation("P-1", "PROD-OTHER", "purchase-1")

@@ -491,10 +491,14 @@ class TestPaygControllers(TestCase):
         op = controller()
         op.__dict__.update(operation_type="Purchase", status="Pending", family_parent="P-1",
                            customer="CUS-1", product="PROD-1", source_card=None,
-                           target_card=None, card=None, old_price=None, new_price=None,
-                           quantity=0, invoice=None)
+                           target_card=None, card=None, old_price=None, new_price=40,
+                           new_course="C-1",
+                           quantity=10, invoice=None)
         op.get = lambda field: getattr(op, field, None)
         op.validate()
+        op.new_price = None
+        with self.assertRaises(ValueError):
+            op.validate()
 
     def test_exchange_pending_allows_target_later(self):
         controller = self.controller("operation")

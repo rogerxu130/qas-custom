@@ -27,7 +27,8 @@ class TestPaygDrafts(TestCase):
     def setUp(self):
         self.operation = Doc(name="OP-1", operation_type="Purchase", status="Pending",
                              family_parent="P-1", customer="C-1", product="PROD-1",
-                             invoice=None, invoice_request_key=None, card=None)
+                             invoice=None, invoice_request_key=None, card=None,
+                             new_price=Decimal("40"), new_course="COURSE-1")
         self.product = Doc(name="PROD-1", course="COURSE-1", enabled=1,
                            standard_card_price=Decimal("400"), invoice_item="ITEM-1")
         self.invoice = Doc(name=None, items=[], customer="C-1", parent="P-1")
@@ -105,6 +106,11 @@ class TestPaygDrafts(TestCase):
             payg_drafts.create_payg_draft("OP-1", "invoice-1")
         self.assertIsNone(self.operation.invoice)
         self.fake.db.rollback.assert_called()
+
+    def test_purchase_draft_rejects_changed_product_course(self):
+        self.product.course = "COURSE-OTHER"
+        with self.assertRaisesRegex(ValueError, "product/course"):
+            payg_drafts.create_payg_draft("OP-1", "invoice-1")
 
     def test_support_view_guard_only_applies_to_linked_payg_invoices(self):
         with patch.object(payg_drafts, "get_support_view_token", return_value="support"):
@@ -226,15 +232,19 @@ class TestPaygCrossModuleOrders(TestCase):
                     patch.object(payg_drafts, "run_invoice_mutation_as_administrator", side_effect=lambda f: f()):
                 if invoice_first:
                     created = payg_drafts.create_payg_draft("OP-1", "invoice-1")
+                    case.product.standard_card_price = Decimal("900")
                     card = issue_card("OP-1", "issue-1")
                 else:
                     card = issue_card("OP-1", "issue-1")
+                    case.product.standard_card_price = Decimal("900")
                     created = payg_drafts.create_payg_draft("OP-1", "invoice-1")
             self.assertIs(created, invoice)
             self.assertEqual(case.operation.invoice, "SINV-NEW")
             self.assertEqual(case.operation.card, card.name)
             self.assertEqual(case.operation.issue_request_key, "issue-1")
             self.assertEqual(case.operation.invoice_request_key, "invoice-1")
+            self.assertEqual(invoice.get("items")[0].rate, Decimal("400.000000000"))
+            self.assertEqual(card.unit_price_snapshot, Decimal("40.000000000"))
             case.fake.db.commit.assert_not_called()
         finally:
             case.doCleanups()

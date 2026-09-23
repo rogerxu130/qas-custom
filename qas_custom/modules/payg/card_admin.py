@@ -54,6 +54,13 @@ def _bookings(card_id):
 
 
 def _lock_context(card_id, kind, request_key):
+    # A known retry shares the same Operation lock as billing. Pre-read without
+    # a missing-key gap lock; only an existing row is locked before family rows.
+    operation = _operation_by_key(kind, request_key)
+    if operation:
+        linked_card = operation.source_card if kind == "Exchange" else operation.card
+        if linked_card != card_id:
+            frappe.throw("PAYG request key belongs to another card")
     family = frappe.db.get_value(CARD, card_id, "family_parent")
     if not family:
         frappe.throw("PAYG source card does not exist")
@@ -63,10 +70,11 @@ def _lock_context(card_id, kind, request_key):
         ORDER BY name FOR UPDATE""", (family,), as_dict=True)
     frappe.db.sql("SELECT name FROM `tabParent` WHERE name=%s FOR UPDATE", (family,))
     bookings = _bookings(card_id)
-    operation = _operation_by_key(kind, request_key)
     card = frappe.get_doc(CARD, card_id, for_update=True)
     if card.family_parent != family or card.customer != frappe.db.get_value("Parent", family, "customer"):
         frappe.throw("PAYG card family/customer changed; retry")
+    if operation and (operation.family_parent, operation.customer) != (card.family_parent, card.customer):
+        frappe.throw("PAYG request key belongs to another family/customer")
     # Recheck after the card lock. This is intentionally a locking current read,
     # not frappe.get_all against a transaction's older snapshot.
     latest = _bookings(card_id)
