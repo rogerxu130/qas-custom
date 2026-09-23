@@ -64,7 +64,8 @@ from qas_custom.modules.billing.commands import (
 )
 from qas_custom.modules.billing.presentation import build_course_invoice_description, invoice_item_schedule
 from qas_custom.modules.billing.payg_drafts import (
-	lock_payg_operations_for_invoices, payg_sources, validate_payg_bindings,
+	lock_payg_operations_for_invoices, payg_sources, reject_payg_support_view_write,
+	validate_payg_bindings,
 )
 from qas_custom.modules.billing.payment_plans import apply_payment_plan, has_active_payment_plan, payment_plan_payload
 from qas_custom.modules.makeup.commands import (
@@ -1896,6 +1897,7 @@ def update_school_admin_draft_invoice_data(invoice=None, payload=None):
 	frappe.db.savepoint(savepoint)
 	try:
 		payg_operations = lock_payg_operations_for_invoices([invoice])
+		reject_payg_support_view_write(payg_operations)
 		doc = _lock_school_admin_draft_invoice(invoice)
 		validate_payg_bindings(doc, payg_operations)
 		change = _apply_school_admin_draft_invoice_payload(doc, payload)
@@ -2041,6 +2043,7 @@ def submit_school_admin_invoice_data(invoice=None, enqueue_notification=False, s
 	frappe.db.savepoint(savepoint)
 	try:
 		payg_operations = lock_payg_operations_for_invoices([invoice])
+		reject_payg_support_view_write(payg_operations)
 		doc = _lock_school_admin_draft_invoice(invoice)
 		validate_payg_bindings(doc, payg_operations)
 		change = _apply_school_admin_draft_invoice_payload(doc, draft_payload) if draft_payload is not None else None

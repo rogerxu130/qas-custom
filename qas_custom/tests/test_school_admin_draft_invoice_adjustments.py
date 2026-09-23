@@ -50,6 +50,28 @@ class _Invoice(frappe._dict):
 
 
 class TestSchoolAdminDraftInvoiceAdjustments(TestCase):
+	def test_support_view_blocks_payg_draft_save_and_submit_before_invoice_lock(self):
+		from qas_custom.modules.billing import payg_drafts
+		fake_db = SimpleNamespace(savepoint=Mock(), rollback=Mock(), commit=Mock())
+		fake_frappe = SimpleNamespace(db=fake_db)
+		with patch("qas_custom.services.school_admin.frappe", fake_frappe), patch(
+			"qas_custom.services.school_admin._require_school_admin"
+		), patch(
+			"qas_custom.services.school_admin.lock_payg_operations_for_invoices", return_value={"OP-1": object()}
+		), patch(
+			"qas_custom.services.school_admin._lock_school_admin_draft_invoice"
+		) as invoice_lock, patch.object(
+			payg_drafts, "get_support_view_token", return_value="support-token"
+		), patch.object(
+			payg_drafts.frappe, "throw", side_effect=lambda message, *_args: (_ for _ in ()).throw(PermissionError(message))
+		):
+			for action in (update_school_admin_draft_invoice_data, submit_school_admin_invoice_data):
+				with self.assertRaisesRegex(PermissionError, "Support View"):
+					action("SINV-PAYG", payload={})
+		invoice_lock.assert_not_called()
+		fake_db.commit.assert_not_called()
+		self.assertEqual(fake_db.rollback.call_count, 2)
+
 	def test_payg_save_and_submit_keep_line_source_and_family(self):
 		from contextlib import ExitStack
 		invoice = _Invoice(name="SINV-PAYG", docstatus=0, customer="CUS-1", parent="PAR-1",

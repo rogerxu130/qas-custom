@@ -19,6 +19,12 @@ def _admin():
         frappe.throw("School Admin access is required", frappe.PermissionError)
 
 
+def reject_payg_support_view_write(locked_operations):
+    """Keep legacy invoices unchanged while PAYG bindings remain read-only."""
+    if locked_operations and get_support_view_token():
+        frappe.throw("Support View cannot change PAYG invoices", frappe.PermissionError)
+
+
 def _linked_invoice(operation):
     invoice = frappe.get_doc("Sales Invoice", operation.invoice, for_update=True)
     if invoice.customer != operation.customer or invoice.get("parent") != operation.family_parent:

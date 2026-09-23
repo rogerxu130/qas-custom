@@ -18,7 +18,7 @@ from qas_custom.modules.billing.commands import (
 from qas_custom.modules.billing.drafts import new_invoice_draft
 from qas_custom.modules.billing.payg_drafts import (
 	lock_payg_operations_for_invoices, validate_payg_bindings,
-	relink_consolidated_payg_operations,
+	relink_consolidated_payg_operations, reject_payg_support_view_write,
 )
 from qas_custom.modules.billing.invoice_settings import apply_invoice_payment_snapshot
 from qas_custom.modules.billing.store_credit import get_invoice_payable_amount
@@ -259,6 +259,7 @@ def consolidate_school_admin_invoices_data(payload=None):
 	frappe.db.savepoint(savepoint)
 	try:
 		payg_operations = lock_payg_operations_for_invoices(invoice_names)
+		reject_payg_support_view_write(payg_operations)
 		# Operations are locked first, as in PAYG draft creation. Lock invoices
 		# in name order and recheck sources against their current rows.
 		invoices_by_name = {name: frappe.get_doc("Sales Invoice", name, for_update=True)

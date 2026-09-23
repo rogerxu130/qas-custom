@@ -350,6 +350,27 @@ class TestWorkshops(TestCase):
 		self.assertEqual(operations["OP-2"].invoice_request_key, "key-OP-2")
 		operations["OP-2"].save.assert_called_once_with(ignore_permissions=True)
 
+	@patch("qas_custom.services.workshops._require_school_admin")
+	@patch("qas_custom.services.workshops.frappe")
+	def test_support_view_blocks_payg_consolidation_before_invoice_mutation(self, workshop_frappe, _require):
+		from qas_custom.modules.billing import payg_drafts
+		workshop_frappe.db.savepoint = Mock()
+		workshop_frappe.db.rollback = Mock()
+		workshop_frappe.db.commit = Mock()
+		with patch("qas_custom.services.workshops.lock_payg_operations_for_invoices",
+				return_value={"OP-1": object()}), patch.object(
+			payg_drafts, "get_support_view_token", return_value="support-token"
+		), patch.object(
+			payg_drafts.frappe, "throw", side_effect=lambda message, *_args: (_ for _ in ()).throw(PermissionError(message))
+		), patch("qas_custom.services.workshops.relink_consolidated_payg_operations") as relink:
+			with self.assertRaisesRegex(PermissionError, "Support View"):
+				consolidate_school_admin_invoices_data({"invoices": ["SINV-1", "SINV-2"]})
+		relink.assert_not_called()
+		workshop_frappe.get_doc.assert_not_called()
+		workshop_frappe.delete_doc.assert_not_called()
+		workshop_frappe.db.commit.assert_not_called()
+		workshop_frappe.db.rollback.assert_called_once()
+
 	@patch("qas_custom.services.workshops.set_if_field")
 	@patch("qas_custom.services.workshops.frappe")
 	def test_relink_invoice_records_updates_supported_source_documents(self, workshop_frappe, set_if_field_mock):

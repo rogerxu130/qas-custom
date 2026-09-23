@@ -106,6 +106,12 @@ class TestPaygDrafts(TestCase):
         self.assertIsNone(self.operation.invoice)
         self.fake.db.rollback.assert_called()
 
+    def test_support_view_guard_only_applies_to_linked_payg_invoices(self):
+        with patch.object(payg_drafts, "get_support_view_token", return_value="support"):
+            payg_drafts.reject_payg_support_view_write({})
+            with self.assertRaisesRegex(ValueError, "Support View"):
+                payg_drafts.reject_payg_support_view_write({"OP-1": self.operation})
+
     def test_prior_card_does_not_change_invoice_or_create_another_card(self):
         self.operation.card = "CARD-1"
         invoice = payg_drafts.create_payg_draft("OP-1", "invoice-1")
