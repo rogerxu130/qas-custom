@@ -3853,9 +3853,12 @@ def get_school_admin_weekly_timeslots_data(
 	items = [_docdict(row) for row in rows]
 	_attach_course_labels(items)
 	enrollment_counts = _get_active_enrollment_counts_for_timeslots([row.get("name") for row in items])
+	from qas_custom.services.school_admin_timetable_export import class_student_breakdown
+	student_counts = class_student_breakdown([row["name"] for row in items])
 	ndis_capacity_statuses = get_ndis_friendly_capacity_statuses([row.get("name") for row in items])
 	for item in items:
 		item["active_enrollment_count"] = enrollment_counts.get(item.get("name"), 0)
+		item["student_counts"] = student_counts[item["name"]]
 		item.update(ndis_capacity_statuses.get(item.get("name"), {}))
 	return {"items": items}
 
@@ -3868,6 +3871,8 @@ def get_school_admin_weekly_timeslot_data(weekly_timeslot=None):
 		frappe.throw(_("Weekly timeslot is required."))
 	doc = frappe.get_doc("Weekly Timeslot", weekly_timeslot)
 	payload = _document_payload(doc)
+	from qas_custom.services.school_admin_timetable_export import class_student_breakdown
+	payload["student_counts"] = class_student_breakdown([weekly_timeslot])[weekly_timeslot]
 	payload.update(get_ndis_friendly_capacity_status(weekly_timeslot))
 	payload["enrollments"] = _get_enrollment_rows(filters={"weekly_timeslot": weekly_timeslot, "status": "Active"}, limit=200)
 	payload["sessions"] = _get_course_session_rows(weekly_timeslot=weekly_timeslot, limit=80)

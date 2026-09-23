@@ -68,21 +68,29 @@ def export_school_admin_timetable_data(term=None):
 
 
 def _class_student_counts(term, weekly_timeslots):
+	return {name: counts["total"] for name, counts in class_student_breakdown(weekly_timeslots, term).items()}
+
+
+def class_student_breakdown(weekly_timeslots, term=None):
 	"""Union enrollment and current trial links, never infer identity from names.
 
 	The legacy CSV column name stays unchanged for planner compatibility.
 	This is distinct students linked to a class, not peak session attendance.
 	"""
-	students = {name: set() for name in weekly_timeslots}
+	if not weekly_timeslots:
+		return {}
+	students = {name: {"Planned": set(), "Active": set(), "Trial": set()} for name in weekly_timeslots}
+	filters = {"weekly_timeslot": ["in", weekly_timeslots], "status": ["in", ["Planned", "Active"]]}
+	if term:
+		filters["term"] = term
 	enrollments = frappe.get_all(
 		"Enrollment",
-		filters={"term": term, "weekly_timeslot": ["in", weekly_timeslots],
-			"status": ["in", ["Planned", "Active"]]},
-		fields=["weekly_timeslot", "student"], limit_page_length=0,
+		filters=filters,
+		fields=["weekly_timeslot", "student", "status"], limit_page_length=0,
 	)
 	for row in enrollments:
 		if row.get("student"):
-			students[row["weekly_timeslot"]].add(row["student"])
+			students[row["weekly_timeslot"]][row["status"]].add(row["student"])
 	classes = frappe.get_all(
 		"Course Sessions", filters={"weekly_timeslot": ["in", weekly_timeslots],
 			"status": ["!=", "Cancelled"]},
@@ -99,8 +107,10 @@ def _class_student_counts(term, weekly_timeslots):
 		for row in trials:
 			if not row.get("student"):
 				frappe.throw(_("Trial inquiry {0} has no linked student. Link the student before exporting.").format(row["name"]))
-			students[class_map[row["course_session"]]].add(row["student"])
-	return {name: len(ids) for name, ids in students.items()}
+			students[class_map[row["course_session"]]]["Trial"].add(row["student"])
+	return {name: {"trial": len(groups["Trial"]), "planned": len(groups["Planned"]),
+		"active": len(groups["Active"]), "total": len(set().union(*groups.values()))}
+		for name, groups in students.items()}
 
 
 def build_timetable_zip(sessions, courses, teachers, rooms, campuses, trial_field=None, student_counts=None):

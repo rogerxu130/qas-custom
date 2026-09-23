@@ -175,7 +175,7 @@ class TestTimetableExport(TestCase):
 		fake.db.get_value.return_value = "2026 Term 4"
 		records = {"Weekly Timeslot": [self.session], "Course": [self.course], "Teacher": [self.teacher],
 			"Classroom": [self.room], "Campus": [self.campus],
-			"Enrollment": [{"weekly_timeslot": self.session["name"], "student": f"S-{i}"} for i in range(5)],
+			"Enrollment": [{"weekly_timeslot": self.session["name"], "student": f"S-{i}", "status": "Planned"} for i in range(5)],
 			"Course Sessions": [{"name": "CS-1", "weekly_timeslot": self.session["name"]}],
 			"Inquiry": [{"name": "I-1", "course_session": "CS-1", "student": "TRIAL-ONLY"}]}
 		fake.get_all.side_effect = lambda doctype, **kwargs: records[doctype]
@@ -191,7 +191,7 @@ class TestTimetableExport(TestCase):
 			"term": "TERM-4", "weekly_timeslot": ["in", [self.session["name"]]],
 			"status": ["in", ["Planned", "Active"]],
 		})
-		self.assertEqual(enrollment_query.kwargs["fields"], ["weekly_timeslot", "student"])
+		self.assertEqual(enrollment_query.kwargs["fields"], ["weekly_timeslot", "student", "status"])
 		trial_query = next(call for call in calls if call.args[0] == "Inquiry")
 		self.assertEqual(trial_query.kwargs["filters"], {
 			"inquiry_type": "Trial Lesson", "course_session": ["in", ["CS-1"]],
@@ -209,7 +209,7 @@ class TestTimetableExport(TestCase):
 	def test_trials_and_enrollments_deduplicate_per_class_not_globally(self):
 		fake = self.fake_frappe()
 		fake.get_all.side_effect = [
-			[{"weekly_timeslot": "W1", "student": "S1"}] * 2,
+			[{"weekly_timeslot": "W1", "student": "S1", "status": "Planned"}] * 2,
 			[{"name": "C1", "weekly_timeslot": "W1"},
 			 {"name": "C2", "weekly_timeslot": "W1"},
 			 {"name": "C3", "weekly_timeslot": "W2"}],
@@ -228,6 +228,29 @@ class TestTimetableExport(TestCase):
 		with patch.object(export, "frappe", fake):
 			self.assertEqual(export._class_student_counts("TERM", ["W1"]), {"W1": 0})
 		self.assertEqual(fake.get_all.call_count, 2)
+
+	def test_breakdown_deduplicates_each_category_and_union(self):
+		fake = self.fake_frappe()
+		fake.get_all.side_effect = [
+			[{"weekly_timeslot": "W1", "student": "S1", "status": "Planned"},
+			 {"weekly_timeslot": "W1", "student": "S1", "status": "Planned"},
+			 {"weekly_timeslot": "W1", "student": "S1", "status": "Active"}],
+			[{"name": "C1", "weekly_timeslot": "W1"}],
+			[{"name": "I1", "course_session": "C1", "student": "S1"},
+			 {"name": "I2", "course_session": "C1", "student": "S2"},
+			 {"name": "I3", "course_session": "C1", "student": "S2"}],
+		]
+		with patch.object(export, "frappe", fake):
+			self.assertEqual(export.class_student_breakdown(["W1", "W2"]), {
+				"W1": {"trial": 2, "planned": 1, "active": 1, "total": 2},
+				"W2": {"trial": 0, "planned": 0, "active": 0, "total": 0}})
+		self.assertNotIn("term", fake.get_all.call_args_list[0].kwargs["filters"])
+
+	def test_empty_breakdown_avoids_queries(self):
+		fake = self.fake_frappe()
+		with patch.object(export, "frappe", fake):
+			self.assertEqual(export.class_student_breakdown([]), {})
+		fake.get_all.assert_not_called()
 
 	def test_trial_without_student_fails_instead_of_silently_exporting_zero(self):
 		fake = self.fake_frappe()
