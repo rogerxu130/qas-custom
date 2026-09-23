@@ -226,6 +226,17 @@ class TestWorkshops(TestCase):
 
 		workshop_frappe.throw.assert_called_once_with("Selected invoices must use the same Currency.")
 
+	@patch("qas_custom.services.workshops.frappe")
+	@patch("qas_custom.services.workshops._", side_effect=lambda value: value)
+	def test_consolidation_rejects_incompatible_discounts(self, _translate, workshop_frappe):
+		workshop_frappe.throw.side_effect = frappe.ValidationError
+		base = {"docstatus": 0, "status": "Draft", "parent": "PAR-1", "customer": "CUS-1",
+			"company": "QAS", "currency": "AUD", "items": [], "taxes": []}
+		first = frappe._dict(**base, additional_discount_percentage=10)
+		second = frappe._dict(**base, additional_discount_percentage=20)
+		with self.assertRaises(frappe.ValidationError):
+			_validate_invoice_consolidation([first, second])
+
 	@patch("qas_custom.services.workshops._relink_invoice_records")
 	@patch("qas_custom.services.workshops._invoice_linked_records", return_value={"Workshop Enrollment": ["WEN-1", "WEN-2"]})
 	@patch("qas_custom.services.workshops._validate_no_invoice_payment_activity")
@@ -261,13 +272,14 @@ class TestWorkshops(TestCase):
 
 		target = invoice("SINV-OLD", "2026-09-01 09:00:00", "WEN-1", 200, "Workshop")
 		source = invoice("SINV-NEW", "2026-09-02 09:00:00", "WEN-2", 180, "Course")
-		workshop_frappe.get_doc.side_effect = lambda doctype, name: {
+		workshop_frappe.get_doc.side_effect = lambda doctype, name, **_kwargs: {
 			("Sales Invoice", "SINV-OLD"): target,
 			("Sales Invoice", "SINV-NEW"): source,
 		}[(doctype, name)]
 		target.save.side_effect = lambda **_kwargs: setattr(target, "grand_total", 380)
 
-		result = consolidate_school_admin_invoices_data({"invoices": ["SINV-NEW", "SINV-OLD"]})
+		with patch("qas_custom.services.workshops.lock_payg_operations_for_invoices", return_value={}):
+			result = consolidate_school_admin_invoices_data({"invoices": ["SINV-NEW", "SINV-OLD"]})
 
 		self.assertEqual(result["invoice"], "SINV-OLD")
 		self.assertEqual(result["merged_invoices"], 1)
@@ -282,6 +294,61 @@ class TestWorkshops(TestCase):
 		)
 		workshop_frappe.delete_doc.assert_called_once_with("Sales Invoice", "SINV-NEW", ignore_permissions=True)
 		workshop_frappe.db.commit.assert_called_once()
+
+	@patch("qas_custom.services.workshops._relink_invoice_records")
+	@patch("qas_custom.services.workshops._invoice_linked_records", return_value={})
+	@patch("qas_custom.services.workshops._validate_no_invoice_payment_activity")
+	@patch("qas_custom.services.workshops.apply_invoice_payment_snapshot")
+	@patch("qas_custom.services.workshops.sync_invoice_student_summary")
+	@patch("qas_custom.services.workshops.run_invoice_mutation_as_administrator", side_effect=lambda callback: callback())
+	@patch("qas_custom.services.workshops._require_school_admin")
+	@patch("qas_custom.services.workshops.frappe")
+	def test_consolidate_two_payg_drafts_preserves_each_source_and_relinks_before_delete(
+		self, workshop_frappe, _require, _administrator, _summary, _snapshot, _payment,
+		_linked, _relink_legacy,
+	):
+		def invoice(name, creation, operation):
+			doc = Mock()
+			doc.name, doc.creation, doc.docstatus, doc.grand_total = name, creation, 0, 100
+			doc.customer, doc.parent = "CUS-1", "PAR-1"
+			doc.items = [frappe._dict(name="ROW-" + operation, item_code="PAYG",
+				qas_source_doctype="QAS PAYG Operation", qas_source_document=operation)]
+			doc.taxes = []
+			values = {"creation": creation, "status": "Draft", "qas_invoice_type": "PAYG Card",
+				"parent": doc.parent, "customer": doc.customer, "company": "QAS", "currency": "AUD",
+				"items": doc.items, "taxes": doc.taxes}
+			doc.get.side_effect = lambda key, default=None: values.get(key, default)
+			def append(field, row_values):
+				row = frappe._dict(row_values)
+				getattr(doc, field).append(row)
+				return row
+			doc.append.side_effect = append
+			def save(**_kwargs):
+				for index, row in enumerate(doc.items):
+					row.name = row.get("name") or f"MERGED-{index}"
+			doc.save.side_effect = save
+			return doc
+
+		target = invoice("SINV-OLD", "2026-09-01", "OP-1")
+		source = invoice("SINV-NEW", "2026-09-02", "OP-2")
+		operations = {name: frappe._dict(name=name, invoice=invoice_name,
+			family_parent="PAR-1", customer="CUS-1", invoice_request_key="key-" + name,
+			save=Mock()) for name, invoice_name in (("OP-1", target.name), ("OP-2", source.name))}
+		order = []
+		def get_doc(doctype, name, **kwargs):
+			if kwargs.get("for_update"):
+				order.append("invoice-lock")
+			return {target.name: target, source.name: source}[name]
+		workshop_frappe.get_doc.side_effect = get_doc
+		workshop_frappe.delete_doc.side_effect = lambda *_args, **_kwargs: self.assertEqual(operations["OP-2"].invoice, target.name)
+		with patch("qas_custom.services.workshops.lock_payg_operations_for_invoices",
+				side_effect=lambda _names: (order.append("operations-lock"), operations)[1]):
+			result = consolidate_school_admin_invoices_data({"invoices": [source.name, target.name]})
+		self.assertEqual(result["invoice"], target.name)
+		self.assertEqual(order[:2], ["operations-lock", "invoice-lock"])
+		self.assertEqual([row.qas_source_document for row in target.items], ["OP-1", "OP-2"])
+		self.assertEqual(operations["OP-2"].invoice_request_key, "key-OP-2")
+		operations["OP-2"].save.assert_called_once_with(ignore_permissions=True)
 
 	@patch("qas_custom.services.workshops.set_if_field")
 	@patch("qas_custom.services.workshops.frappe")

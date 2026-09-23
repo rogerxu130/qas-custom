@@ -2,6 +2,7 @@ import frappe
 from frappe.model.document import Document
 from qas_custom.modules.payg.money import stored_currency
 from qas_custom.modules.payg.rules import as_brisbane_datetime
+from qas_custom.modules.payg.invoice_links import permitted_invoice_relink
 from qas_custom.qas_custom.doctype.payg_validation import nonnegative, integer
 
 
@@ -61,6 +62,8 @@ class QASPAYGOperation(Document):
         for field in ("card", "target_card", "invoice", "issue_request_key", "invoice_request_key"):
             old_value, new_value = before.get(field), self.get(field)
             if old_value and new_value != old_value:
+                if field == "invoice" and permitted_invoice_relink(self.name, old_value, new_value):
+                    continue
                 frappe.throw(f"PAYG operation {field} can only be set once")
         transitions = {"Pending": {"Pending", "Completed", "Cancelled"},
                        "Completed": {"Completed"}, "Cancelled": {"Cancelled"}}

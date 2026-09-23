@@ -8,6 +8,7 @@ from qas_custom.modules.billing.commands import get_invoice_item, run_invoice_mu
 from qas_custom.modules.billing.drafts import new_invoice_draft
 from qas_custom.modules.billing.invoice_settings import apply_invoice_payment_snapshot
 from qas_custom.modules.notifications.guard import disable_sales_invoice_auto_notifications
+from qas_custom.modules.payg.invoice_links import allow_invoice_relink
 from qas_custom.services.support_view import get_support_view_token
 
 
@@ -19,16 +20,74 @@ def _admin():
 
 
 def _linked_invoice(operation):
-    invoice = frappe.get_doc("Sales Invoice", operation.invoice)
+    invoice = frappe.get_doc("Sales Invoice", operation.invoice, for_update=True)
     if invoice.customer != operation.customer or invoice.get("parent") != operation.family_parent:
         frappe.throw("PAYG invoice customer or family does not match operation")
-    if len(invoice.get("items") or []) != 1:
-        frappe.throw("PAYG invoice source must have exactly one operation line")
-    line = invoice.get("items")[0]
-    if (line.get("qas_source_doctype"), line.get("qas_source_document")) != (
-            "QAS PAYG Operation", operation.name):
+    matching = [row for row in (invoice.get("items") or [])
+                if (row.get("qas_source_doctype"), row.get("qas_source_document")) ==
+                ("QAS PAYG Operation", operation.name)]
+    if len(matching) != 1:
         frappe.throw("PAYG invoice line source does not match operation")
     return invoice
+
+
+def payg_sources(invoice):
+    """Return row-name/operation pairs; reject incomplete provenance."""
+    result = {}
+    seen = set()
+    for row in invoice.get("items") or []:
+        doctype, operation = row.get("qas_source_doctype"), row.get("qas_source_document")
+        if not doctype and not operation:
+            continue
+        if doctype and doctype != "QAS PAYG Operation":
+            continue
+        if doctype != "QAS PAYG Operation" or not operation or operation in seen or not row.get("name"):
+            frappe.throw("Invalid or duplicate PAYG invoice line source")
+        seen.add(operation)
+        result[row.name] = operation
+    if invoice.get("qas_invoice_type") == "PAYG Card" and not result:
+        frappe.throw("PAYG invoice line source is missing")
+    return result
+
+
+def validate_payg_bindings(invoice, locked_operations):
+    sources = payg_sources(invoice)
+    if set(sources.values()) != set(locked_operations):
+        frappe.throw("PAYG invoice sources changed; retry")
+    for operation_id in sources.values():
+        operation = locked_operations[operation_id]
+        if (operation.invoice != invoice.name or operation.customer != invoice.customer
+                or operation.family_parent != invoice.get("parent")):
+            frappe.throw("PAYG invoice source family/customer or link does not match operation")
+    return sources
+
+
+def lock_payg_operations_for_invoices(invoice_names):
+    """Lock Operations before any Invoice row lock, in a stable global order."""
+    ids = set(frappe.get_all("QAS PAYG Operation", filters={"invoice": ["in", invoice_names]},
+                             pluck="name", limit_page_length=0))
+    for invoice_name in invoice_names:
+        invoice = frappe.get_doc("Sales Invoice", invoice_name)
+        ids.update(payg_sources(invoice).values())
+    return {name: frappe.get_doc("QAS PAYG Operation", name, for_update=True)
+            for name in sorted(ids)}
+
+
+def relink_consolidated_payg_operations(invoices, target, locked_operations):
+    selected = {invoice.name for invoice in invoices}
+    target_sources = payg_sources(target)
+    if set(target_sources.values()) != set(locked_operations):
+        frappe.throw("Consolidated PAYG invoice sources changed; retry")
+    for operation_id in sorted(locked_operations):
+        operation = locked_operations[operation_id]
+        if operation.invoice not in selected or operation.customer != target.customer or operation.family_parent != target.get("parent"):
+            frappe.throw("PAYG operation cannot be consolidated into another family")
+        if operation.invoice == target.name:
+            continue
+        source = operation.invoice
+        operation.invoice = target.name
+        with allow_invoice_relink(operation.name, source, target.name):
+            operation.save(ignore_permissions=True)
 
 
 def create_payg_draft(operation_id, invoice_request_key):

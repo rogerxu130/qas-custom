@@ -16,6 +16,10 @@ from qas_custom.modules.billing.commands import (
 	sync_invoice_student_summary,
 )
 from qas_custom.modules.billing.drafts import new_invoice_draft
+from qas_custom.modules.billing.payg_drafts import (
+	lock_payg_operations_for_invoices, validate_payg_bindings,
+	relink_consolidated_payg_operations,
+)
 from qas_custom.modules.billing.invoice_settings import apply_invoice_payment_snapshot
 from qas_custom.modules.billing.store_credit import get_invoice_payable_amount
 from qas_custom.modules.common import has_field, set_if_field
@@ -251,15 +255,25 @@ def consolidate_school_admin_invoices_data(payload=None):
 	if len(invoice_names) < 2:
 		frappe.throw(_("Select at least two draft invoices to consolidate."))
 
-	invoices = [frappe.get_doc("Sales Invoice", name) for name in invoice_names]
-	_validate_invoice_consolidation(invoices)
-	_validate_no_invoice_payment_activity(invoice_names)
-	invoices.sort(key=lambda doc: (str(doc.get("creation") or ""), doc.name))
-	target, sources = invoices[0], invoices[1:]
-	linked_records = _invoice_linked_records(invoice_names)
 	savepoint = "consolidate_family_draft_invoices"
 	frappe.db.savepoint(savepoint)
 	try:
+		payg_operations = lock_payg_operations_for_invoices(invoice_names)
+		# Operations are locked first, as in PAYG draft creation. Lock invoices
+		# in name order and recheck sources against their current rows.
+		invoices_by_name = {name: frappe.get_doc("Sales Invoice", name, for_update=True)
+		                    for name in sorted(invoice_names)}
+		invoices = [invoices_by_name[name] for name in invoice_names]
+		_validate_invoice_consolidation(invoices)
+		for invoice in invoices:
+			validate_payg_bindings(invoice, {
+				operation_id: operation for operation_id, operation in payg_operations.items()
+				if operation.invoice == invoice.name
+			})
+		_validate_no_invoice_payment_activity(invoice_names)
+		invoices.sort(key=lambda doc: (str(doc.get("creation") or ""), doc.name))
+		target, sources = invoices[0], invoices[1:]
+		linked_records = _invoice_linked_records(invoice_names)
 		for source in sources:
 			for row in source.get("items") or []:
 				target.append("items", _copy_child_row_values(row))
@@ -273,6 +287,7 @@ def consolidate_school_admin_invoices_data(payload=None):
 		sync_invoice_student_summary(target)
 		apply_invoice_payment_snapshot(target)
 		run_invoice_mutation_as_administrator(lambda: target.save(ignore_permissions=True))
+		relink_consolidated_payg_operations(invoices, target, payg_operations)
 
 		_relink_invoice_records(linked_records, target, invoice_names)
 
@@ -735,6 +750,13 @@ def _validate_invoice_consolidation(invoices):
 		frappe.throw(_("Selected invoices must use the same Company."))
 	if len(currencies) != 1 or not next(iter(currencies), None):
 		frappe.throw(_("Selected invoices must use the same Currency."))
+	percent_discounts = {(invoice.get("apply_discount_on") if flt(invoice.get("additional_discount_percentage") or 0) else None,
+		flt(invoice.get("additional_discount_percentage") or 0)) for invoice in invoices}
+	if len(percent_discounts) > 1 or any(
+		flt(invoice.get("discount_amount") or 0) and not flt(invoice.get("additional_discount_percentage") or 0)
+		for invoice in invoices
+	):
+		frappe.throw(_("Selected invoices have incompatible discounts and cannot be consolidated."))
 	percentage_tax_structures = {_percentage_tax_structure(invoice) for invoice in invoices}
 	if len(percentage_tax_structures) != 1:
 		frappe.throw(_("Selected invoices have different tax or charge structures and cannot be consolidated."))

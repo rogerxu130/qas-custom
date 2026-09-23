@@ -357,6 +357,27 @@ class TestPaygControllers(TestCase):
         with self.assertRaises(ValueError):
             op.validate()
 
+    def test_invoice_relink_token_is_exact_and_does_not_allow_key_change(self):
+        from qas_custom.modules.payg.invoice_links import allow_invoice_relink
+        controller = self.controller("operation")
+        before = self.doc(name="OP-1", invoice="SINV-SOURCE", invoice_request_key="invoice-1",
+                          status="Pending")
+        op = controller()
+        op.__dict__.update(before.__dict__)
+        op.invoice = "SINV-TARGET"
+        op.get = lambda field: getattr(op, field, None)
+        op.get_doc_before_save = lambda: before
+        with self.assertRaises(ValueError):
+            controller._validate_existing(op)
+        with allow_invoice_relink("OP-OTHER", "SINV-SOURCE", "SINV-TARGET"):
+            with self.assertRaises(ValueError):
+                controller._validate_existing(op)
+        with allow_invoice_relink("OP-1", "SINV-SOURCE", "SINV-TARGET"):
+            controller._validate_existing(op)
+            op.invoice_request_key = "invoice-2"
+            with self.assertRaises(ValueError):
+                controller._validate_existing(op)
+
     def test_operation_reason_cannot_change_or_clear_after_insert(self):
         controller = self.controller("operation")
         before = self.doc(operation_type="Purchase", request_key="req-1",

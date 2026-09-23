@@ -1,6 +1,6 @@
 from unittest import TestCase
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 import frappe
 
@@ -11,6 +11,7 @@ from qas_custom.services.school_admin import (
 	_apply_invoice_adjustments,
 	_apply_invoice_items,
 	_invoice_edit_totals,
+	update_school_admin_draft_invoice_data,
 	submit_school_admin_invoice_data,
 )
 
@@ -49,6 +50,85 @@ class _Invoice(frappe._dict):
 
 
 class TestSchoolAdminDraftInvoiceAdjustments(TestCase):
+	def test_payg_save_and_submit_keep_line_source_and_family(self):
+		from contextlib import ExitStack
+		invoice = _Invoice(name="SINV-PAYG", docstatus=0, customer="CUS-1", parent="PAR-1",
+			qas_invoice_type="PAYG Card", grand_total=400, taxes=[], payment_schedule=[],
+			items=[_Child(name="ROW-1", item_code="PAYG", description="Card", qty=1, rate=400,
+				qas_source_doctype="QAS PAYG Operation", qas_source_document="OP-1")])
+		invoice.flags = SimpleNamespace(ignore_permissions=False)
+		invoice.save = Mock()
+		operation = frappe._dict(name="OP-1", invoice="SINV-PAYG", family_parent="PAR-1", customer="CUS-1")
+		fake_db = SimpleNamespace(savepoint=Mock(), commit=Mock(), rollback=Mock())
+		fake_frappe = SimpleNamespace(db=fake_db, get_doc=Mock(return_value=invoice),
+			throw=Mock(side_effect=lambda message: (_ for _ in ()).throw(ValueError(message))))
+		sequence = Mock()
+		def lock_ops(_names):
+			sequence.operations()
+			return {"OP-1": operation}
+		def lock_invoice(_name):
+			sequence.invoice()
+			return invoice
+		payload = {"items": [{"name": "ROW-1", "item_code": "PAYG", "description": "Edited card",
+			"qty": 1, "rate": 380}]}
+		# Parent Portal SchoolAdminView.vue must pass `name: item.name` in its
+		# invoice-item mapping. A missing stable child ID is rejected so an
+		# editor cannot silently reassign a merged PAYG operation line.
+		patches = [
+			patch("qas_custom.services.school_admin.frappe", fake_frappe),
+			patch("qas_custom.services.school_admin._require_school_admin"),
+			patch("qas_custom.services.school_admin._", side_effect=lambda value: value),
+			patch("qas_custom.services.school_admin.lock_payg_operations_for_invoices", side_effect=lock_ops),
+			patch("qas_custom.services.school_admin._lock_school_admin_draft_invoice", side_effect=lock_invoice),
+			patch("qas_custom.services.school_admin.apply_invoice_payment_snapshot", return_value=False),
+			patch("qas_custom.services.school_admin._run_school_admin_invoice_mutation", side_effect=lambda callback: callback()),
+			patch("qas_custom.services.school_admin._add_comment"),
+			patch("qas_custom.services.school_admin._build_invoice_payload", return_value={"name": "SINV-PAYG"}),
+			patch("qas_custom.services.school_admin.apply_store_credit_to_invoice", return_value={"applied": 0}),
+			patch("qas_custom.services.school_admin.sync_invoice_store_credit_snapshot"),
+			patch("qas_custom.services.school_admin.get_invoice_store_credit_applied", return_value=0),
+			patch("qas_custom.services.school_admin._skipped_invoice_notification", return_value={"status": "Skipped"}),
+		]
+		with ExitStack() as stack:
+			for item in patches:
+				stack.enter_context(item)
+			update_school_admin_draft_invoice_data("SINV-PAYG", payload)
+			self.assertEqual((invoice.get("items")[0].qas_source_doctype,
+				invoice.get("items")[0].qas_source_document), ("QAS PAYG Operation", "OP-1"))
+			self.assertEqual(invoice.get("items")[0].rate, 380)
+			self.assertEqual(sequence.mock_calls[:2], [call.operations(), call.invoice()])
+			sequence.reset_mock()
+			submit_school_admin_invoice_data("SINV-PAYG", payload=payload, send_notifications=False)
+			self.assertEqual(invoice.docstatus, 1)
+			self.assertEqual(sequence.mock_calls[:2], [call.operations(), call.invoice()])
+			with self.assertRaisesRegex(ValueError, "customer and family"):
+				_apply_school_admin_draft_invoice_payload(invoice, {"customer": "CUS-OTHER"})
+
+	def test_payg_editor_rejects_removed_or_forged_source(self):
+		invoice = _Invoice(name="SINV-PAYG", customer="CUS-1", parent="PAR-1", qas_invoice_type="PAYG Card",
+			grand_total=400, taxes=[], items=[_Child(name="ROW-1", item_code="PAYG", description="Card",
+				qty=1, rate=400, qas_source_doctype="QAS PAYG Operation", qas_source_document="OP-1")])
+		with patch("qas_custom.services.school_admin.frappe.throw", side_effect=lambda message: (_ for _ in ()).throw(ValueError(message))), patch(
+			"qas_custom.services.school_admin.apply_invoice_payment_snapshot", return_value=False
+		):
+			with self.assertRaisesRegex(ValueError, "removed"):
+				_apply_school_admin_draft_invoice_payload(invoice, {"items": [{"item_code": "PAYG", "description": "Card", "qty": 1, "rate": 400}]})
+		invoice.set("items", [_Child(name="ROW-1", item_code="PAYG", description="Card", qty=1,
+			rate=400, qas_source_doctype="QAS PAYG Operation", qas_source_document="OP-1")])
+		with patch("qas_custom.services.school_admin.frappe.throw", side_effect=lambda message: (_ for _ in ()).throw(ValueError(message))), patch(
+			"qas_custom.services.school_admin.apply_invoice_payment_snapshot", return_value=False
+		):
+			with self.assertRaisesRegex(ValueError, "changed"):
+				_apply_school_admin_draft_invoice_payload(invoice, {"items": [{"name": "ROW-1", "item_code": "PAYG",
+					"description": "Card", "qty": 1, "rate": 400, "qas_source_document": "OP-OTHER"}]})
+		invoice.set("items", [_Child(name="ROW-1", item_code="PAYG", description="Card", qty=1,
+			rate=400, qas_source_doctype="QAS PAYG Operation", qas_source_document="OP-1")])
+		with patch("qas_custom.services.school_admin.frappe.throw", side_effect=lambda message: (_ for _ in ()).throw(ValueError(message))), patch(
+			"qas_custom.services.school_admin.apply_invoice_payment_snapshot", return_value=False
+		):
+			with self.assertRaisesRegex(ValueError, "item, quantity"):
+				_apply_school_admin_draft_invoice_payload(invoice, {"items": [{"name": "ROW-1", "item_code": "OTHER",
+					"description": "Card", "qty": 1, "rate": 400}]})
 	@patch("qas_custom.services.school_admin.apply_invoice_payment_snapshot", return_value=False)
 	def test_edited_due_date_survives_erpnext_save_and_submit_recalculation(self, _snapshot):
 		from erpnext.controllers.accounts_controller import AccountsController
@@ -90,6 +170,10 @@ class TestSchoolAdminDraftInvoiceAdjustments(TestCase):
 
 		with patch("qas_custom.services.school_admin.frappe", fake_frappe), patch(
 			"qas_custom.services.school_admin._require_school_admin"
+		), patch(
+			"qas_custom.services.school_admin.lock_payg_operations_for_invoices", return_value={}
+		), patch(
+			"qas_custom.services.school_admin.validate_payg_bindings", return_value={}
 		), patch(
 			"qas_custom.services.school_admin._", side_effect=lambda message: message
 		), patch(

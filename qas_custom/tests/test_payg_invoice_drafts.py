@@ -40,6 +40,7 @@ class TestPaygDrafts(TestCase):
         self.fake = SimpleNamespace(
             session=SimpleNamespace(user="admin@example.com"),
             get_roles=lambda _user: ["School Admin"], get_doc=Mock(side_effect=get_doc),
+            get_all=Mock(return_value=[]),
             db=SimpleNamespace(savepoint=Mock(), rollback=Mock(), commit=Mock(), sql=Mock(),
                                get_value=Mock(return_value="C-1"), exists=Mock(return_value=True)),
             throw=lambda message, *_args: (_ for _ in ()).throw(ValueError(message)),
@@ -71,6 +72,13 @@ class TestPaygDrafts(TestCase):
         self.invoice.get("items")[0].qas_source_document = "OP-OTHER"
         with self.assertRaisesRegex(ValueError, "source"):
             payg_drafts.create_payg_draft("OP-1", "invoice-1")
+
+    def test_linked_invoice_can_have_another_operation_line_after_consolidation(self):
+        payg_drafts.create_payg_draft("OP-1", "invoice-1")
+        self.invoice.append("items", {"qas_source_doctype": "QAS PAYG Operation",
+                                      "qas_source_document": "OP-2"})
+        self.assertIs(payg_drafts.create_payg_draft("OP-1", "invoice-1"), self.invoice)
+        self.fake.get_doc.assert_any_call("Sales Invoice", "SINV-NEW", for_update=True)
 
     def test_exchange_positive_uses_delta_and_negative_has_no_invoice(self):
         self.operation.operation_type = "Exchange"
@@ -106,12 +114,48 @@ class TestPaygDrafts(TestCase):
         self.fake.get_doc.assert_any_call("QAS PAYG Operation", "OP-1", for_update=True)
 
     def test_exchange_wrapper_rolls_back_on_draft_failure(self):
-        with patch("qas_custom.modules.payg.card_admin.exchange_card", return_value=self.operation), \
+        state = {"operation": None, "target_card": None, "entries": []}
+        snapshots = {}
+        def savepoint(name):
+            snapshots[name] = (state["operation"], state["target_card"], list(state["entries"]))
+        def rollback(save_point):
+            state["operation"], state["target_card"], state["entries"] = snapshots[save_point]
+        def exchange(*_args, **_kwargs):
+            state.update(operation="OP-1", target_card="CARD-2", entries=["Transfer Out", "Transfer In"])
+            return self.operation
+        self.fake.db.savepoint.side_effect = savepoint
+        self.fake.db.rollback.side_effect = rollback
+        with patch("qas_custom.modules.payg.card_admin.exchange_card", side_effect=exchange), \
                 patch.object(payg_drafts, "create_payg_draft", side_effect=RuntimeError("invoice failed")):
             with self.assertRaisesRegex(RuntimeError, "invoice failed"):
                 payg_drafts.exchange_card_with_draft("CARD-1", "PROD-1", "exchange-1", "invoice-1")
         self.fake.db.rollback.assert_called_once()
         self.assertIn("payg_exchange_invoice_", self.fake.db.rollback.call_args.kwargs["save_point"])
+        self.assertEqual(state, {"operation": None, "target_card": None, "entries": []})
+
+    def test_payg_operation_locks_are_sorted_before_invoice_mutation(self):
+        first = Doc(name="SINV-1", qas_invoice_type="PAYG Card", items=[
+            Doc(name="ROW-1", qas_source_doctype="QAS PAYG Operation", qas_source_document="OP-Z")])
+        second = Doc(name="SINV-2", qas_invoice_type="PAYG Card", items=[
+            Doc(name="ROW-2", qas_source_doctype="QAS PAYG Operation", qas_source_document="OP-A")])
+        order = []
+        def get_doc(doctype, name, **kwargs):
+            if doctype == "Sales Invoice":
+                return {"SINV-1": first, "SINV-2": second}[name]
+            order.append((name, kwargs.get("for_update")))
+            return Doc(name=name)
+        self.fake.get_doc.side_effect = get_doc
+        payg_drafts.lock_payg_operations_for_invoices(["SINV-1", "SINV-2"])
+        self.assertEqual(order, [("OP-A", True), ("OP-Z", True)])
+
+    def test_linked_operation_without_invoice_line_is_detected(self):
+        self.operation.invoice = "SINV-1"
+        invoice = Doc(name="SINV-1", customer="C-1", parent="P-1", qas_invoice_type="Other", items=[])
+        self.fake.get_all.return_value = ["OP-1"]
+        self.fake.get_doc.side_effect = lambda dt, name, **_kwargs: invoice if dt == "Sales Invoice" else self.operation
+        locked = payg_drafts.lock_payg_operations_for_invoices(["SINV-1"])
+        with self.assertRaisesRegex(ValueError, "sources changed"):
+            payg_drafts.validate_payg_bindings(invoice, locked)
 
     def test_existing_course_or_workshop_draft_is_never_queried(self):
         payg_drafts.create_payg_draft("OP-1", "invoice-1")
@@ -152,3 +196,45 @@ class TestPaygInvoicePatch(TestCase):
         self.assertEqual(values[("Custom Field", "Sales Invoice Item", "qas_line_type")].options,
                          "Course Fee\nWorkshop\nPAYG Card\nPAYG Exchange")
         self.assertNotIn("default", [write[2] for write in writes])
+
+
+class TestPaygCrossModuleOrders(TestCase):
+    def _run_order(self, invoice_first):
+        from qas_custom.tests.test_payg_issue import TestIssue
+        from qas_custom.modules.payg.issue import issue_card
+
+        case = TestIssue()
+        case.setUp()
+        try:
+            case.operation.invoice = None
+            case.operation.invoice_request_key = None
+            case.product.invoice_item = "ITEM-1"
+            case.fake.db.exists = Mock(return_value=True)
+            case.fake.db.commit = Mock()
+            invoice = Doc(name=None, items=[], customer="C-1", parent="P-1", qas_invoice_type="PAYG Card")
+            with patch.object(payg_drafts, "frappe", case.fake), \
+                    patch.object(payg_drafts, "get_support_view_token", return_value=None), \
+                    patch.object(payg_drafts, "disable_sales_invoice_auto_notifications"), \
+                    patch.object(payg_drafts, "new_invoice_draft", return_value=invoice), \
+                    patch.object(payg_drafts, "apply_invoice_payment_snapshot"), \
+                    patch.object(payg_drafts, "run_invoice_mutation_as_administrator", side_effect=lambda f: f()):
+                if invoice_first:
+                    created = payg_drafts.create_payg_draft("OP-1", "invoice-1")
+                    card = issue_card("OP-1", "issue-1")
+                else:
+                    card = issue_card("OP-1", "issue-1")
+                    created = payg_drafts.create_payg_draft("OP-1", "invoice-1")
+            self.assertIs(created, invoice)
+            self.assertEqual(case.operation.invoice, "SINV-NEW")
+            self.assertEqual(case.operation.card, card.name)
+            self.assertEqual(case.operation.issue_request_key, "issue-1")
+            self.assertEqual(case.operation.invoice_request_key, "invoice-1")
+            case.fake.db.commit.assert_not_called()
+        finally:
+            case.doCleanups()
+
+    def test_invoice_then_issue_uses_same_operation(self):
+        self._run_order(True)
+
+    def test_issue_then_invoice_uses_same_operation(self):
+        self._run_order(False)

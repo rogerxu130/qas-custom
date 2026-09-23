@@ -63,6 +63,9 @@ from qas_custom.modules.billing.commands import (
 	get_invoice_item,
 )
 from qas_custom.modules.billing.presentation import build_course_invoice_description, invoice_item_schedule
+from qas_custom.modules.billing.payg_drafts import (
+	lock_payg_operations_for_invoices, payg_sources, validate_payg_bindings,
+)
 from qas_custom.modules.billing.payment_plans import apply_payment_plan, has_active_payment_plan, payment_plan_payload
 from qas_custom.modules.makeup.commands import (
     DEFAULT_VOUCHER_EXPIRY_DAYS,
@@ -1892,8 +1895,11 @@ def update_school_admin_draft_invoice_data(invoice=None, payload=None):
 	savepoint = "school_admin_update_draft_invoice"
 	frappe.db.savepoint(savepoint)
 	try:
+		payg_operations = lock_payg_operations_for_invoices([invoice])
 		doc = _lock_school_admin_draft_invoice(invoice)
+		validate_payg_bindings(doc, payg_operations)
 		change = _apply_school_admin_draft_invoice_payload(doc, payload)
+		validate_payg_bindings(doc, payg_operations)
 		_run_school_admin_invoice_mutation(lambda: doc.save(ignore_permissions=True))
 		_add_comment(
 			"Sales Invoice",
@@ -1919,7 +1925,7 @@ def _lock_school_admin_draft_invoice(invoice):
 		"select name from `tabSales Invoice` where name = %s for update",
 		(invoice,),
 	)
-	doc = frappe.get_doc("Sales Invoice", invoice)
+	doc = frappe.get_doc("Sales Invoice", invoice, for_update=True)
 	if cint(doc.docstatus) != 0:
 		frappe.throw(_("Only draft invoices can be edited or submitted."))
 	return doc
@@ -1933,6 +1939,9 @@ def _apply_school_admin_draft_invoice_payload(doc, payload):
 	operator to save an intermediate Draft first.
 	"""
 	previous_total = get_invoice_total_amount(doc)
+	payg_bindings = payg_sources(doc)
+	payg_original_rows = {row.name: row for row in (doc.get("items") or []) if row.get("name") in payg_bindings}
+	payg_customer, payg_parent = doc.get("customer"), doc.get("parent")
 	fallback_accounts = _invoice_item_financial_values(doc, "income_account")
 	fallback_cost_centers = _invoice_item_financial_values(doc, "cost_center")
 	is_manual_invoice = cint(doc.get("qas_is_manual_invoice")) or (doc.get("source_type") or "").strip().lower() == "manual"
@@ -1982,7 +1991,8 @@ def _apply_school_admin_draft_invoice_payload(doc, payload):
 	_apply_invoice_payment_payload(doc, payload)
 	apply_invoice_payment_snapshot(doc)
 	if "items" in payload:
-		_apply_invoice_items(doc, payload.get("items") or [])
+		_apply_invoice_items(doc, payload.get("items") or [], payg_bindings=payg_bindings,
+			payg_original_rows=payg_original_rows)
 	if "adjustments" in payload:
 		_apply_invoice_adjustments(
 			doc,
@@ -1991,6 +2001,10 @@ def _apply_school_admin_draft_invoice_payload(doc, payload):
 			fallback_cost_centers=fallback_cost_centers,
 		)
 	_sync_invoice_student_summary(doc)
+	if payg_bindings and (doc.get("customer"), doc.get("parent")) != (payg_customer, payg_parent):
+		frappe.throw(_("PAYG invoice customer and family cannot change."))
+	if payg_bindings and payg_sources(doc) != payg_bindings:
+		frappe.throw(_("PAYG invoice line sources cannot change."))
 	doc.calculate_taxes_and_totals()
 	if flt(doc.get("grand_total")) < 0:
 		frappe.throw(_("Invoice total cannot be negative."))
@@ -2026,8 +2040,11 @@ def submit_school_admin_invoice_data(invoice=None, enqueue_notification=False, s
 	savepoint = "school_admin_submit_invoice"
 	frappe.db.savepoint(savepoint)
 	try:
+		payg_operations = lock_payg_operations_for_invoices([invoice])
 		doc = _lock_school_admin_draft_invoice(invoice)
+		validate_payg_bindings(doc, payg_operations)
 		change = _apply_school_admin_draft_invoice_payload(doc, draft_payload) if draft_payload is not None else None
+		validate_payg_bindings(doc, payg_operations)
 
 		def submit_invoice():
 			if apply_invoice_payment_snapshot(doc):
@@ -6966,11 +6983,31 @@ def _invoice_status_label(doc):
 	return doc.get("status")
 
 
-def _apply_invoice_items(invoice, items):
+def _apply_invoice_items(invoice, items, *, payg_bindings=None, payg_original_rows=None):
 	if not items:
 		frappe.throw(_("At least one invoice item is required."))
+	payg_bindings = payg_bindings or {}
+	payg_original_rows = payg_original_rows or {}
+	seen_payg_rows = set()
 	invoice.set("items", [])
 	for row in items:
+		row_name = row.get("name")
+		linked_operation = payg_bindings.get(row_name)
+		claimed_doctype = row.get("qas_source_doctype")
+		claimed_document = row.get("qas_source_document")
+		if linked_operation:
+			if row_name in seen_payg_rows or (claimed_doctype and claimed_doctype != "QAS PAYG Operation") or (claimed_document and claimed_document != linked_operation):
+				frappe.throw(_("PAYG invoice line source cannot be changed or duplicated."))
+			seen_payg_rows.add(row_name)
+			original = payg_original_rows[row_name]
+			for field in ("item_code", "qty", "course", "qas_line_type"):
+				changed = (flt(row.get(field)) != flt(original.get(field))) if field == "qty" else (
+					str(row.get(field) or "") != str(original.get(field) or "")
+				)
+				if field in row and changed:
+					frappe.throw(_("PAYG invoice item, quantity, course and line type cannot change."))
+		elif claimed_doctype == "QAS PAYG Operation" or (claimed_document and not claimed_doctype):
+			frappe.throw(_("PAYG invoice line source cannot be added by the editor."))
 		item_code = row.get("item_code") or row.get("item")
 		if not item_code:
 			frappe.throw(_("Invoice item code is required."))
@@ -6986,10 +7023,10 @@ def _apply_invoice_items(invoice, items):
 		if rate < 0:
 			frappe.throw(_("Invoice item unit price cannot be negative. Use an Adjustment for deductions."))
 		item_values = {
-			"item_code": item_code,
-			"item_name": row.get("item_name") or item_code,
+			"item_code": original.get("item_code") if linked_operation else item_code,
+			"item_name": (original.get("item_name") or item_code) if linked_operation else (row.get("item_name") or item_code),
 			"description": description,
-			"qty": qty,
+			"qty": original.get("qty") if linked_operation else qty,
 			"rate": rate,
 		}
 		for fieldname in ("income_account", "cost_center", "warehouse", "uom", "conversion_factor"):
@@ -6999,16 +7036,26 @@ def _apply_invoice_items(invoice, items):
 			"items",
 			item_values,
 		)
+		if linked_operation:
+			item.name = row_name
+			# This is the same persisted child row with edited financial values.
+			# Frappe otherwise treats a newly appended object as an INSERT and
+			# collides with its existing primary key.
+			item.set("__islocal", 0)
+			_set_if_field(item, "qas_source_doctype", "QAS PAYG Operation")
+			_set_if_field(item, "qas_source_document", linked_operation)
 		student = row.get("student")
-		_set_if_field(item, "qas_line_type", row.get("qas_line_type") or row.get("line_type") or "Other")
+		_set_if_field(item, "qas_line_type", original.get("qas_line_type") if linked_operation else (row.get("qas_line_type") or row.get("line_type") or "Other"))
 		_set_if_field(item, "student", student)
 		_set_if_field(item, "student_display_name", row.get("student_display_name") or (get_student_parent_name(student) if student else None))
 		_set_if_field(item, "student_code", row.get("student_code") or (get_student_display_code(student) if student else None))
 		_set_if_field(item, "enrollment", row.get("enrollment"))
-		_set_if_field(item, "course", row.get("course"))
+		_set_if_field(item, "course", original.get("course") if linked_operation else row.get("course"))
 		_set_if_field(item, "term", row.get("term"))
 		_set_if_field(item, "course_session", row.get("course_session"))
 		_set_if_field(item, "session_count", row.get("session_count"))
+	if seen_payg_rows != set(payg_bindings):
+		frappe.throw(_("PAYG invoice line source cannot be removed."))
 
 
 def _apply_invoice_adjustments(invoice, adjustments, *, fallback_accounts=None, fallback_cost_centers=None):
