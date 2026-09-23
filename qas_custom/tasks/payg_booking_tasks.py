@@ -30,7 +30,7 @@ def _lock_due_payg_bookings(batch_size=200):
             except Exception:
                 frappe.db.rollback()
                 try:
-                    frappe.log_error(title="PAYG booking lock failed", message=f"Booking {row.name}")
+                    frappe.log_error(frappe.get_traceback(), f"PAYG booking lock failed: {row.name}")
                 except Exception:
                     frappe.logger("qas_custom").exception("PAYG booking lock failed: %s", row.name)
         if len(rows) < batch_size:

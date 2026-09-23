@@ -3,9 +3,10 @@ import json
 from uuid import uuid4
 
 import frappe
-from frappe.utils import get_datetime, get_datetime_in_timezone
+from frappe.utils import get_datetime_in_timezone
 
 from qas_custom.modules.course_schedule import session_resources
+from qas_custom.modules.payg.rules import as_brisbane_datetime
 from qas_custom.services.support_view import get_support_view_token
 
 
@@ -32,8 +33,17 @@ def _locked_booking(booking_id):
     frappe.get_doc("Term", slot.term, for_update=True)
     if slot.classroom:
         frappe.get_doc("Classroom", slot.classroom, for_update=True)
-    rows = session_resources.active_rows(session.name, lock=True)
-    return booking, card, rows
+    session_resources.active_rows(session.name, lock=True)
+    if not booking.attendance_entry:
+        frappe.throw("PAYG booking attendance was not found")
+    attendance = frappe.get_doc("Class Attendance Entry", booking.attendance_entry, for_update=True)
+    if (attendance.student, attendance.course_session,
+            attendance.source_doctype, attendance.source_document) != (
+            booking.student, booking.course_session, BOOKING, booking.name):
+        frappe.throw("PAYG booking attendance does not match its source")
+    if attendance.status == "Cancelled" and booking.status != "Cancelled":
+        frappe.throw("PAYG booking attendance is Cancelled while booking is open")
+    return booking, card, attendance
 
 
 def _return_key(booking_id):
@@ -68,15 +78,13 @@ def cancel_by_admin(booking_id, *, reason, request_key, admin=None):
     savepoint = "payg_admin_cancel_" + uuid4().hex
     frappe.db.savepoint(savepoint)
     try:
-        booking, card, rows = _locked_booking(booking_id)
+        booking, card, attendance = _locked_booking(booking_id)
         if booking.status == "Cancelled":
             if _prior_return_key(booking.name) != request_key:
                 frappe.throw("Booking was already cancelled with another request key")
             return booking
         if booking.status not in ("Reserved", "Locked", "Completed"):
             frappe.throw("PAYG booking cannot be cancelled from this status")
-        if not booking.attendance_entry or not any(row.name == booking.attendance_entry for row in rows):
-            frappe.throw("Active booking attendance was not found")
         consumed = booking.status in ("Locked", "Completed")
         if consumed != _has_consume(booking.name):
             frappe.throw("PAYG booking status and consumption differ")
@@ -109,14 +117,12 @@ def lock_due_booking(booking_id):
     savepoint = "payg_lock_" + uuid4().hex
     frappe.db.savepoint(savepoint)
     try:
-        booking, card, rows = _locked_booking(booking_id)
+        booking, card, attendance = _locked_booking(booking_id)
         if booking.status != "Reserved":
             return False
         now = _now()
-        if not booking.cancellable_until or get_datetime(booking.cancellable_until) > get_datetime(now):
+        if not booking.cancellable_until or as_brisbane_datetime(booking.cancellable_until) > as_brisbane_datetime(now):
             return False
-        if not booking.attendance_entry or not any(row.name == booking.attendance_entry for row in rows):
-            frappe.throw("Active booking attendance was not found")
         frappe.get_doc({"doctype": ENTRY, "card": card.name, "booking": booking.name,
                         "kind": "Consume", "available_delta": 0, "reserved_delta": -1,
                         "consumed_delta": 1, "operation_key": f"consume:{booking.name}",

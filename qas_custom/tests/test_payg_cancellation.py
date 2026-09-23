@@ -1,5 +1,5 @@
 """PAYG cancellation and lock command contracts without a connected site."""
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 import json
 from unittest import TestCase
 from unittest.mock import patch
@@ -30,7 +30,8 @@ class TestCancellation(TestCase):
                  operation_key="reserve:PB-1", available_delta=-1, reserved_delta=1, consumed_delta=0)
         self.card.available_count = 9
         self.card.reserved_count = 1
-        self.attendance = self.add("Class Attendance Entry", "ATT-1", status="Absent",
+        self.attendance = self.add("Class Attendance Entry", "ATT-1", student="S-1",
+                                   course_session="CS-1", status="Absent",
                                    source_doctype="QAS PAYG Booking", source_document="PB-1",
                                    marked_by="teacher@example.com", marked_at=datetime(2026, 9, 27, 11))
         booking.session_resources.active_rows.return_value = [frappe._dict(name="ATT-1")]
@@ -140,8 +141,58 @@ class TestCancellation(TestCase):
         self.assertFalse(any(dt in {"Voucher", "Store Credit", "Sales Invoice"}
                              for dt, _ in self.state["docs"]))
 
+    def test_aware_utc_now_matches_naive_brisbane_deadline(self):
+        cancellation._now.return_value = datetime(2026, 9, 23, 23, 59, tzinfo=timezone.utc)
+        self.assertFalse(cancellation.lock_due_booking("PB-1"))
+        cancellation._now.return_value = datetime(2026, 9, 24, 0, tzinfo=timezone.utc)
+        self.assertTrue(cancellation.lock_due_booking("PB-1"))
+        self.assertEqual(len(self.entries("Consume")), 1)
+
+    def test_leave_reserved_admin_cancel_returns_reserved_unit(self):
+        self.attendance.status = "Leave"
+        cancellation.session_resources.active_rows.return_value = []
+        cancellation.cancel_by_admin("PB-1", reason="Leave correction", request_key="leave-r")
+        returned = self.entries("Return")[0]
+        self.assertEqual((returned.available_delta, returned.reserved_delta,
+                          returned.consumed_delta), (1, -1, 0))
+        self.assertEqual(self.attendance.status, "Cancelled")
+        self.assertEqual(self.attendance.source_document, "PB-1")
+
+    def test_leave_attendance_locks_then_admin_returns_original_card(self):
+        self.attendance.status = "Leave"
+        cancellation.session_resources.active_rows.return_value = []
+        self.assertTrue(cancellation.lock_due_booking("PB-1"))
+        cancellation.cancel_by_admin("PB-1", reason="Leave correction", request_key="leave-1")
+        self.assertEqual((self.card.available_count, self.card.reserved_count,
+                          self.card.consumed_count), (10, 0, 0))
+        self.assertEqual(self.attendance.status, "Cancelled")
+        self.assertEqual(self.attendance.marked_by, "teacher@example.com")
+        self.assertEqual(self.attendance.marked_at, datetime(2026, 9, 27, 11))
+        self.assertLess(self.events.index("Classroom:ROOM-1"),
+                        self.events.index("Class Attendance Entry:ATT-1"))
+
+    def test_current_attendance_must_belong_to_booking(self):
+        for field, bad in (("student", "OTHER"), ("course_session", "CS-OTHER"),
+                           ("source_doctype", "Adhoc Booking"), ("source_document", "OTHER")):
+            original = self.attendance[field]
+            self.attendance[field] = bad
+            with self.assertRaisesRegex(ValueError, "attendance.*match"):
+                cancellation.lock_due_booking("PB-1")
+            self.attendance[field] = original
+        self.assertEqual(self.entries("Consume"), [])
+
+    def test_cancelled_attendance_with_open_booking_is_consistency_error(self):
+        self.attendance.status = "Cancelled"
+        cancellation.session_resources.active_rows.return_value = []
+        with self.assertRaisesRegex(ValueError, "attendance.*Cancelled"):
+            cancellation.lock_due_booking("PB-1")
+        with self.assertRaisesRegex(ValueError, "attendance.*Cancelled"):
+            cancellation.cancel_by_admin("PB-1", reason="Correction", request_key="k")
+        self.assertEqual(self.entries("Return"), [])
+
     def test_scheduler_advances_cursor_and_isolates_failed_booking(self):
         self.fake.log_error = self.db.rollback.__class__()
+        self.fake.get_traceback = lambda: "Traceback: temporary failure"
         rows = iter([[frappe._dict(name="PB-1", cancellable_until="2026-09-24 09:00:00")],
                      [frappe._dict(name="PB-2", cancellable_until="2026-09-24 10:00:00")], []])
         self.db.sql.side_effect = lambda query, _params, **_kwargs: next(rows)
@@ -154,5 +205,6 @@ class TestCancellation(TestCase):
         self.assertEqual(result["locked"], ["PB-2"])
         self.assertEqual(self.db.commit.call_count, 1)
         self.db.rollback.assert_called_once_with()
+        self.assertIn("Traceback: temporary failure", str(self.fake.log_error.call_args))
         self.assertEqual(self.db.sql.call_args_list[1].args[1][1:],
                          ("2026-09-24 09:00:00", "2026-09-24 09:00:00", "PB-1", 1))
