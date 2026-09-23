@@ -270,8 +270,8 @@ class TestPaygControllers(TestCase):
     def test_booking_resolves_session_course_through_timeslot(self):
         controller = self.controller("booking")
         self.frappe.db.get_value.side_effect = [
-            types.SimpleNamespace(family_parent="P-1", course="C-1", expires_on="2027-03-23"),
-            "P-1", "WTS-1", "C-1"]
+            "P-1", types.SimpleNamespace(family_parent="P-1", course="C-1", expires_on="2027-03-23"),
+            "WTS-1", "C-1"]
         booking = self.doc(card="CARD-1", family_parent="P-1", student="S-1",
                            course_session="SESSION-1", course_snapshot="C-1",
                            card_expires_on_snapshot="2027-03-23", attendance_entry=None,
@@ -282,13 +282,33 @@ class TestPaygControllers(TestCase):
         self.assertEqual(self.frappe.db.get_value.call_args_list[-1].args,
                          ("Weekly Timeslot", "WTS-1", "course"))
 
+
+    def test_booking_links_use_current_reads_in_lock_order(self):
+        controller = self.controller("booking")
+        values = {
+            "Student": "P-1",
+            "QAS PAYG Card": types.SimpleNamespace(family_parent="P-1", course="C-1", expires_on="2027-03-23"),
+            "Course Sessions": "WTS-1",
+            "Weekly Timeslot": "C-1",
+        }
+        self.frappe.db.get_value.side_effect = lambda dt, *_args, **_kwargs: values[dt]
+        booking = self.doc(card="CARD-1", family_parent="P-1", student="S-1",
+                           course_session="SESSION-1", course_snapshot="C-1",
+                           card_expires_on_snapshot="2027-03-23", attendance_entry=None,
+                           status="Reserved")
+        controller.validate(booking)
+        calls = self.frappe.db.get_value.call_args_list
+        self.assertEqual([call.args[0] for call in calls],
+                         ["Student", "QAS PAYG Card", "Course Sessions", "Weekly Timeslot"])
+        self.assertTrue(all(call.kwargs.get("for_update") is True for call in calls))
+
     def test_booking_identity_cannot_change_after_insert(self):
         controller = self.controller("booking")
         before = self.doc(family_parent="P-1", student="S-1", card="CARD-1",
                           course_session="SESSION-1", course_snapshot="C-1",
                           card_expires_on_snapshot="2027-03-23", request_key="req-1")
         self.frappe.db.get_value.side_effect = [
-            types.SimpleNamespace(family_parent="P-1", course="C-1", expires_on="2027-03-23"), "P-1"]
+            "P-1", types.SimpleNamespace(family_parent="P-1", course="C-1", expires_on="2027-03-23")]
         booking = self.doc(family_parent="P-1", student="S-1", card="CARD-1",
                            course_session="SESSION-2", course_snapshot="C-1",
                            card_expires_on_snapshot="2027-03-23", request_key="req-1",
@@ -308,7 +328,7 @@ class TestPaygControllers(TestCase):
                               "cancel_reason": "Closure"})
         booking.get_doc_before_save = lambda: before
         self.frappe.db.get_value.side_effect = [
-            types.SimpleNamespace(family_parent="P-1", course="C-1", expires_on="2027-03-23"), "P-1"]
+            "P-1", types.SimpleNamespace(family_parent="P-1", course="C-1", expires_on="2027-03-23")]
         self.frappe.db.exists.return_value = False
         with self.assertRaises(ValueError):
             controller.validate(booking)

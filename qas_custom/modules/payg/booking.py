@@ -37,8 +37,13 @@ def _student(student, family, lock=False):
     if not student:
         frappe.throw("Student is required")
     if lock:
-        frappe.db.sql("SELECT name FROM `tabStudent` WHERE name=%s FOR UPDATE", (student,))
-    row = frappe.get_doc("Student", student)
+        rows = frappe.db.sql("""SELECT name, guardian, status, date_of_birth
+            FROM `tabStudent` WHERE name=%s FOR UPDATE""", (student,), as_dict=True)
+        if not rows:
+            frappe.throw("Student was not found")
+        row = rows[0]
+    else:
+        row = frappe.get_doc("Student", student)
     if row.guardian != family:
         frappe.throw("Student does not belong to this family", frappe.PermissionError)
     return row
@@ -48,7 +53,19 @@ def _cards(family, course=None, lock=False):
     filters = {"family_parent": family}
     if course:
         filters["course"] = course
-    names = sorted(frappe.get_all(CARD, filters=filters, pluck="name"))
+    if lock:
+        # Parent is already locked by confirm; this locking read sees cards issued
+        # while that Parent lock was awaited, even under MariaDB REPEATABLE READ.
+        if course:
+            rows = frappe.db.sql("""SELECT name FROM `tabQAS PAYG Card`
+                WHERE family_parent=%s AND course=%s ORDER BY name FOR UPDATE""",
+                (family, course), as_dict=True)
+        else:
+            rows = frappe.db.sql("""SELECT name FROM `tabQAS PAYG Card`
+                WHERE family_parent=%s ORDER BY name FOR UPDATE""", (family,), as_dict=True)
+        names = sorted(row.name for row in rows)
+    else:
+        names = sorted(frappe.get_all(CARD, filters=filters, pluck="name"))
     return [frappe.get_doc(CARD, name, for_update=lock) for name in names]
 
 
@@ -200,6 +217,12 @@ def preview_booking(student, session, parent=None):
             "session": session, "student": student}
 
 
+def _booking_by_request_key(request_key):
+    rows = frappe.db.sql("""SELECT name FROM `tabQAS PAYG Booking`
+        WHERE request_key=%s FOR UPDATE""", (request_key,), as_dict=True)
+    return frappe.get_doc(BOOKING, rows[0].name, for_update=True) if rows else None
+
+
 def _same_booking(booking, family, student, session):
     if (booking.family_parent, booking.student, booking.course_session) != (family, student, session):
         frappe.throw("Booking request key belongs to another reservation")
@@ -216,9 +239,9 @@ def confirm_booking(student, session, preview_card, request_key, *, confirmed_ru
     frappe.db.savepoint(savepoint)
     try:
         pupil = _student(student, family.name, lock=True)
-        existing = frappe.db.get_value(BOOKING, {"request_key": request_key}, "name")
+        existing = _booking_by_request_key(request_key)
         if existing:
-            return _same_booking(frappe.get_doc(BOOKING, existing, for_update=True), family.name, student, session)
+            return _same_booking(existing, family.name, student, session)
         # Serialize candidate-card discovery with issue actions for this family.
         frappe.db.sql("SELECT name FROM `tabParent` WHERE name=%s FOR UPDATE", (family.name,))
         # Resolve identifiers without locking Session, then lock all family cards by stable name.
@@ -265,9 +288,10 @@ def confirm_booking(student, session, preview_card, request_key, *, confirmed_ru
         return booking
     except (frappe.DuplicateEntryError, frappe.UniqueValidationError):
         frappe.db.rollback(save_point=savepoint)
-        existing = frappe.db.get_value(BOOKING, {"request_key": request_key}, "name")
+        _student(student, family.name, lock=True)
+        existing = _booking_by_request_key(request_key)
         if existing:
-            return _same_booking(frappe.get_doc(BOOKING, existing), family.name, student, session)
+            return _same_booking(existing, family.name, student, session)
         raise
     except Exception:
         frappe.db.rollback(save_point=savepoint)

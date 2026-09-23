@@ -69,6 +69,14 @@ class TestBooking(TestCase):
     def sql(self, query, params, **_kwargs):
         if "tabStudent" in query and "FOR UPDATE" in query:
             self.events.append("Student:" + params[0])
+            return [self.state["docs"][("Student", params[0])]]
+        if "tabQAS PAYG Booking" in query and "request_key" in query:
+            return [frappe._dict(name=doc.name) for (dt, _), doc in self.state["docs"].items()
+                    if dt == "QAS PAYG Booking" and doc.request_key == params[0]]
+        if "tabQAS PAYG Card" in query and "FOR UPDATE" in query:
+            return [frappe._dict(name=doc.name) for (dt, _), doc in self.state["docs"].items()
+                    if dt == "QAS PAYG Card" and doc.family_parent == params[0]
+                    and (len(params) == 1 or doc.course == params[1])]
         if "FROM `tabCourse Sessions` s" in query:
             return [frappe._dict(name="CS-1", session_date="2026-09-27")]
         return []
@@ -92,6 +100,57 @@ class TestBooking(TestCase):
                           self.state["docs"][("Term", "T-1")], [])
         return "ATT-NEW"
 
+
+
+    def test_locked_student_uses_current_fields_not_cached_document(self):
+        stale = self.add("Student", "STALE", guardian="OTHER", status="Inactive",
+                         date_of_birth="2025-01-01")
+        original = self.fake.get_doc.side_effect
+        self.fake.get_doc.side_effect = lambda dt, name=None, **kw: stale if dt == "Student" else original(dt, name, **kw)
+        current = booking._student("S-1", "P-1", lock=True)
+        self.assertEqual((current.guardian, current.status, current.date_of_birth),
+                         ("P-1", "Active", "2018-01-01"))
+        self.assertTrue(any("guardian, status, date_of_birth" in call.args[0]
+                            and "FOR UPDATE" in call.args[0] for call in self.db.sql.call_args_list))
+
+    def test_request_key_current_read_beats_old_snapshot(self):
+        existing = self.add("QAS PAYG Booking", "PB-EXIST", family_parent="P-1",
+                            student="S-1", course_session="CS-1", request_key="req-1")
+        self.db.get_value.side_effect = lambda dt, key, field, **kw: None if dt == "QAS PAYG Booking" and isinstance(key, dict) else self.value(dt, key, field, **kw)
+        found = booking.confirm_booking("S-1", "CS-1", "A", "req-1", confirmed_rules=True)
+        self.assertIs(found, existing)
+        self.assertTrue(any("tabQAS PAYG Booking" in call.args[0] and "FOR UPDATE" in call.args[0]
+                            for call in self.db.sql.call_args_list))
+        self.assertLess(self.events.index("Student:S-1"), self.events.index("QAS PAYG Booking:PB-EXIST"))
+
+    def test_duplicate_retry_rechecks_request_key_with_lock(self):
+        original = self.fake.get_doc.side_effect
+        test = self
+        class CollidingBooking(Document):
+            def insert(self, **_options):
+                test.add("QAS PAYG Booking", "PB-OTHER", family_parent="P-1",
+                         student="S-1", course_session="CS-1", request_key="req-1")
+                raise frappe.DuplicateEntryError("duplicate")
+        def race(dt, name=None, **kwargs):
+            if isinstance(dt, dict) and dt.get("doctype") == "QAS PAYG Booking":
+                return CollidingBooking(test.state, **dt)
+            return original(dt, name, **kwargs)
+        self.fake.get_doc.side_effect = race
+        found = booking.confirm_booking("S-1", "CS-1", "A", "req-1", confirmed_rules=True)
+        self.assertEqual(found.name, "PB-OTHER")
+        self.db.rollback.assert_called_once()
+        reads = [call for call in self.db.sql.call_args_list if "tabQAS PAYG Booking" in call.args[0]]
+        self.assertEqual(len(reads), 2)
+        self.assertTrue(all("FOR UPDATE" in call.args[0] for call in reads))
+
+    def test_card_name_discovery_is_current_and_sorted(self):
+        self.add("QAS PAYG Card", "B", family_parent="P-1", course="C-1", status="Active")
+        self.fake.get_all.side_effect = AssertionError("stale snapshot")
+        cards = booking._cards("P-1", "C-1", lock=True)
+        self.assertEqual([card.name for card in cards], ["A", "B"])
+        query = next(call.args[0] for call in self.db.sql.call_args_list if "tabQAS PAYG Card" in call.args[0])
+        self.assertIn("ORDER BY name FOR UPDATE", query)
+        self.assertEqual(self.events[-2:], ["QAS PAYG Card:A", "QAS PAYG Card:B"])
 
     def test_rules_must_be_explicitly_confirmed(self):
         with self.assertRaisesRegex(ValueError, "confirm.*rules"):

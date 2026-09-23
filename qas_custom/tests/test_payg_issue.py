@@ -47,7 +47,8 @@ class TestIssue(TestCase):
         self.fake = SimpleNamespace(
             session=SimpleNamespace(user="admin@example.com"),
             get_roles=lambda _user: ["School Admin"], get_doc=Mock(side_effect=get_doc),
-            db=SimpleNamespace(get_value=Mock(side_effect=self.value), savepoint=Mock(), rollback=Mock(), sql=Mock()),
+            db=SimpleNamespace(get_value=Mock(side_effect=self.value), savepoint=Mock(), rollback=Mock(),
+                               sql=Mock(side_effect=self.sql)),
             throw=lambda message, *_args: (_ for _ in ()).throw(ValueError(message)),
             PermissionError=PermissionError, DuplicateEntryError=frappe.DuplicateEntryError,
             UniqueValidationError=frappe.UniqueValidationError,
@@ -57,10 +58,47 @@ class TestIssue(TestCase):
         for item in self.patches:
             item.start(); self.addCleanup(item.stop)
 
+    def sql(self, query, params, **_kwargs):
+        if "tabQAS PAYG Operation" in query:
+            return [frappe._dict(name=doc.name) for (dt, _), doc in self.state["docs"].items()
+                    if dt == "QAS PAYG Operation" and doc.get("request_key") == params[0]]
+        return []
+
     def value(self, dt, key, field):
         if dt == "Parent": return "C-1"
         if dt == "QAS PAYG Product" and field == "enabled": return 1
         return None
+
+
+    def test_purchase_key_lookup_is_current_locking_read(self):
+        self.operation.request_key = "purchase-1"
+        self.fake.db.get_value.side_effect = lambda *_args: None
+        self.assertIs(issue.create_or_get_purchase_operation("P-1", "PROD-1", "purchase-1"), self.operation)
+        query = next(call.args[0] for call in self.fake.db.sql.call_args_list
+                     if "tabQAS PAYG Operation" in call.args[0])
+        self.assertIn("FOR UPDATE", query)
+        self.fake.get_doc.assert_any_call("QAS PAYG Operation", "OP-1", for_update=True)
+
+    def test_purchase_duplicate_retries_with_current_read(self):
+        original = self.fake.get_doc.side_effect
+        counts = {"lookup": 0}
+        def sql(query, params, **kwargs):
+            if "tabQAS PAYG Operation" in query:
+                counts["lookup"] += 1
+                return [frappe._dict(name="OP-1")] if counts["lookup"] > 1 else []
+            return []
+        self.fake.db.sql.side_effect = sql
+        class CollidingOperation(Document):
+            def insert(self, **_options):
+                raise frappe.DuplicateEntryError("duplicate")
+        def collide(dt, name=None, **kwargs):
+            if isinstance(dt, dict) and dt.get("doctype") == "QAS PAYG Operation":
+                return CollidingOperation(self.state, **dt)
+            return original(dt, name, **kwargs)
+        self.fake.get_doc.side_effect = collide
+        self.assertIs(issue.create_or_get_purchase_operation("P-1", "PROD-1", "purchase-1"), self.operation)
+        self.assertEqual(counts["lookup"], 2)
+        self.fake.db.rollback.assert_called_once()
 
     def test_prior_invoice_and_same_issue_key_reuse_one_card(self):
         first = issue.issue_card("OP-1", "issue-1")
