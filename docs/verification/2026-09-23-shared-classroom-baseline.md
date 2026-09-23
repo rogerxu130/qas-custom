@@ -22,14 +22,33 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD" /Users/ranxu/Documents/Project/frapp
 
 The import printed `/private/tmp/qas-shared-foundation/qas_custom/__init__.py`. The unittest command passed **43/43 tests** (`Ran 43 tests in 0.043s`, `OK`). The tests use the real Frappe import but mock database boundaries; they do not establish live database behavior.
 
+The two additional modules named in the caller inventory were run from the same backend checkout and Python environment:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD" /Users/ranxu/Documents/Project/frappe-bench/env/bin/python -m unittest qas_custom.tests.test_parent_makeup_session_roster qas_custom.tests.test_makeup_parent_notifications -v
+```
+
+This ran **21 tests: 20 passed and 1 errored** (`Ran 21 tests in 0.066s`, `FAILED (errors=1)`). All tests in `test_makeup_parent_notifications.py` passed. The error was `test_parent_list_hides_empty_sessions_and_admin_list_keeps_them` in `test_parent_makeup_session_roster.py`: `TypeError: unhashable type: 'dict'` at `qas_custom/modules/makeup/commands.py:685`. That test patches `commands.frappe.get_all` to always return session dictionaries; the production function also calls `get_all` for `Weekly Timeslot` names and passes that mocked result to `set(...)`. This is a baseline test-mock mismatch at the unchanged commit, not a verified site or database failure. No code was changed to resolve it.
+
 Run from `/Users/ranxu/.codex/worktrees/payg-foundation-plans/qas-parent-portal`:
 
 ```sh
 /Users/ranxu/.nvm/versions/node/v22.22.2/bin/node --test tests/*.test.js
-/Users/ranxu/.nvm/versions/node/v22.22.2/bin/node /Users/ranxu/Documents/Project/qas-parent-portal/node_modules/vite/bin/vite.js build
 ```
 
-The Node command passed **12/12 tests** (`# pass 12`, `# fail 0`). The production build passed (`2184 modules transformed`, `built in 1.34s`). Vite warned that some generated chunks exceed 500 kB after minification. This detached checkout has no `node_modules`; invoking the existing Vite CLI alone initially failed to resolve `vite`, `@vitejs/plugin-vue`, `@tailwindcss/vite`, and `unplugin-icons/vite` from its config. A temporary `node_modules` symlink to `/Users/ranxu/Documents/Project/qas-parent-portal/node_modules` allowed the successful build; the link was removed afterward. No package manifest or lockfile was changed. There is no remaining build gap for this baseline under that dependency reuse arrangement.
+The Node command passed **12/12 tests** (`# pass 12`, `# fail 0`). This detached checkout has no `node_modules`; invoking the existing Vite CLI alone initially failed to resolve `vite`, `@vitejs/plugin-vue`, `@tailwindcss/vite`, and `unplugin-icons/vite` from its config. The successful production build used the existing dependency directory through a temporary symlink. Reproduce that build from the frontend checkout with:
+
+```sh
+(
+  set -e
+  test ! -e node_modules && test ! -L node_modules
+  ln -s /Users/ranxu/Documents/Project/qas-parent-portal/node_modules node_modules
+  trap 'test -L node_modules && unlink node_modules' EXIT
+  /Users/ranxu/.nvm/versions/node/v22.22.2/bin/node /Users/ranxu/Documents/Project/qas-parent-portal/node_modules/vite/bin/vite.js build
+)
+```
+
+The build passed (`2184 modules transformed`, `built in 1.34s`). Vite warned that some generated chunks exceed 500 kB after minification. The temporary symlink was removed after verification. No package manifest or lockfile was changed. A future build in this detached checkout must recreate that link or otherwise supply dependencies; the checkout has no local installation.
 
 ## Caller inventory
 
@@ -59,4 +78,4 @@ The existing rule is intentional: a concentrated makeup quota **may exceed class
 
 ## Verification limits
 
-Real database concurrency and lock behavior, browser UI, test-site end-to-end flows, and production behavior remain unverified. This baseline does not imply a Frappe Cloud or frontend deployment. The successful build required temporary reuse of the existing dependency directory, as described above.
+Real database concurrency and lock behavior, browser UI, test-site end-to-end flows, and production behavior remain unverified. This baseline does not imply a Frappe Cloud or frontend deployment. The successful build required temporary reuse of the existing dependency directory, as described above. The additional backend run has one baseline test error; it is not a clean suite pass.
