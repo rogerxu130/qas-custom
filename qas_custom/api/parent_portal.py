@@ -9,6 +9,7 @@ from qas_custom.services.parent_feed import (
 )
 from qas_custom.services.parent_classroom_messages import get_parent_classroom_messages_data
 from qas_custom.services.parent_info import get_parent_info_data
+from qas_custom.services.parent_portal_destination import get_parent_portal_context_data
 from qas_custom.services.material_orders import (
     create_parent_store_order_data,
     get_parent_store_order_data,
@@ -120,6 +121,11 @@ def _serve_parent_media(payload):
 @frappe.whitelist()
 def parent_portal_get_info():
     return get_parent_info_data()
+
+
+@frappe.whitelist()
+def parent_portal_get_portal_context():
+    return get_parent_portal_context_data()
 
 
 @frappe.whitelist()

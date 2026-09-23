@@ -119,6 +119,13 @@ def parent_portal_invoice_link(invoice: str):
 		or frappe.conf.get("parent_portal_url")
 		or DEFAULT_PARENT_PORTAL_URL
 	)
+	try:
+		invoice_type = frappe.db.get_value("Sales Invoice", invoice, "qas_invoice_type")
+	except Exception:
+		# Links also render in notifications when the site/schema is temporarily unavailable.
+		invoice_type = None
+	if invoice_type in ("PAYG Card", "PAYG Exchange"):
+		return f"{str(base_url).rstrip('/')}/psugo?{urlencode({'section': 'invoices', 'invoice': invoice})}"
 	return f"{str(base_url).rstrip('/')}/invoices?{urlencode({'invoice': invoice})}"
 
 
