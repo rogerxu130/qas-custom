@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import mimetypes
+from datetime import datetime, timedelta
 from urllib.parse import urlencode
+from urllib.parse import urlsplit
 
 import frappe
 from frappe import _
-from frappe.utils import get_datetime, get_url
+from frappe.utils import get_datetime, getdate, get_time, get_datetime_in_timezone
 
+from qas_custom.modules.payg.rules import as_brisbane_datetime
 from qas_custom.services.class_attendance import ATTENDANCE_DOCTYPE
 from qas_custom.services.support_view import get_support_view_parent, get_support_view_token
 
@@ -205,7 +208,7 @@ def _build_homework_item(row, session_map, weekly_timeslot_map, student_map, ses
         "published_at": _normalize_datetime(row.published_at),
         "teacher": _build_teacher_payload(row.teacher, teacher_map),
         "students": _build_students_payload(row.course_session, session_student_map, student_map),
-        "attachments": _build_homework_attachments(row.attachments),
+        "attachments": _build_homework_attachments(row.name, row.attachments),
         "route": f"/updates/homework/{row.name}",
     }
 
@@ -269,11 +272,11 @@ def _build_teacher_payload(teacher_id, teacher_map):
     return {"id": teacher_id, "name": teacher_map.get(teacher_id) or teacher_id}
 
 
-def _build_homework_attachments(attachment_url):
+def _build_homework_attachments(homework_name, attachment_url):
     if not attachment_url:
         return []
     label = attachment_url.split("/")[-1]
-    return [{"label": label, "url": attachment_url}]
+    return [{"label": label, "url": _media_proxy_url("parent_portal_get_feed_homework", homework=homework_name)}]
 
 
 def _build_session_label(timeslot):
@@ -292,50 +295,24 @@ def _normalize_datetime(value):
     return str(get_datetime(value))
 
 
-def _normalize_media_url(value):
-    if not value:
-        return None
-    if value.startswith(("http://", "https://")):
-        return value
-    return get_url(value)
+def _media_proxy_url(endpoint, **params):
+    token = get_support_view_token()
+    if token:
+        params["support_token"] = token
+    return "/api/method/qas_custom.api.parent_portal." + endpoint + "?" + urlencode(params)
 
 
 def _build_photo_asset(photo_post_name, photo_row):
     idx = cint(photo_row.get("idx"))
-    image_url = photo_row.get("image")
-    direct_url = _normalize_media_url(image_url)
-
-    if image_url and image_url.startswith("/private/files/"):
-        file_name = image_url.rsplit("/", 1)[-1]
-        proxy_url = (
-            "/api/method/qas_custom.api.parent_portal.parent_portal_get_feed_photo"
-            f"?photo_post={photo_post_name}&photo_idx={idx}"
-        )
-        if get_support_view_token():
-            proxy_url += "&" + urlencode({"support_token": get_support_view_token()})
-        return proxy_url
-
-    return direct_url
+    return _media_proxy_url("parent_portal_get_feed_photo", photo_post=photo_post_name, photo_idx=idx)
 
 
 def _build_video_asset(row):
     if not row.video:
         return None
 
-    proxy_url = (
-        "/api/method/qas_custom.api.parent_portal.parent_portal_get_feed_video"
-        f"?video_post={row.name}"
-    )
-    if get_support_view_token():
-        proxy_url += "&" + urlencode({"support_token": get_support_view_token()})
-    download_url = f"{proxy_url}&download=1"
-
-    if row.video.startswith("/private/files/"):
-        video_url = proxy_url
-        video_download_url = download_url
-    else:
-        video_url = _normalize_media_url(row.video)
-        video_download_url = video_url
+    video_url = _media_proxy_url("parent_portal_get_feed_video", video_post=row.name)
+    video_download_url = _media_proxy_url("parent_portal_get_feed_video", video_post=row.name, download=1)
 
     return {
         "url": video_url,
@@ -382,6 +359,9 @@ def _accessible_parent_attendance(parent_name, course_session=None, student_ids=
                               filters={"attendance_entry": ["in", [row.name for row in rows]]},
                               fields=["name", "attendance_entry", "student", "course_session", "status"])
     booking_by_attendance = {booking.attendance_entry: booking for booking in bookings}
+    payg_sessions = {row.course_session for row in rows
+                     if row.source_doctype == "QAS PAYG Booking" or row.name in booking_by_attendance}
+    finished_sessions = _payg_finished_sessions(payg_sessions) if payg_sessions else set()
     allowed = []
     for row in rows:
         booking = booking_by_attendance.get(row.name)
@@ -389,11 +369,35 @@ def _accessible_parent_attendance(parent_name, course_session=None, student_ids=
             if (booking and row.source_doctype == "QAS PAYG Booking" and
                     row.source_document == booking.name and booking.attendance_entry == row.name and
                     booking.student == row.student and booking.course_session == row.course_session and
-                    booking.status in ("Locked", "Completed") and row.status in ("Present", "Late")):
+                    booking.status in ("Locked", "Completed") and row.status in ("Present", "Late") and
+                    row.course_session in finished_sessions):
                 allowed.append(row)
         else:
             allowed.append(row)
     return allowed
+
+
+def _payg_finished_sessions(session_ids):
+    if not session_ids:
+        return set()
+    sessions = frappe.get_all("Course Sessions", filters={"name": ["in", sorted(session_ids)]},
+                              fields=["name", "session_date", "weekly_timeslot"])
+    slot_ids = {row.weekly_timeslot for row in sessions if row.weekly_timeslot}
+    slots = frappe.get_all("Weekly Timeslot", filters={"name": ["in", sorted(slot_ids)]},
+                           fields=["name", "start_time", "end_time"]) if slot_ids else []
+    slot_map = {row.name: row for row in slots}
+    now = as_brisbane_datetime(get_datetime_in_timezone("Australia/Brisbane"))
+    finished = set()
+    for session in sessions:
+        slot = slot_map.get(session.weekly_timeslot)
+        if not session.session_date or not slot or not slot.end_time:
+            continue
+        end = datetime.combine(getdate(session.session_date), get_time(slot.end_time))
+        if slot.start_time and get_time(slot.end_time) <= get_time(slot.start_time):
+            end += timedelta(days=1)
+        if as_brisbane_datetime(end) <= now:
+            finished.add(session.name)
+    return finished
 
 
 def _validate_parent_session_access(parent_name, course_session):
@@ -418,20 +422,7 @@ def get_parent_feed_photo_content(photo_post, photo_idx):
     if not photo_row or not getattr(photo_row, "image", None):
         raise frappe.DoesNotExistError
 
-    file_doc_name = frappe.db.get_value("File", {"file_url": photo_row.image}, "name")
-    if not file_doc_name:
-        raise frappe.DoesNotExistError
-
-    file_doc = frappe.get_doc("File", file_doc_name)
-    content = file_doc.get_content()
-    filename = file_doc.file_name or photo_row.image.rsplit("/", 1)[-1]
-    content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
-
-    return {
-        "filename": filename,
-        "content": content,
-        "content_type": content_type,
-    }
+    return _authorized_media(photo_row.image)
 
 
 def get_parent_feed_video_content(video_post, download=False):
@@ -443,21 +434,34 @@ def get_parent_feed_video_content(video_post, download=False):
     if not video_post_doc.video:
         raise frappe.DoesNotExistError
 
-    file_doc_name = frappe.db.get_value("File", {"file_url": video_post_doc.video}, "name")
+    return _authorized_media(video_post_doc.video, file_name=video_post_doc.file_name,
+                             content_type=video_post_doc.mime_type,
+                             display_content_as="attachment" if cint(download) else "inline")
+
+
+def get_parent_feed_homework_content(homework):
+    parent_name = _require_parent()
+    doc = frappe.get_doc("Session Homework", homework)
+    _validate_parent_session_access(parent_name, doc.get("course_session"))
+    if not doc.attachments:
+        raise frappe.DoesNotExistError
+    return _authorized_media(doc.attachments, display_content_as="attachment")
+
+
+def _authorized_media(saved_url, file_name=None, content_type=None, display_content_as="inline"):
+    parsed = urlsplit(saved_url)
+    if parsed.scheme in ("http", "https") and parsed.netloc:
+        return {"redirect": saved_url}
+    if parsed.scheme or parsed.netloc or not saved_url.startswith(("/files/", "/private/files/")):
+        raise frappe.PermissionError
+    file_doc_name = frappe.db.get_value("File", {"file_url": saved_url}, "name")
     if not file_doc_name:
         raise frappe.DoesNotExistError
-
     file_doc = frappe.get_doc("File", file_doc_name)
-    content = file_doc.get_content()
-    filename = file_doc.file_name or video_post_doc.file_name or video_post_doc.video.rsplit("/", 1)[-1]
-    content_type = video_post_doc.mime_type or mimetypes.guess_type(filename)[0] or "application/octet-stream"
-
-    return {
-        "filename": filename,
-        "content": content,
-        "content_type": content_type,
-        "display_content_as": "attachment" if cint(download) else "inline",
-    }
+    filename = file_doc.file_name or file_name or saved_url.rsplit("/", 1)[-1]
+    return {"filename": filename, "content": file_doc.get_content(),
+            "content_type": content_type or mimetypes.guess_type(filename)[0] or "application/octet-stream",
+            "display_content_as": display_content_as}
 
 
 def cint(value):

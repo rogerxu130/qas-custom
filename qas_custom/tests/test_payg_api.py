@@ -70,3 +70,22 @@ class TestPaygPortalAPI(TestCase):
                          ("C-1", "C-2", 3))
         self.assertTrue(result["manual_refund_review_required"])
         exchange.assert_called_once()
+
+    def test_invalid_cursor_and_limits_return_frappe_errors(self):
+        with patch.object(payg_portal, "frappe") as fake:
+            fake.throw.side_effect = ValueError
+            with self.assertRaises(ValueError):
+                payg_portal.payg_available_sessions("S", "C", cursor="not-json")
+            fake.throw.assert_called()
+        with patch.object(booking, "_family", return_value=frappe._dict(name="P-1")), \
+             patch.object(booking.frappe, "throw", side_effect=ValueError) as error:
+            with self.assertRaises(ValueError):
+                booking.family_booking_history(limit="bogus")
+            error.assert_called()
+        with patch.object(booking, "_family", return_value=frappe._dict(name="P-1")), \
+             patch.object(booking, "_student", return_value=frappe._dict(name="S-1")), \
+             patch.object(booking.frappe, "get_doc", return_value=frappe._dict(name="C-1")), \
+             patch.object(booking.frappe, "throw", side_effect=ValueError) as error:
+            with self.assertRaises(ValueError):
+                booking.available_sessions("S-1", "C-1", cursor=[])
+            error.assert_called()

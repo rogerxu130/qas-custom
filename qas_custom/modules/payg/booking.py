@@ -2,7 +2,7 @@
 
 All commands join the caller's transaction. A savepoint protects each multi-row write.
 """
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from uuid import uuid4
 
 import frappe
@@ -68,6 +68,16 @@ def _cards(family, course=None, lock=False):
     else:
         names = sorted(frappe.get_all(CARD, filters=filters, pluck="name"))
     return [frappe.get_doc(CARD, name, for_update=lock) for name in names]
+
+
+def _query_limit(value, maximum):
+    try:
+        count = int(value)
+    except (TypeError, ValueError):
+        frappe.throw("PAYG limit must be an integer")
+    if count < 1:
+        frappe.throw("PAYG limit must be positive")
+    return min(count, maximum)
 
 
 def _start(session, slot):
@@ -144,7 +154,7 @@ def family_booking_history(student=None, limit=100):
     family = _family()
     if student:
         _student(student, family.name)
-    count = max(1, min(int(limit), 200))
+    count = _query_limit(limit, 200)
     filters = {"family_parent": family.name}
     if student:
         filters["student"] = student
@@ -160,12 +170,16 @@ def available_sessions(student, course, cursor=None, limit=30, parent=None):
     pupil = _student(student, family.name)
     if not course:
         frappe.throw("Course is required")
-    limit = max(1, min(int(limit), 100))
+    limit = _query_limit(limit, 100)
     course_doc = frappe.get_doc("Course", course)
-    if cursor:
-        if not isinstance(cursor, (tuple, list)) or len(cursor) != 2:
-            frappe.throw("Cursor must be (session_date, name)")
-        getdate(cursor[0])
+    if cursor is not None:
+        if (not isinstance(cursor, (tuple, list)) or len(cursor) != 2 or
+                not isinstance(cursor[0], str) or not isinstance(cursor[1], str) or not cursor[1]):
+            frappe.throw("PAYG cursor must be a [session_date, session] pair")
+        try:
+            date.fromisoformat(cursor[0])
+        except (TypeError, ValueError):
+            frappe.throw("PAYG cursor date is invalid")
     else:
         cursor = ("1000-01-01", "")
     # Scan raw cursor batches until we have a full page of age-matched sessions.

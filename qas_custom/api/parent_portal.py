@@ -5,6 +5,7 @@ from qas_custom.services.parent_feed import (
     get_parent_feed_data,
     get_parent_feed_photo_content,
     get_parent_feed_video_content,
+    get_parent_feed_homework_content,
 )
 from qas_custom.services.parent_classroom_messages import get_parent_classroom_messages_data
 from qas_custom.services.parent_info import get_parent_info_data
@@ -89,20 +90,30 @@ def parent_portal_get_classroom_messages(student=None, limit=50):
 @frappe.whitelist()
 def parent_portal_get_feed_photo(photo_post=None, photo_idx=None, support_token=None):
     payload = get_parent_feed_photo_content(photo_post=photo_post, photo_idx=photo_idx)
-    frappe.local.response.filename = payload["filename"]
-    frappe.local.response.filecontent = payload["content"]
-    frappe.local.response.content_type = payload["content_type"]
-    frappe.local.response.display_content_as = "inline"
-    frappe.local.response.type = "download"
+    _serve_parent_media(payload)
 
 
 @frappe.whitelist()
 def parent_portal_get_feed_video(video_post=None, download=0, support_token=None):
     payload = get_parent_feed_video_content(video_post=video_post, download=download)
+    _serve_parent_media(payload)
+
+
+@frappe.whitelist()
+def parent_portal_get_feed_homework(homework=None, support_token=None):
+    payload = get_parent_feed_homework_content(homework=homework)
+    _serve_parent_media(payload)
+
+
+def _serve_parent_media(payload):
+    if payload.get("redirect"):
+        frappe.local.response.location = payload["redirect"]
+        frappe.local.response.type = "redirect"
+        return
     frappe.local.response.filename = payload["filename"]
     frappe.local.response.filecontent = payload["content"]
     frappe.local.response.content_type = payload["content_type"]
-    frappe.local.response.display_content_as = payload["display_content_as"]
+    frappe.local.response.display_content_as = payload.get("display_content_as", "inline")
     frappe.local.response.type = "download"
 
 

@@ -2,14 +2,16 @@
 from unittest import TestCase
 from unittest.mock import Mock, patch
 from types import SimpleNamespace
+from datetime import datetime
 
 import frappe
 
 from qas_custom.services import parent_classroom_messages, parent_feed, teacher_portal
+from qas_custom.api import parent_portal
 
 
 class TestPaygContentAccess(TestCase):
-    def _attendance(self, status, booking_status, *, guardian=True, source="QAS PAYG Booking", document="B-1"):
+    def _attendance(self, status, booking_status, *, guardian=True, source="QAS PAYG Booking", document="B-1", finished=True):
         row = frappe._dict(name="ATT-1", student="S-1", course_session="CS-1",
                            status=status, source_doctype=source, source_document=document)
         booking = (frappe._dict(name="B-1", attendance_entry="ATT-1", student="S-1",
@@ -19,7 +21,8 @@ class TestPaygContentAccess(TestCase):
                                if a[0] == "Student" else ([row] if guardian else [])
                                if a[0] == "Class Attendance Entry" else ([booking] if booking else []),
                                PermissionError=PermissionError)
-        with patch.object(parent_feed, "frappe", fake):
+        with patch.object(parent_feed, "frappe", fake), \
+             patch.object(parent_feed, "_payg_finished_sessions", return_value={"CS-1"} if finished else set()):
             return parent_feed._accessible_parent_attendance("P-1", "CS-1")
 
     def test_completed_present_booking_grants_access_after_card_changes(self):
@@ -29,7 +32,8 @@ class TestPaygContentAccess(TestCase):
                                course_session="CS-1", status="Locked")
         fake = SimpleNamespace(get_all=lambda *a, **k: ["S-1"] if a[0] == "Student" else [row]
                                if a[0] == "Class Attendance Entry" else [booking])
-        with patch.object(parent_feed, "frappe", fake):
+        with patch.object(parent_feed, "frappe", fake), \
+             patch.object(parent_feed, "_payg_finished_sessions", return_value={"CS-1"}):
             self.assertEqual(parent_feed._accessible_parent_attendance("P-1", "CS-1"), [row])
 
     def test_cancelled_or_unbooked_payg_does_not_grant_access(self):
@@ -37,7 +41,8 @@ class TestPaygContentAccess(TestCase):
                            status="Present", source_doctype="QAS PAYG Booking")
         fake = SimpleNamespace(get_all=lambda *a, **k: ["S-1"] if a[0] == "Student" else [row]
                                if a[0] == "Class Attendance Entry" else [])
-        with patch.object(parent_feed, "frappe", fake):
+        with patch.object(parent_feed, "frappe", fake), \
+             patch.object(parent_feed, "_payg_finished_sessions", return_value=set()):
             self.assertEqual(parent_feed._accessible_parent_attendance("P-1", "CS-1"), [])
 
     def test_source_label_does_not_override_booking_or_family(self):
@@ -82,3 +87,64 @@ class TestPaygContentAccess(TestCase):
     def test_teacher_counts_payg_source_without_enrollment(self):
         rows = [{"enrollment_type": "Pay-as-you-go", "source_doctype": "QAS PAYG Booking"}]
         self.assertEqual(teacher_portal._count_special_students(rows)["pay_as_you_go"], 1)
+
+    def test_feed_never_returns_raw_photo_video_or_homework_url(self):
+        photo = parent_feed._build_photo_asset("POST-1", {"idx": 1, "image": "/files/public.jpg"})
+        self.assertIn("parent_portal_get_feed_photo", photo)
+        video = parent_feed._build_video_asset(frappe._dict(name="VIDEO-1", video="https://cdn.example/video.mp4",
+                                                             file_name="video.mp4", file_size=1))
+        self.assertIn("parent_portal_get_feed_video", video["url"])
+        self.assertIn("parent_portal_get_feed_video", video["download_url"])
+        homework = parent_feed._build_homework_attachments("HW-1", "/private/files/homework.pdf")
+        self.assertIn("parent_portal_get_feed_homework", homework[0]["url"])
+
+    def test_future_present_payg_does_not_grant_access(self):
+        self.assertEqual(self._attendance("Present", "Locked", finished=False), [])
+
+    def test_end_time_is_batched_and_future_class_denied(self):
+        rows = [frappe._dict(name="CS-PAST", session_date="2026-09-23", weekly_timeslot="W-1"),
+                frappe._dict(name="CS-FUTURE", session_date="2026-09-25", weekly_timeslot="W-1")]
+        slots = [frappe._dict(name="W-1", start_time="14:00:00", end_time="16:00:00")]
+        get_all = Mock(side_effect=[rows, slots])
+        with patch.object(parent_feed, "frappe", SimpleNamespace(get_all=get_all)), \
+             patch.object(parent_feed, "get_datetime_in_timezone", return_value=datetime(2026, 9, 24, 12)):
+            finished = parent_feed._payg_finished_sessions({"CS-PAST", "CS-FUTURE"})
+        self.assertEqual(finished, {"CS-PAST"})
+        self.assertEqual(get_all.call_count, 2)
+
+    def test_media_external_redirect_uses_current_doc_url_only(self):
+        fake = SimpleNamespace(get_doc=Mock(return_value=frappe._dict(course_session="CS-1",
+                             video="https://cdn.example/file.mp4", file_name="clip.mp4", mime_type="video/mp4")))
+        with patch.object(parent_feed, "frappe", fake), \
+             patch.object(parent_feed, "_require_parent", return_value="P-1"), \
+             patch.object(parent_feed, "_validate_parent_session_access"):
+            result = parent_feed.get_parent_feed_video_content("VIDEO-1")
+        self.assertEqual(result["redirect"], "https://cdn.example/file.mp4")
+
+    def test_local_file_lookup_and_homework_authorization(self):
+        file_doc = frappe._dict(file_name="homework.pdf")
+        file_doc.get_content = Mock(return_value=b"pdf")
+        def get_doc(doctype, name):
+            if doctype == "Session Homework":
+                return frappe._dict(course_session="CS-1", attachments="/private/files/homework.pdf")
+            if doctype == "File" and name == "FILE-1":
+                return file_doc
+            raise AssertionError((doctype, name))
+        db = SimpleNamespace(get_value=Mock(return_value="FILE-1"))
+        fake = SimpleNamespace(get_doc=get_doc, db=db, PermissionError=PermissionError)
+        with patch.object(parent_feed, "frappe", fake), \
+             patch.object(parent_feed, "_require_parent", return_value="P-1"), \
+             patch.object(parent_feed, "_validate_parent_session_access") as authorize:
+            payload = parent_feed.get_parent_feed_homework_content("HW-1")
+        authorize.assert_called_once_with("P-1", "CS-1")
+        db.get_value.assert_called_once_with("File", {"file_url": "/private/files/homework.pdf"}, "name")
+        self.assertEqual((payload["content"], payload["display_content_as"]), (b"pdf", "attachment"))
+
+    def test_parent_portal_uses_redirect_only_after_service_check(self):
+        frappe.local.flags = frappe._dict(in_test=False)
+        response = frappe._dict()
+        with patch.object(parent_portal, "get_parent_feed_video_content",
+                          return_value={"redirect": "https://cdn.example/file.mp4"}), \
+             patch.object(parent_portal.frappe.local, "response", response, create=True):
+            parent_portal.parent_portal_get_feed_video("VIDEO-1")
+        self.assertEqual((response.type, response.location), ("redirect", "https://cdn.example/file.mp4"))
