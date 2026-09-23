@@ -12,6 +12,10 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD" /Users/ranxu/Documents/Project/frapp
 
 Result: **57 tests run, 56 passed, 1 errored** (`FAILED (errors=1)`), in 0.541s. The error is `test_parent_context_exposes_adjustment_as_independent_line` in `test_school_admin_draft_invoice_adjustments.py`. Its positive payable amount makes `build_parent_invoice_context` call `payment_url`, whose `settings()` calls `frappe.db.exists("DocType", "QAS Stripe Settings")`. With no site-bound `frappe.db`, Werkzeug raises `RuntimeError: object is not bound`. A focused rerun of that exact test produced the same error (`Ran 1 test`, `FAILED (errors=1)`). This is an existing test setup gap at the recorded HEAD; it does not establish an invoice, Stripe, or database behavior failure. No test or production code was changed to address it in this task.
 
+### Test-isolation repair (2026-09-23)
+
+A later test-only change patches `qas_custom.services.stripe_trial_payments.payment_url` in `test_parent_context_exposes_adjustment_as_independent_line`, the helper imported by `build_parent_invoice_context` when payable is positive. It returns a deterministic harmless URL so the line and amount assertions still exercise the presentation code without requiring site-bound Stripe settings. The isolated `test_school_admin_draft_invoice_adjustments` module passed **10/10 tests**. Rerunning the exact six-module command above passed **57/57 tests** (`Ran 57 tests`, `OK`). This repairs test isolation only; it changes no product behavior.
+
 ## Current caller and behavior inventory
 
 | Path | Existing behavior at the recorded HEAD |
@@ -27,7 +31,7 @@ Result: **57 tests run, 56 passed, 1 errored** (`FAILED (errors=1)`), in 0.541s.
 
 `run_invoice_mutation_as_administrator` saves the original session user, switches to `Administrator` for the callback, and restores the original user in `finally`, including after exceptions. The Course and Workshop insert/save calls still pass `ignore_permissions=True`. Workshop first checks `_require_school_admin`; the privilege switch is scoped to persistence, not an authorization grant to the caller. The School Admin service has a separate wrapper with the same switch-and-restore pattern.
 
-The guard is more than a per-invoice flag: if the `Notification` DocType exists, `disable_sales_invoice_auto_notifications` clears the Sales Invoice notification cache, scans all Notification rows, and disables any Sales Invoice notification or one matching legacy invoice subject/message markers through `frappe.db.set_value(..., update_modified=False)`; it clears the cache again. When called as a Sales Invoice document hook with flags, it also resets `doc.flags.notifications` and `notifications_executed` before and after the scan. If the `Notification` DocType does not exist, the function returns before those flag/cache actions. `hooks.py` invokes it on Sales Invoice `before_insert` and `before_submit`; Sales Invoice `on_update`/`on_change` purge matching unsent legacy email queue entries, and Email Queue `before_insert` suppresses matching legacy invoice messages. These are global notification/email side effects, so a later refactor must preserve call timing and scope deliberately.
+The guard is more than a per-invoice flag: if the `Notification` DocType exists, `disable_sales_invoice_auto_notifications` clears the Sales Invoice notification cache, scans all Notification rows, and disables any Sales Invoice notification or one matching legacy invoice subject/message markers through `frappe.db.set_value(..., update_modified=False)`; it clears the cache again. When called as a Sales Invoice document hook with flags, it also resets `doc.flags.notifications` and `notifications_executed` before and after the scan. If the `Notification` DocType does not exist, the function returns before those flag/cache actions. `hooks.py` invokes it on Sales Invoice `before_insert` and `before_submit`; Sales Invoice `on_update`/`on_change` purge matching legacy Email Queue entries with statuses `Not Sent`, `Partially Sent`, and `Error`, including their recipient rows. Email Queue `before_insert` suppresses matching legacy invoice messages by marking the queue message and every recipient `Sent` to prevent delivery. These are global notification/email side effects, so a later refactor must preserve call timing and scope deliberately.
 
 ## Read-only environment inspection and limits
 
@@ -35,11 +39,11 @@ The bench has `qas-local.test` and `qas-restore.test` site configuration files (
 
 | Surface | Status | Limit |
 | --- | --- | --- |
-| Mocked financial unit tests with real Frappe imports | Partially verified | 56/57 passed; one reproducible unbound-DB test error above. |
+| Mocked financial unit tests with real Frappe imports | Verified after test isolation repair | Historical baseline: 56/57 passed; clean rerun: 57/57 passed. |
 | Browser/portal invoice flows | Unverified | No browser session or designated disposable site/account. |
 | Real invoice creation, reuse, submission, or database transaction | Unverified | No site connection or test records. |
 | Real payment, Stripe, charge, or refund | Unverified | No payment action or disposable payment setup. |
 | Real notification/email queue delivery or suppression | Unverified | Hook behavior inspected in code only; no email action. |
 | Production behavior and deployment | Unverified | No production access or deployment check. |
 
-This documentation task made no schema, data, API, or billing behavior change. It did not push, deploy, connect to a site, send email, or charge a payment method.
+The baseline documentation and later test-isolation repair made no schema, data, API, or billing behavior change. Neither pushed, deployed, connected to a site, sent email, or charged a payment method.

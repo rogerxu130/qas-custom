@@ -227,6 +227,7 @@ class TestSchoolAdminDraftInvoiceAdjustments(TestCase):
 	@patch("qas_custom.modules.billing.presentation.get_invoice_settings", return_value={})
 	@patch("qas_custom.modules.billing.presentation.get_invoice_payment_context", return_value={})
 	@patch("qas_custom.modules.billing.presentation.get_invoice_total_amount", return_value=450)
+	@patch("qas_custom.services.stripe_trial_payments.payment_url", return_value="https://example.invalid/pay/SINV-0001")
 	@patch(
 		"qas_custom.modules.billing.presentation.resolve_invoice_print_amounts",
 		return_value={"store_credit_applied": 0, "payable_amount": 450},
@@ -238,6 +239,7 @@ class TestSchoolAdminDraftInvoiceAdjustments(TestCase):
 		_payment_plan,
 		_recipient_name,
 		_amounts,
+		_payment_url,
 		_total,
 		_payment_context,
 		_settings,
