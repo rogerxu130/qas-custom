@@ -143,6 +143,8 @@ doc_events = {
 	"Enrollment": {"validate": "qas_custom.services.term_lifecycle.validate_term_child"},
 	"Course Sessions": {"validate": "qas_custom.services.term_lifecycle.validate_term_child"},
 	"Class Attendance Entry": {"validate": "qas_custom.services.term_lifecycle.validate_term_child"},
+	"*": {"before_validate": "qas_custom.services.term_media.guard_media_reference"},
+	"Term": {"validate": "qas_custom.services.term_media.validate_term_change"},
 	"Email Queue": {
 		"before_insert": "qas_custom.modules.notifications.guard.suppress_legacy_invoice_email_queue",
 	},
@@ -221,6 +223,7 @@ scheduler_events = {
 	],
 	"daily": [
 		"qas_custom.tasks.maintenance_tasks.nightly_maintenance",
+		"qas_custom.services.term_media.expire_archives",
 	],
 }
 

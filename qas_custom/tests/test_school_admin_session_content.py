@@ -14,6 +14,14 @@ from qas_custom.services.school_admin import (
 
 
 class TestSchoolAdminSessionContent(TestCase):
+	def setUp(self):
+		# Existing-media scenarios have no archive schema/tombstones; archive behavior has dedicated tests.
+		archive_frappe = Mock()
+		archive_frappe.db.exists.return_value = False
+		patcher = patch("qas_custom.services.term_media.frappe", archive_frappe)
+		patcher.start()
+		self.addCleanup(patcher.stop)
+
 	@patch("qas_custom.services.school_admin._doctype_available", return_value=True)
 	@patch("qas_custom.services.school_admin.frappe.get_all")
 	def test_content_rows_include_only_published_records_and_sort_newest_first(self, get_all, _doctype_available):

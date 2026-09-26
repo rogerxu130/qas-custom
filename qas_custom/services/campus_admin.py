@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from qas_custom.services.term_media import annotate_media, assert_media_available
+
 import frappe
 from frappe import _
 
@@ -935,6 +937,7 @@ def get_campus_admin_session_photo_content_data(course_session=None, photo_post=
 	target_idx = cint(photo_idx)
 	if target_idx <= 0:
 		raise frappe.PermissionError
+	assert_media_available(photo_post_doc.name, "photo", target_idx)
 	photo_row = next((row for row in photo_post_doc.photos or [] if cint(row.idx) == target_idx), None)
 	if not photo_row or not getattr(photo_row, "image", None):
 		raise frappe.DoesNotExistError
@@ -950,6 +953,7 @@ def get_campus_admin_session_video_content_data(course_session=None, video_post=
 	video_post_doc = frappe.get_doc("Session Video Post", video_post)
 	if video_post_doc.get("course_session") != course_session or video_post_doc.get("status") != "Published":
 		raise frappe.PermissionError
+	assert_media_available(video_post_doc.name, "video")
 	if not video_post_doc.get("video"):
 		raise frappe.DoesNotExistError
 

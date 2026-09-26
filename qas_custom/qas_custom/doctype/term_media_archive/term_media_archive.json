@@ -1,0 +1,90 @@
+{
+ "doctype": "DocType",
+ "name": "Term Media Archive",
+ "module": "QAS Custom",
+ "autoname": "hash",
+ "engine": "InnoDB",
+ "field_order": [
+  "term",
+  "media_type",
+  "status",
+  "progress",
+  "total",
+  "expires_at",
+  "backup_confirmed_at",
+  "backup_confirmed_by",
+  "cleanup_status",
+  "job_data",
+  "error"
+ ],
+ "fields": [
+  {
+   "fieldname": "term",
+   "fieldtype": "Link",
+   "label": "Term",
+   "options": "Term",
+   "search_index": 1
+  },
+  {
+   "fieldname": "media_type",
+   "fieldtype": "Select",
+   "label": "Media Type",
+   "options": "all\nphoto\nvideo"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Data",
+   "label": "Status"
+  },
+  {
+   "fieldname": "progress",
+   "fieldtype": "Int",
+   "label": "Progress"
+  },
+  {
+   "fieldname": "total",
+   "fieldtype": "Int",
+   "label": "Total"
+  },
+  {
+   "fieldname": "expires_at",
+   "fieldtype": "Datetime",
+   "label": "Expires At"
+  },
+  {
+   "fieldname": "backup_confirmed_at",
+   "fieldtype": "Datetime",
+   "label": "Backup Confirmed At"
+  },
+  {
+   "fieldname": "backup_confirmed_by",
+   "fieldtype": "Link",
+   "label": "Backup Confirmed By",
+   "options": "User"
+  },
+  {
+   "fieldname": "cleanup_status",
+   "fieldtype": "Data",
+   "label": "Cleanup Status"
+  },
+  {
+   "fieldname": "job_data",
+   "fieldtype": "Long Text",
+   "label": "Job Data"
+  },
+  {
+   "fieldname": "error",
+   "fieldtype": "Small Text",
+   "label": "Error"
+  }
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1
+  }
+ ],
+ "track_changes": 0,
+ "sort_field": "creation",
+ "sort_order": "DESC"
+}

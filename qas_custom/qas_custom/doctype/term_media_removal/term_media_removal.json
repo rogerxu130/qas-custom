@@ -1,0 +1,87 @@
+{
+ "doctype": "DocType",
+ "name": "Term Media Removal",
+ "module": "QAS Custom",
+ "autoname": "hash",
+ "engine": "InnoDB",
+ "field_order": [
+  "archive",
+  "term",
+  "post",
+  "kind",
+  "photo_idx",
+  "state",
+  "file_id",
+  "file_url",
+  "removed_by",
+  "removed_at"
+ ],
+ "fields": [
+  {
+   "fieldname": "archive",
+   "fieldtype": "Link",
+   "label": "Archive",
+   "options": "Term Media Archive",
+   "search_index": 1
+  },
+  {
+   "fieldname": "term",
+   "fieldtype": "Link",
+   "label": "Term",
+   "options": "Term",
+   "search_index": 1
+  },
+  {
+   "fieldname": "post",
+   "fieldtype": "Data",
+   "label": "Post",
+   "search_index": 1
+  },
+  {
+   "fieldname": "kind",
+   "fieldtype": "Data",
+   "label": "Kind"
+  },
+  {
+   "fieldname": "photo_idx",
+   "fieldtype": "Int",
+   "label": "Photo Idx"
+  },
+  {
+   "fieldname": "state",
+   "fieldtype": "Data",
+   "label": "State",
+   "search_index": 1
+  },
+  {
+   "fieldname": "file_id",
+   "fieldtype": "Data",
+   "label": "File Id"
+  },
+  {
+   "fieldname": "file_url",
+   "fieldtype": "Small Text",
+   "label": "File Url"
+  },
+  {
+   "fieldname": "removed_by",
+   "fieldtype": "Link",
+   "label": "Removed By",
+   "options": "User"
+  },
+  {
+   "fieldname": "removed_at",
+   "fieldtype": "Datetime",
+   "label": "Removed At"
+  }
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1
+  }
+ ],
+ "track_changes": 0,
+ "sort_field": "creation",
+ "sort_order": "DESC"
+}

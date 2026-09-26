@@ -5,6 +5,8 @@ from datetime import datetime, timedelta
 from urllib.parse import urlencode
 from urllib.parse import urlsplit
 
+from qas_custom.services.term_media import annotate_media, assert_media_available
+
 import frappe
 from frappe import _
 from frappe.utils import get_datetime, getdate, get_time, get_datetime_in_timezone
@@ -183,7 +185,7 @@ def get_parent_feed_data(student=None, page=1, page_length=10):
 
     start = (page - 1) * page_length
     end = start + page_length
-    paged_items = items[start:end]
+    paged_items = annotate_media(items[start:end])
 
     return {
         "items": paged_items,
@@ -419,6 +421,7 @@ def get_parent_feed_photo_content(photo_post, photo_idx):
     if target_idx <= 0:
         raise frappe.PermissionError
 
+    assert_media_available(photo_post_doc.name, "photo", target_idx)
     photo_row = next((row for row in photo_post_doc.photos or [] if cint(row.idx) == target_idx), None)
     if not photo_row or not getattr(photo_row, "image", None):
         raise frappe.DoesNotExistError
@@ -433,6 +436,7 @@ def get_parent_feed_video_content(video_post, download=False):
     _require_published_media_doc(video_post_doc)
     _validate_parent_session_access(parent_name, video_post_doc.get("course_session"))
 
+    assert_media_available(video_post_doc.name, "video")
     if not video_post_doc.video:
         raise frappe.DoesNotExistError
 

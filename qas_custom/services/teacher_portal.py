@@ -5,6 +5,8 @@ import json
 import mimetypes
 from urllib.parse import urlencode
 
+from qas_custom.services.term_media import annotate_media, assert_media_available
+
 import frappe
 from frappe import _
 from frappe.utils import add_days, cint, get_time, getdate, now_datetime, today
@@ -159,6 +161,10 @@ def get_teacher_session_detail_data(course_session=None):
             }
         )
 
+    photo_posts = _get_photo_post_rows(session["name"])
+    video_posts = _get_video_post_rows(session["name"])
+    annotate_media(photo_posts + video_posts)
+
     return {
         "session": {
             "id": session["name"],
@@ -175,8 +181,8 @@ def get_teacher_session_detail_data(course_session=None):
         },
         "students": students,
         "homeworks": _get_homework_rows(session["name"]),
-        "photo_posts": _get_photo_post_rows(session["name"]),
-        "video_posts": _get_video_post_rows(session["name"]),
+        "photo_posts": photo_posts,
+        "video_posts": video_posts,
         "status_options": _get_attendance_status_options(),
         "special_students": _count_special_students(attendance_rows),
     }
@@ -353,6 +359,7 @@ def get_teacher_photo_content_data(photo_post=None, photo_idx=None):
     if target_idx <= 0:
         raise frappe.PermissionError
 
+    assert_media_available(photo_post_doc.name, "photo", target_idx)
     photo_row = next((row for row in photo_post_doc.photos or [] if cint(row.idx) == target_idx), None)
     if not photo_row or not getattr(photo_row, "image", None):
         raise frappe.DoesNotExistError
@@ -448,6 +455,7 @@ def get_teacher_video_content_data(video_post=None, download=False):
     video_post_doc = frappe.get_doc("Session Video Post", video_post)
     _get_owned_session(video_post_doc.get("course_session"), teacher.name)
 
+    assert_media_available(video_post_doc.name, "video")
     if not video_post_doc.video:
         raise frappe.DoesNotExistError
 
@@ -772,10 +780,10 @@ def _get_photo_previews(photo_post_ids: list[str]):
             "parenttype": "Session Photo Post",
             "parentfield": "photos",
         },
-        fields=["parent", "idx"],
+        fields=["parent", "idx", "image"],
         order_by="parent asc, idx asc",
     ):
-        if len(previews[row.parent]) >= PHOTO_POST_PREVIEW_LIMIT:
+        if not row.get("image") or len(previews[row.parent]) >= PHOTO_POST_PREVIEW_LIMIT:
             continue
         previews[row.parent].append(_build_photo_preview_payload(row.parent, row.idx))
     return previews
@@ -799,6 +807,7 @@ def _build_photo_post_payload(photo_post_id, title, caption, status, posted_at, 
     photos = photos or []
     return {
         "id": photo_post_id,
+        "type": "photo_post",
         "title": title or "Class Photos",
         "caption": caption or "",
         "status": status,
@@ -843,6 +852,7 @@ def _build_video_post_payload(video_post_id, title, caption, status, posted_at, 
     preview_url = _build_teacher_video_url(video_post_id)
     return {
         "id": video_post_id,
+        "type": "video_post",
         "title": title or "Class Video",
         "caption": caption or "",
         "status": status,
