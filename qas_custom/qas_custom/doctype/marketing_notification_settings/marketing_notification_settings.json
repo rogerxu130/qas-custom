@@ -1,0 +1,40 @@
+{
+ "doctype": "DocType",
+ "name": "Marketing Notification Settings",
+ "module": "QAS Custom",
+ "engine": "InnoDB",
+ "issingle": 1,
+ "track_changes": 1,
+ "fields": [
+  {
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Website trial notifications enabled",
+   "default": "0"
+  },
+  {
+   "fieldname": "recipient",
+   "fieldtype": "Data",
+   "label": "Marketing email",
+   "options": "Email"
+  }
+ ],
+ "field_order": [
+  "enabled",
+  "recipient"
+ ],
+ "permissions": [
+  {
+   "role": "School Admin",
+   "read": 1,
+   "write": 1,
+   "create": 1
+  },
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1
+  }
+ ]
+}

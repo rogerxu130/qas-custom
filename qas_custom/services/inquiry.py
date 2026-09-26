@@ -76,8 +76,10 @@ def create_inquiry_webhook_data(payload=None):
 	normalized["skip_confirmation"] = True
 	normalized["require_bookable_session"] = True
 	normalized["raw_webhook_payload"] = payload
-	detail = create_inquiry_core(normalized, source=normalized.get("source") or "Webhook", actor=None)
+	detail = create_inquiry_core(normalized, source=normalized.get("source") or "Webhook", actor=None, commit=False)
 	inquiry_id = (detail.get("inquiry") or {}).get("id")
+	from qas_custom.services.marketing_notifications import record_webhook_trial
+	record_webhook_trial(inquiry_id)
 	return _build_webhook_response(inquiry_id, status="created", duplicate=False)
 
 

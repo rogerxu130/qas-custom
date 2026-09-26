@@ -1677,3 +1677,15 @@ def school_admin_complete_direct_enrollment(inquiry=None, payload=None):
 def school_admin_update_invoice_due_date(invoice=None, due_date=None):
 	from qas_custom.services.school_admin import update_school_admin_invoice_due_date_data
 	return update_school_admin_invoice_due_date_data(invoice=invoice, due_date=due_date)
+
+
+@frappe.whitelist()
+def school_admin_get_marketing_notification_settings():
+    from qas_custom.services.marketing_notifications import get_settings
+    return get_settings()
+
+
+@frappe.whitelist(methods=["POST"])
+def school_admin_save_marketing_notification_settings(enabled=0, recipient=None):
+    from qas_custom.services.marketing_notifications import save_settings
+    return save_settings(enabled, recipient)

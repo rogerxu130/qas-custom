@@ -199,6 +199,7 @@ doc_events = {
 
 scheduler_events = {
 	"cron": {
+		"*/5 * * * *": ["qas_custom.services.marketing_notifications.retry_pending"],
 		"*/15 * * * *": [
 			"qas_custom.tasks.teacher_session_completion_reminders.send_teacher_session_completion_reminders",
 			"qas_custom.tasks.trial_parent_notifications.send_trial_parent_24h_reminders",

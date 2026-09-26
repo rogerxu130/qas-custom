@@ -1,0 +1,66 @@
+{
+ "doctype": "DocType",
+ "name": "Marketing Trial Notification",
+ "module": "QAS Custom",
+ "engine": "InnoDB",
+ "autoname": "hash",
+ "track_changes": 1,
+ "fields": [
+  {
+   "fieldname": "inquiry",
+   "fieldtype": "Link",
+   "label": "Inquiry",
+   "options": "Inquiry",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "recipient",
+   "fieldtype": "Data",
+   "label": "Marketing email",
+   "options": "Email",
+   "reqd": 1
+  },
+  {
+   "fieldname": "parent_name",
+   "fieldtype": "Data",
+   "label": "Parent name"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Pending\nQueued\nFailed\nSkipped",
+   "default": "Pending"
+  },
+  {
+   "fieldname": "email_queue",
+   "fieldtype": "Link",
+   "label": "Email Queue",
+   "options": "Email Queue"
+  },
+  {
+   "fieldname": "last_error",
+   "fieldtype": "Small Text",
+   "label": "Last handoff error"
+  }
+ ],
+ "field_order": [
+  "inquiry",
+  "recipient",
+  "parent_name",
+  "status",
+  "email_queue",
+  "last_error"
+ ],
+ "permissions": [
+  {
+   "role": "School Admin",
+   "read": 1
+  },
+  {
+   "role": "System Manager",
+   "read": 1
+  }
+ ]
+}
