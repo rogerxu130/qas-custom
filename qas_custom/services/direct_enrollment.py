@@ -1,6 +1,8 @@
 """Website full-term enrollment. Trial booking side effects are deliberately absent."""
 from datetime import date
 import json
+import re
+import unicodedata
 
 import frappe
 from frappe.utils import cint, getdate, validate_email_address
@@ -67,9 +69,60 @@ def _student(parent, name, dob):
 
 def _match(payload):
     try:
-        return _match_schedule(payload)
+        return _match_schedule(_website_schedule_payload(payload))
     except (ValueError, TypeError, OverflowError):
         raise ReviewRequired("The submitted class time or start date could not be parsed.")
+
+
+def _label(value):
+    """Ignore presentation differences, never guess abbreviations or spelling."""
+    return " ".join(re.findall(r"[^\W_]+", unicodedata.normalize("NFKC", str(value or "")).casefold()))
+
+
+def _website_schedule_payload(payload):
+    result = dict(payload)
+    title = payload.get("form_name") or payload.get("submitted_form_name")
+    if payload.get("form_name") and payload.get("submitted_form_name") and _label(payload["form_name"]) != _label(payload["submitted_form_name"]):
+        raise ReviewRequired("Conflicting form names were submitted.")
+    available = payload.get("available_sessions")
+    if available:
+        if not isinstance(available, str):
+            raise ReviewRequired("Select exactly one Available Sessions option.")
+        result["class_session"] = available
+    session = result.get("class_session")
+    if session:
+        # Full matching prevents a multi-selection or malformed end time being truncated.
+        pattern = r"[A-Za-z]+\s+\d{1,2}:\d{2}(?:\s*[-–—]\s*\d{1,2}:\d{2})?(?:\s*\(\s*in\s+Chinese\s*\))?"
+        if not isinstance(session, str) or not re.fullmatch(pattern, session.strip(), re.IGNORECASE):
+            raise ReviewRequired("Available Sessions must contain one weekday and class time, for example Sat 13:00–14:30.")
+        result["class_session"] = session.strip().replace("—", "-")
+        if available and payload.get("class_session"):
+            original = payload["class_session"]
+            if not isinstance(original, str) or not re.fullmatch(pattern, original.strip(), re.IGNORECASE):
+                raise ReviewRequired("Conflicting class session fields were submitted.")
+            if (inquiries._parse_class_session(original.replace("—", "-")) != inquiries._parse_class_session(result["class_session"])
+                    or inquiries._parse_class_language(original) != inquiries._parse_class_language(session)):
+                raise ReviewRequired("Conflicting class session fields were submitted.")
+    if title:
+        if not isinstance(title, str):
+            raise ReviewRequired("Form name must be a campus and course title.")
+        campuses = frappe.get_all("Campus", fields=["name", "campus_name"], limit_page_length=0)
+        courses = frappe.get_all("Course", fields=["name", "course_name"], limit_page_length=0)
+        matches = {
+            (campus.name, course.name)
+            for campus in campuses for course in courses
+            if any(_label(title) == _label(f"{campus_label} {course_label}")
+                   for campus_label in {campus.name, campus.get("campus_name") or campus.name}
+                   for course_label in {course.name, course.get("course_name") or course.name})
+        }
+        if len(matches) != 1:
+            raise ReviewRequired("Form name could not be uniquely matched to a campus and course. Review the submitted title.")
+        campus, course = matches.pop()
+        for key, matched, resolver in (("campus", campus, inquiries._resolve_campus), ("course", course, inquiries._resolve_course)):
+            if payload.get(key) and resolver(payload[key]) != matched:
+                raise ReviewRequired("Form name conflicts with the submitted campus or course.")
+            result[key] = matched
+    return result
 
 
 def _match_schedule(payload):
@@ -210,11 +263,12 @@ def create_webhook(payload=None):
     doc.external_form_id = str(payload.get("form_id") or "")
     doc.source_url = payload.get("source_url")
     doc.webhook_source = "Fluent Form"
-    allowed = ("external_submission_id", "form_id", "submitted_at", "source_url", "parent_name", "email", "phone", "student_name", "date_of_birth", "campus", "course", "weekly_timeslot", "class_session", "start_date", "form_answers")
+    allowed = ("external_submission_id", "form_id", "form_name", "submitted_form_name", "available_sessions", "submitted_at", "source_url", "parent_name", "email", "phone", "student_name", "date_of_birth", "campus", "course", "weekly_timeslot", "class_session", "start_date", "form_answers")
     doc.raw_webhook_payload = json.dumps(_safe_answers({key: payload[key] for key in allowed if key in payload}), ensure_ascii=False)
     doc.contact_name, doc.contact_email, doc.contact_phone = payload.get("parent_name"), email, payload.get("phone")
     doc.submitted_student_name = payload.get("student_name")
-    doc.submitted_class_session = payload.get("class_session")
+    doc.submitted_form_name = str(payload.get("form_name") or payload.get("submitted_form_name") or "")[:140]
+    doc.submitted_class_session = str(payload.get("available_sessions") or payload.get("class_session") or "")[:140]
     doc.requested_start_date = str(payload.get("start_date") or "")[:140]
     doc.confirmation_status = doc.reminder_status = "Not Required"
     doc.campus = inquiries._resolve_campus(payload.get("campus"))
