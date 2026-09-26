@@ -17,7 +17,7 @@ import frappe
 from frappe import _
 from frappe.model.rename_doc import rename_doc
 from frappe.sessions import clear_sessions
-from frappe.utils import add_days, cint, flt, get_time, getdate, now_datetime, nowdate, today, validate_email_address
+from frappe.utils import add_days, cint, flt, get_datetime, get_time, getdate, now_datetime, nowdate, today, validate_email_address
 from frappe.utils.data import make_filter_tuple
 from PIL import Image, ImageOps
 
@@ -157,6 +157,8 @@ DEFAULT_COURSE_INVOICE_ITEM = "Tuition Fee"
 MANUAL_INVOICE_ITEM = "Other"
 INVOICE_ADJUSTMENT_FIELD = "qas_is_invoice_adjustment"
 BULK_INVOICE_SUBMIT_JOB_TTL_SECONDS = 86400
+BULK_INVOICE_SUBMIT_STALE_SECONDS = 9000
+BULK_INVOICE_SUBMIT_LATEST_KEY = "qas:school_admin:bulk_invoice_submit:latest"
 NON_ATTENDING_ATTENDANCE_STATUSES = {"Cancelled", "Leave"}
 TRIAL_CONFIRMATION_STATUSES = {"Pending", "Text Message Sent", "Customer Confirmed"}
 SCHOOL_ADMIN_LEAVE_ATTENDANCE_STATUSES = ("To be started", "Absent")
@@ -2295,29 +2297,39 @@ def reopen_school_admin_unpaid_invoice_data(invoice=None, reason=None):
 def start_school_admin_bulk_invoice_submit_job_data(payload=None):
 	_require_school_admin()
 	payload = _get_payload(payload)
-	if payload.get("all_drafts"):
-		invoice_names = _get_all_draft_invoice_names()
-	else:
-		invoices = payload.get("invoices") or []
-		if not isinstance(invoices, list):
-			frappe.throw(_("Invoices must be a list."))
-		invoice_names = _unique_invoice_names(invoices)
-	if not invoice_names:
-		frappe.throw(_("At least one draft invoice is required."))
-
-	job_id = frappe.generate_hash(length=16)
-	status = _bulk_invoice_submit_initial_status(job_id, invoice_names)
-	_set_bulk_invoice_submit_job_status(job_id, status)
-	frappe.enqueue(
-		"qas_custom.services.school_admin.run_school_admin_bulk_invoice_submit_job",
-		queue="long",
-		timeout=3600,
-		job_name=f"QAS Bulk Invoice Submit {job_id}",
-		enqueue_after_commit=True,
-		qas_job_id=job_id,
-		invoices=invoice_names,
-		requested_by=frappe.session.user,
-	)
+	if not payload.get("all_drafts") and not isinstance(payload.get("invoices") or [], list):
+		frappe.throw(_("Invoices must be a list."))
+	with frappe.cache().lock(f"{frappe.local.site}:qas:bulk_invoice_submit", timeout=30, blocking_timeout=10):
+		current = _get_latest_bulk_invoice_submit_job_status()
+		if current and current.get("status") in {"queued", "running"}:
+			return current
+		invoice_names = (
+			_get_all_draft_invoice_names()
+			if payload.get("all_drafts")
+			else _unique_invoice_names(payload.get("invoices") or [])
+		)
+		if not invoice_names:
+			frappe.throw(_("At least one draft invoice is required."))
+		job_id = frappe.generate_hash(length=16)
+		status = _bulk_invoice_submit_initial_status(job_id, invoice_names)
+		_set_bulk_invoice_submit_job_status(job_id, status)
+		frappe.cache().set_value(BULK_INVOICE_SUBMIT_LATEST_KEY, job_id, expires_in_sec=BULK_INVOICE_SUBMIT_JOB_TTL_SECONDS)
+		try:
+			frappe.enqueue(
+				"qas_custom.services.school_admin.run_school_admin_bulk_invoice_submit_job",
+				queue="long",
+				timeout=7200,
+				job_id=f"qas-bulk-invoice-submit-{job_id}",
+				enqueue_after_commit=True,
+				qas_job_id=job_id,
+				invoices=invoice_names,
+				requested_by=frappe.session.user,
+			)
+		except Exception:
+			status["status"] = "failed"
+			status["completed_at"] = now_datetime().isoformat()
+			_set_bulk_invoice_submit_job_status(job_id, status)
+			raise
 	return status
 
 
@@ -2351,9 +2363,9 @@ def _get_all_draft_invoice_names():
 
 def get_school_admin_bulk_invoice_submit_job_data(job_id=None):
 	_require_school_admin()
-	job_id = (job_id or "").strip()
+	job_id = (job_id or frappe.cache().get_value(BULK_INVOICE_SUBMIT_LATEST_KEY, expires=True) or "").strip()
 	if not job_id:
-		frappe.throw(_("Job ID is required."))
+		return None
 	status = _get_bulk_invoice_submit_job_status(job_id)
 	if not status:
 		frappe.throw(_("Bulk invoice submit job was not found or has expired."))
@@ -2370,10 +2382,16 @@ def run_school_admin_bulk_invoice_submit_job(qas_job_id=None, invoices=None, req
 		frappe.set_user(requested_by)
 
 	status = _get_bulk_invoice_submit_job_status(job_id) or _bulk_invoice_submit_initial_status(job_id, invoice_names)
+	status.setdefault("emails_sent", 0)
+	status.setdefault("emails_failed", 0)
+	if not frappe.cache().get_value(BULK_INVOICE_SUBMIT_LATEST_KEY, expires=True):
+		frappe.cache().set_value(BULK_INVOICE_SUBMIT_LATEST_KEY, job_id, expires_in_sec=BULK_INVOICE_SUBMIT_JOB_TTL_SECONDS)
 	status.update({"status": "running", "started_at": now_datetime().isoformat(), "current_invoice": None})
 	_set_bulk_invoice_submit_job_status(job_id, status)
 
 	for invoice_name in invoice_names:
+		if frappe.cache().get_value(BULK_INVOICE_SUBMIT_LATEST_KEY, expires=True) != job_id:
+			return status
 		invoice_name = (invoice_name or "").strip()
 		if not invoice_name:
 			continue
@@ -2387,6 +2405,11 @@ def run_school_admin_bulk_invoice_submit_job(qas_job_id=None, invoices=None, req
 				status["skipped"] += 1
 			elif result_row.get("ok"):
 				status["succeeded"] += 1
+				notification = result_row.get("notification") or {}
+				if notification.get("sent"):
+					status["emails_sent"] += 1
+				elif notification and not notification.get("queued"):
+					status["emails_failed"] += 1
 			else:
 				status["failed"] += 1
 		except Exception as exc:
@@ -2402,10 +2425,11 @@ def run_school_admin_bulk_invoice_submit_job(qas_job_id=None, invoices=None, req
 			)
 		_set_bulk_invoice_submit_job_status(job_id, status)
 
-	status["current_invoice"] = None
-	status["completed_at"] = now_datetime().isoformat()
-	status["status"] = "completed_with_errors" if status.get("failed") else "completed"
-	_set_bulk_invoice_submit_job_status(job_id, status)
+	if frappe.cache().get_value(BULK_INVOICE_SUBMIT_LATEST_KEY, expires=True) == job_id:
+		status["current_invoice"] = None
+		status["completed_at"] = now_datetime().isoformat()
+		status["status"] = "completed_with_errors" if status.get("failed") or status.get("emails_failed") else "completed"
+		_set_bulk_invoice_submit_job_status(job_id, status)
 	return status
 
 
@@ -2419,7 +2443,9 @@ def _run_one_bulk_invoice_submit(invoice_name):
 	if docstatus == 2:
 		return {"invoice": invoice_name, "ok": False, "docstatus": 2, "message": _("Cancelled invoices cannot be submitted.")}
 
-	result = submit_school_admin_invoice_data(invoice=invoice_name, enqueue_notification=True)
+	result = submit_school_admin_invoice_data(invoice=invoice_name, enqueue_notification=False)
+	notification = result.get("notification") or {}
+	mail_message = _("Invoice email sent") if notification.get("sent") else _("Invoice submitted; email was not sent: {0}").format(notification.get("reason") or _("Check the notification log."))
 	return {
 		"invoice": invoice_name,
 		"ok": True,
@@ -2427,7 +2453,7 @@ def _run_one_bulk_invoice_submit(invoice_name):
 		"docstatus": result.get("docstatus"),
 		"notification": result.get("notification"),
 		"receipt_notification": result.get("receipt_notification"),
-		"message": _("Done"),
+		"message": mail_message,
 	}
 
 
@@ -2440,6 +2466,8 @@ def _bulk_invoice_submit_initial_status(job_id, invoice_names):
 		"succeeded": 0,
 		"failed": 0,
 		"skipped": 0,
+		"emails_sent": 0,
+		"emails_failed": 0,
 		"current_invoice": None,
 		"results": [],
 		"created_at": now_datetime().isoformat(),
@@ -2453,6 +2481,7 @@ def _bulk_invoice_submit_job_cache_key(job_id):
 
 
 def _set_bulk_invoice_submit_job_status(job_id, status):
+	status["updated_at"] = now_datetime().isoformat()
 	frappe.cache().set_value(
 		_bulk_invoice_submit_job_cache_key(job_id),
 		status,
@@ -2461,7 +2490,20 @@ def _set_bulk_invoice_submit_job_status(job_id, status):
 
 
 def _get_bulk_invoice_submit_job_status(job_id):
-	return frappe.cache().get_value(_bulk_invoice_submit_job_cache_key(job_id))
+	status = frappe.cache().get_value(_bulk_invoice_submit_job_cache_key(job_id), expires=True)
+	if status and status.get("status") in {"queued", "running"}:
+		updated = get_datetime(status.get("updated_at") or status.get("created_at"))
+		if updated and (now_datetime() - updated).total_seconds() > BULK_INVOICE_SUBMIT_STALE_SECONDS:
+			status["status"] = "failed"
+			status["completed_at"] = now_datetime().isoformat()
+			status["results"].append({"invoice": status.get("current_invoice"), "ok": False, "message": _("The background job stopped updating. Submitted invoices will be skipped when retried.")})
+			_set_bulk_invoice_submit_job_status(job_id, status)
+	return status
+
+
+def _get_latest_bulk_invoice_submit_job_status():
+	job_id = frappe.cache().get_value(BULK_INVOICE_SUBMIT_LATEST_KEY, expires=True)
+	return _get_bulk_invoice_submit_job_status(job_id) if job_id else None
 
 
 def bulk_school_admin_invoice_action_data(payload=None):

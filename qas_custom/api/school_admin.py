@@ -1,5 +1,10 @@
 import frappe
 
+from qas_custom.services.term_generation_jobs import (
+	get_school_admin_term_generation_job_data,
+	start_school_admin_term_generation_job_data,
+)
+
 from qas_custom.services.school_admin_timetable_export import export_school_admin_timetable_data
 from qas_custom.services.parent_contact_export import (
 	export_school_admin_parent_contacts_data,
@@ -1253,6 +1258,16 @@ def school_admin_create_term_invoices(term=None, payload=None):
 @frappe.whitelist()
 def school_admin_create_term_attendance(term=None, payload=None):
 	return create_school_admin_term_attendance_data(term=term, payload=payload)
+
+
+@frappe.whitelist()
+def school_admin_start_term_generation_job(term=None, operation=None):
+	return start_school_admin_term_generation_job_data(term=term, operation=operation)
+
+
+@frappe.whitelist()
+def school_admin_get_term_generation_job(term=None, operation=None):
+	return get_school_admin_term_generation_job_data(term=term, operation=operation)
 
 
 @frappe.whitelist()
