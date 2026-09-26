@@ -10,6 +10,65 @@ def enr(name='E1', term='T3', student='S1', course='Art', slot='W1', **extra):
 
 
 class TestTermEnrollmentComparison(TestCase):
+    def test_invoice_payment_categories_use_actual_invoice_state(self):
+        classify = report._invoice_payment_category
+        self.assertEqual(classify(None), 'no_invoice')
+        self.assertEqual(classify(None, 'INV-1'), 'missing_invoice')
+        self.assertEqual(classify({'docstatus': 2}, 'INV-1'), 'cancelled')
+        self.assertEqual(classify({'docstatus': 0}, 'INV-1'), 'draft')
+        self.assertEqual(classify({'docstatus': 1, 'grand_total': 540, 'outstanding_amount': 0}, 'INV-1'), 'paid')
+        self.assertEqual(classify({'docstatus': 1, 'grand_total': 540, 'outstanding_amount': 200}, 'INV-1'), 'partial')
+        self.assertEqual(classify({'docstatus': 1, 'grand_total': 540, 'outstanding_amount': 540}, 'INV-1'), 'outstanding')
+        self.assertEqual(classify({'docstatus': 1, 'grand_total': 0, 'outstanding_amount': 0}, 'INV-1'), 'no_charge')
+
+    @patch.object(report, '_safe_fields', side_effect=lambda doctype, fields: fields)
+    def test_departure_context_keeps_payment_and_attendance_separate(self, safe_fields):
+        items = report.build_comparison([
+            {**enr('E1'), 'invoice': 'INV-1'},
+            {**enr('E2', 'T3', 'S2'), 'invoice': 'INV-2'},
+            {**enr('E3', 'T3', 'S3'), 'invoice': 'INV-3'},
+            enr('E4', 'T4', 'S3'),
+        ], 'T3', 'T4', ['Active'])
+        def get_all(doctype, **kwargs):
+            if doctype == 'Sales Invoice Item':
+                return []
+            if doctype == 'Sales Invoice':
+                self.assertEqual(kwargs['filters']['name'][1], ['INV-1', 'INV-2'])
+                return [dict(name='INV-1', docstatus=1, status='Paid', grand_total=540, outstanding_amount=0),
+                        dict(name='INV-2', docstatus=1, status='Unpaid', grand_total=540, outstanding_amount=540)]
+            if doctype == 'Class Attendance Entry':
+                self.assertEqual(set(kwargs['filters']['source_document'][1]), {'E1', 'E2'})
+                return [dict(source_document='E1', status='Present'), dict(source_document='E1', status='Late'),
+                        dict(source_document='E2', status='To be started')]
+            self.fail(f'Unexpected query: {doctype}')
+        with patch.object(report.frappe, 'get_all', side_effect=get_all), patch.object(report, '_has_field', return_value=True):
+            report._attach_departure_context(items)
+        self.assertEqual(items[0]['before'][0]['payment_category'], 'paid')
+        self.assertTrue(items[0]['all_source_invoices_paid'])
+        self.assertEqual(items[0]['before'][0]['attendance_summary']['present'], 2)
+        self.assertEqual(items[1]['before'][0]['payment_category'], 'outstanding')
+        self.assertFalse(items[1]['all_source_invoices_paid'])
+        self.assertEqual(items[1]['before'][0]['attendance_summary']['unmarked'], 1)
+        self.assertNotIn('payment_category', items[2]['before'][0])
+
+    @patch.object(report, '_safe_fields', side_effect=lambda doctype, fields: fields)
+    @patch.object(report, '_has_field', return_value=True)
+    def test_cancelled_invoice_is_found_after_enrollment_link_is_cleared(self, has_field, safe_fields):
+        items = report.build_comparison([enr('E1')], 'T3', 'T4', ['Active'])
+        def get_all(doctype, **kwargs):
+            if doctype == 'Sales Invoice Item':
+                return [dict(parent='INV-CANCEL', enrollment='E1')]
+            if doctype == 'Sales Invoice':
+                return [dict(name='INV-CANCEL', docstatus=2, status='Cancelled', grand_total=540, outstanding_amount=0)]
+            if doctype == 'Class Attendance Entry':
+                return []
+            self.fail(f'Unexpected query: {doctype}')
+        with patch.object(report.frappe, 'get_all', side_effect=get_all):
+            report._attach_departure_context(items)
+        source = items[0]['before'][0]
+        self.assertEqual(source['review_invoice'], 'INV-CANCEL')
+        self.assertEqual(source['payment_category'], 'cancelled')
+
     def test_students_only_on_one_side_and_cancelled_context(self):
         rows = [enr(), {**enr('cancel', 'T4'), 'status': 'Cancelled'}, enr('new', 'T4', 'S2')]
         result = report.build_comparison(rows, 'T3', 'T4', ['Active'])

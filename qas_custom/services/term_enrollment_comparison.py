@@ -3,13 +3,84 @@ from collections import defaultdict
 
 import frappe
 from frappe import _
-from frappe.utils import cint, now_datetime
+from frappe.utils import cint, flt, now_datetime
 
 from qas_custom.services.school_admin_reporting import (
-    _parent_map, _require_school_admin, _safe_fields, _student_map, _validate_term,
+    _has_field, _parent_map, _require_school_admin, _safe_fields, _student_map, _teacher_name_map, _validate_term,
 )
 
 CLASS_FIELDS = ('course', 'enrollment_type', 'campus', 'day_of_week', 'start_time', 'end_time', 'class_language')
+
+
+def _invoice_payment_category(invoice, linked_name=None):
+    """Classify the actual invoice; Enrollment.invoice_status can be stale."""
+    if not linked_name:
+        return 'no_invoice'
+    if not invoice:
+        return 'missing_invoice'
+    docstatus = cint(invoice.get('docstatus'))
+    if docstatus == 2:
+        return 'cancelled'
+    if docstatus == 0:
+        return 'draft'
+    if docstatus != 1:
+        return 'unknown'
+    total = flt(invoice.get('grand_total'))
+    outstanding = flt(invoice.get('outstanding_amount'))
+    if total <= 0.01:
+        return 'no_charge'
+    if outstanding <= 0.01:
+        return 'paid'
+    if outstanding < total - 0.01:
+        return 'partial'
+    return 'outstanding'
+
+
+def _attach_departure_context(items):
+    """Fetch finance and marked attendance only for students missing from the target Term."""
+    departed = [item for item in items if 'not_continuing' in item['tags']]
+    source_rows = [row for item in departed for row in item['before']]
+    if not source_rows:
+        return
+    enrollment_ids = [row['name'] for row in source_rows]
+    linked_invoices = defaultdict(set)
+    if _has_field('Sales Invoice Item', 'enrollment'):
+        for invoice_item in frappe.get_all('Sales Invoice Item',
+            filters={'enrollment': ['in', enrollment_ids]},
+            fields=['parent', 'enrollment'], limit_page_length=0):
+            if invoice_item.get('parent') and invoice_item.get('enrollment'):
+                linked_invoices[invoice_item['enrollment']].add(invoice_item['parent'])
+    invoice_ids = sorted({name for row in source_rows for name in
+        ([row.get('invoice')] if row.get('invoice') else []) + list(linked_invoices[row['name']]) if name})
+    invoices = {row['name']: dict(row) for row in frappe.get_all(
+        'Sales Invoice', filters={'name': ['in', invoice_ids]},
+        fields=_safe_fields('Sales Invoice', ['name', 'docstatus', 'status', 'grand_total', 'outstanding_amount', 'creation']),
+        limit_page_length=0,
+    )} if invoice_ids else {}
+    attendance = defaultdict(lambda: {'present': 0, 'absent': 0, 'leave': 0, 'unmarked': 0})
+    for entry in frappe.get_all('Class Attendance Entry',
+        filters={'source_doctype': 'Enrollment', 'source_document': ['in', enrollment_ids]},
+        fields=['source_document', 'status'], limit_page_length=0):
+        status = entry.get('status')
+        key = {'Present': 'present', 'Late': 'present', 'Absent': 'absent',
+               'Leave': 'leave', 'To be started': 'unmarked'}.get(status)
+        if key:
+            attendance[entry['source_document']][key] += 1
+    for item in departed:
+        for row in item['before']:
+            related = [invoices[name] for name in linked_invoices[row['name']] if name in invoices]
+            related.sort(key=lambda invoice: str(invoice.get('creation') or ''), reverse=True)
+            current = invoices.get(row.get('invoice'))
+            invoice = current or next((candidate for candidate in related if cint(candidate.get('docstatus')) != 2), None) or (related[0] if related else None)
+            row['review_invoice'] = (invoice or {}).get('name') or row.get('invoice') or ''
+            row['related_invoices'] = [{'name': candidate['name'], 'docstatus': cint(candidate.get('docstatus')),
+                                        'status': candidate.get('status') or ''} for candidate in related]
+            row['payment_category'] = _invoice_payment_category(invoice, row['review_invoice'])
+            row['invoice_actual_status'] = (invoice or {}).get('status') or ''
+            row['invoice_total'] = flt((invoice or {}).get('grand_total')) if invoice else None
+            row['invoice_outstanding'] = flt((invoice or {}).get('outstanding_amount')) if invoice else None
+            row['attendance_summary'] = dict(attendance[row['name']])
+        item['all_source_invoices_paid'] = all(row['payment_category'] == 'paid' for row in item['before'])
 
 
 def _signature(row):
@@ -117,8 +188,9 @@ def get_term_enrollment_comparison(source_term=None, target_term=None, include_p
     slot_ids = sorted({row['weekly_timeslot'] for row in enrollments if row.get('weekly_timeslot')})
     slots = {row['name']: dict(row) for row in frappe.get_all('Weekly Timeslot',
         filters={'name': ['in', slot_ids]},
-        fields=_safe_fields('Weekly Timeslot', ['name', 'campus', 'day_of_week', 'start_time', 'end_time', 'class_language', 'copied_from_weekly_timeslot']),
+        fields=_safe_fields('Weekly Timeslot', ['name', 'campus', 'day_of_week', 'start_time', 'end_time', 'class_language', 'teacher', 'copied_from_weekly_timeslot']),
         limit_page_length=0)} if slot_ids else {}
+    teacher_names = _teacher_name_map({row.get('teacher') for row in slots.values() if row.get('teacher')})
     course_ids = sorted({row['course'] for row in enrollments if row.get('course')})
     courses = {row['name']: row.get('course_name') or row['name'] for row in frappe.get_all('Course',
         filters={'name': ['in', course_ids]}, fields=_safe_fields('Course', ['name', 'course_name']), limit_page_length=0)} if course_ids else {}
@@ -126,7 +198,9 @@ def get_term_enrollment_comparison(source_term=None, target_term=None, include_p
         slot = slots.get(row.get('weekly_timeslot'), {})
         row.update({key: str(value) if value is not None else '' for key, value in slot.items() if key != 'name'})
         row['course_label'] = courses.get(row.get('course'), row.get('course') or '')
+        row['teacher_name'] = teacher_names.get(row.get('teacher'), row.get('teacher') or '')
     items = build_comparison(enrollments, source_term, target_term, statuses, '' if enrollment_type == 'all' else enrollment_type)
+    _attach_departure_context(items)
     student_map = _student_map([row['student'] for row in items])
     parent_ids = {row.get('parent') for row in enrollments if row.get('parent')}
     parent_ids.update(s.get('guardian') or s.get('parent') for s in student_map.values())
