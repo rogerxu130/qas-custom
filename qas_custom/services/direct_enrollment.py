@@ -6,6 +6,7 @@ import frappe
 from frappe.utils import cint, getdate, validate_email_address
 
 from qas_custom.services import inquiry as inquiries
+from qas_custom.modules.notifications.inquiry_admin_notifications import queue_inquiry_admin_notification
 
 DIRECT = "Direct Enrollment"
 
@@ -138,7 +139,7 @@ def _context(doc, course_session, allow_unresolved=False):
     roster = frappe.get_all("Enrollment", filters={"weekly_timeslot": slot.name, "status": ["in", ["Planned", "Active"]], "enrollment_type": "Full-Term"}, pluck="student")
     capacity = classroom_capacity(slot, lock=True)
     if capacity <= 0:
-        raise ReviewRequired("Classroom capacity must be configured before automatic enrollment.")
+        raise ReviewRequired("Classroom capacity must be configured before confirming enrollment.")
     if cint(slot.get("ndis_friendly")):
         from qas_custom.services.ndis_friendly import NDIS_FRIENDLY_CAPACITY
         capacity = min(capacity, NDIS_FRIENDLY_CAPACITY)
@@ -201,6 +202,7 @@ def create_webhook(payload=None):
         return _response(doc, duplicate=True)
     doc = frappe.new_doc("Inquiry")
     doc.inquiry_type, doc.status, doc.source = DIRECT, "Needs Review", "Fluent Form"
+    doc.flags.defer_admin_notification = True
     doc.external_submission_id = key
     doc.external_form_id = str(payload.get("form_id") or "")
     doc.source_url = payload.get("source_url")
@@ -237,9 +239,19 @@ def create_webhook(payload=None):
         context = _context(doc, session)
     except ReviewRequired as error:
         doc.review_reason = str(error)
-        doc.save(ignore_permissions=True)
-        return _response(doc)
-    return _complete(doc, context)
+    else:
+        first, slot, _remaining = context
+        doc.status = "Planned"
+        doc.course_session = first.name
+        doc.campus = slot.campus
+        doc.preferred_course = slot.course
+        doc.current_appointment_date = first.session_date
+        doc.current_appointment_time = slot.start_time
+        doc.review_reason = None
+    doc.save(ignore_permissions=True)
+    # Register only after classification; the job runs after the request commits.
+    queue_inquiry_admin_notification(doc)
+    return _response(doc)
 
 
 def _admin_doc(inquiry):
@@ -253,7 +265,7 @@ def _admin_doc(inquiry):
         frappe.throw("This action is only for Direct Enrollment applications.")
     if doc.get("parent"):
         frappe.db.sql("SELECT name FROM `tabParent` WHERE name=%s FOR UPDATE", (doc.parent,))
-    if doc.status not in {"Needs Review", "Converted"}:
+    if doc.status not in {"Planned", "Needs Review", "Converted"}:
         frappe.throw("This application is no longer awaiting enrollment.")
     return doc
 
@@ -275,9 +287,20 @@ def _manual_student(doc, payload, create=False):
     return doc
 
 
+def _review_result(doc, reason):
+    doc.status = "Needs Review"
+    doc.review_reason = str(reason)
+    doc.save(ignore_permissions=True)
+    # Return normally so the request commits the review state, without creating enrollment.
+    return {"review_required": True, "review_reason": doc.review_reason,
+            "inquiry": inquiries.build_inquiry_detail(doc.name)}
+
+
 def preview(inquiry, payload=None):
     from qas_custom.modules.billing.commands import get_prorata_invoice_context
     doc = _admin_doc(inquiry)
+    if doc.get("converted_enrollment") or doc.status == "Converted":
+        frappe.throw("This application has already been enrolled.")
     payload = inquiries._get_payload(payload)
     _manual_student(doc, payload)
     if payload.get("student_name") and not payload.get("student"):
@@ -285,7 +308,7 @@ def preview(inquiry, payload=None):
     try:
         context = _context(doc, payload.get("course_session"), allow_unresolved=True)
     except ReviewRequired as error:
-        frappe.throw(str(error))
+        return _review_result(doc, error)
     session, slot, remaining = context
     price = get_prorata_invoice_context(doc, slot.course, len(remaining))
     return {"course_session": session.name, "term": slot.term, "remaining_sessions": len(remaining), "estimated_amount": price["invoice_amount"]}
@@ -300,7 +323,7 @@ def complete(inquiry, payload=None):
         _manual_student(doc, payload, create=True)
         context = _context(doc, payload.get("course_session"))
     except ReviewRequired as error:
-        frappe.throw(str(error))
+        return _review_result(doc, error)
     from qas_custom.modules.billing.commands import get_prorata_invoice_context
     from frappe.utils import flt
     session, slot, remaining = context

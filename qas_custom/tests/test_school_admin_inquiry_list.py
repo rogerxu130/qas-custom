@@ -141,3 +141,18 @@ class TestSchoolAdminInquiryList(TestCase):
 
 		self.assertEqual(fake_frappe.get_all.call_args_list[1].kwargs["limit_start"], 0)
 		self.assertEqual(result["limit_start"], 0)
+
+
+class TestPendingEnrollmentQueue(TestCase):
+	def test_pending_queue_includes_both_states_without_date_cutoff(self):
+		for status in (None, "Planned", "Needs Review"):
+			with self.subTest(status=status):
+				fake = SimpleNamespace(get_all=Mock(side_effect=[[{"total": 0}], []]))
+				with patch("qas_custom.services.school_admin._require_school_admin"), patch(
+					"qas_custom.services.school_admin._safe_fields", side_effect=lambda _doctype, fields: fields
+				), patch("qas_custom.services.school_admin.frappe", fake):
+					get_school_admin_inquiries_data(queue="enrollment_pending", status=status)
+				filters = fake.get_all.call_args_list[0].kwargs["filters"]
+				self.assertEqual(filters["inquiry_type"], "Direct Enrollment")
+				self.assertEqual(filters["status"], status or ["in", ["Planned", "Needs Review"]])
+				self.assertNotIn("current_appointment_date", filters)

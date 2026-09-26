@@ -38,11 +38,19 @@ def inquiry(**overrides):
 	return frappe._dict(values)
 
 
-class TestInquiryAdminNotificationQueue(TestCase):
+class NotificationTestCase(TestCase):
+	def setUp(self):
+		for target, value in (("frappe.db", Mock()), ("frappe.conf", {})):
+			patcher = patch(target, value)
+			patcher.start()
+			self.addCleanup(patcher.stop)
+
+
+class TestInquiryAdminNotificationQueue(NotificationTestCase):
 	@patch("qas_custom.modules.notifications.inquiry_admin_notifications.frappe.enqueue")
 	@patch("qas_custom.modules.notifications.inquiry_admin_notifications._notification_event_exists", return_value=False)
 	def test_every_named_inquiry_queues_one_after_commit_job(self, _mock_exists, mock_enqueue):
-		for inquiry_type, status in [("Trial Lesson", "Booked"), ("School Visit", "New"), ("Trial Lesson", "Needs Review")]:
+		for inquiry_type, status in [("Trial Lesson", "Booked"), ("School Visit", "New"), ("Trial Lesson", "Needs Review"), ("Direct Enrollment", "Planned"), ("Direct Enrollment", "Needs Review")]:
 			with self.subTest(inquiry_type=inquiry_type, status=status):
 				mock_enqueue.reset_mock()
 				result = queue_inquiry_admin_notification(
@@ -53,6 +61,8 @@ class TestInquiryAdminNotificationQueue(TestCase):
 				self.assertTrue(kwargs["enqueue_after_commit"])
 				self.assertTrue(kwargs["deduplicate"])
 				self.assertEqual(kwargs["inquiry"], "INQ-2026-00100")
+				if inquiry_type == "Direct Enrollment":
+					self.assertEqual(kwargs["initial_status"], status)
 				self.assertEqual(result["recipient"], DEFAULT_INQUIRY_NOTIFICATION_EMAIL)
 
 	@patch("qas_custom.modules.notifications.inquiry_admin_notifications.frappe.enqueue")
@@ -111,7 +121,7 @@ class TestInquiryAdminNotificationContent(TestCase):
 		self.assertIn(">-</td>", message)
 
 
-class TestInquiryAdminNotificationWorker(TestCase):
+class TestInquiryAdminNotificationWorker(NotificationTestCase):
 	@patch("qas_custom.modules.notifications.inquiry_admin_notifications._mark_notification_sent")
 	@patch("qas_custom.modules.notifications.inquiry_admin_notifications._mark_notification_queued")
 	@patch("qas_custom.modules.notifications.inquiry_admin_notifications.sendmail_or_skip")
@@ -217,3 +227,54 @@ class TestInquiryAdminNotificationController(TestCase):
 		Inquiry.after_insert(doc)
 		mock_admin.assert_called_once_with(doc)
 		mock_staff.assert_not_called()
+
+
+class TestDirectEnrollmentNotification(NotificationTestCase):
+	@patch("qas_custom.modules.notifications.inquiry_admin_notifications._", side_effect=lambda value: value)
+	def test_status_original_date_reason_and_detail_link_are_in_email(self, _translate):
+		for status in ("Planned", "Needs Review"):
+			doc = inquiry(inquiry_type="Direct Enrollment", status=status,
+				submitted_student_name="Sam", requested_start_date="2026-10-09",
+				review_reason="Wrong weekday <Friday>" if status == "Needs Review" else None)
+			self.assertIn(status, _inquiry_admin_subject(doc))
+			body = _inquiry_admin_message(doc)
+			self.assertIn(status, body)
+			self.assertIn("2026-10-09", body)
+			self.assertIn("origin=notification", body)
+			self.assertIn("record=INQ-2026-00100", body)
+			if status == "Needs Review":
+				self.assertIn("Wrong weekday &lt;Friday&gt;", body)
+
+	@patch("qas_custom.modules.notifications.inquiry_admin_notifications.queue_inquiry_admin_notification")
+	@patch("qas_custom.modules.notifications.school_visit_parent_notifications.queue_school_visit_parent_booking_change")
+	@patch("qas_custom.modules.notifications.trial_parent_notifications.queue_trial_parent_booking_change")
+	@patch("qas_custom.services.inquiry.ensure_inquiry_attendance_entry")
+	def test_webhook_insert_defers_admin_job_until_classification(self, _attendance, _trial, _visit, admin):
+		doc = inquiry(inquiry_type="Direct Enrollment", status="Needs Review",
+			flags=frappe._dict(defer_admin_notification=True))
+		Inquiry.after_insert(doc)
+		admin.assert_not_called()
+
+	def test_worker_keeps_received_status_if_application_was_already_confirmed(self):
+		from contextlib import ExitStack
+		from qas_custom.modules.notifications import inquiry_admin_notifications as subject
+		doc = inquiry(inquiry_type="Direct Enrollment", status="Converted")
+		doc.as_dict = lambda: dict(doc)
+		with ExitStack() as stack:
+			for obj, name, value in (
+				(frappe.db, 'exists', True), (frappe, 'get_doc', doc),
+				(subject, '_notification_event_exists', False),
+				(subject, '_create_notification_log', 'LOG'),
+				(subject, '_mark_notification_queued', None),
+				(subject, '_mark_notification_sent', None),
+				(subject, 'get_invoice_settings', {}),
+				(subject, 'outbound_email_enabled', True),
+			):
+				stack.enter_context(patch.object(obj, name, return_value=value))
+			stack.enter_context(patch.object(subject, '_', side_effect=lambda value: value))
+			send = stack.enter_context(patch.object(subject, 'sendmail_or_skip', return_value=None))
+			result = subject.send_inquiry_admin_notification_job(doc.name, initial_status='Planned')
+		self.assertTrue(result['sent'])
+		self.assertIn('Planned', send.call_args.kwargs['subject'])
+		self.assertNotIn('Converted', send.call_args.kwargs['subject'])
+		self.assertEqual(doc.status, 'Converted')

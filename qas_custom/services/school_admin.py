@@ -135,10 +135,11 @@ from qas_custom.services.ndis_friendly import (
 
 
 ADMIN_ROLES = {"School Admin", "System Manager"}
-INQUIRY_OPEN_STATUSES = ["New", "Needs Review", "Booked", "Rescheduled", "No-show"]
+INQUIRY_OPEN_STATUSES = ["New", "Planned", "Needs Review", "Booked", "Rescheduled", "No-show"]
 INQUIRY_POST_VISIT_STATUSES = ["Completed", "Follow-up", "Further Trial Booked"]
 INQUIRY_STATUSES = {
 	"New",
+	"Planned",
 	"Needs Review",
 	"Booked",
 	"Rescheduled",
@@ -1173,6 +1174,12 @@ def get_school_admin_inquiries_data(
 	status = str(status or "").strip()
 	queue = str(queue or "").strip()
 	order_queue = queue
+	if queue == "enrollment_pending":
+		inquiry_type = "Direct Enrollment"
+		if status and status not in {"Planned", "Needs Review"}:
+			return {"items": [], "total": 0, "limit_start": max(cint(limit_start), 0),
+				"limit": _limit(limit, default=80, max_value=200), "has_more": False}
+		filters["status"] = ["in", ["Planned", "Needs Review"]]
 	if status:
 		if status not in INQUIRY_STATUSES:
 			frappe.throw(_("Unsupported inquiry status filter."))

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from hashlib import sha256
+from urllib.parse import urlencode
 
 import frappe
 from frappe import _
@@ -42,6 +43,9 @@ def queue_inquiry_admin_notification(inquiry_doc):
 			job_id=event_key.replace(":", "-"),
 			deduplicate=True,
 			inquiry=inquiry,
+			**({"initial_status": _document_value(inquiry_doc, "status"),
+			    "initial_review_reason": _document_value(inquiry_doc, "review_reason")}
+			   if _document_value(inquiry_doc, "inquiry_type") == "Direct Enrollment" else {}),
 		)
 	except Exception:
 		try:
@@ -52,7 +56,7 @@ def queue_inquiry_admin_notification(inquiry_doc):
 	return {"queued": True, "event_key": event_key, "recipient": inquiry_notification_email()}
 
 
-def send_inquiry_admin_notification_job(inquiry):
+def send_inquiry_admin_notification_job(inquiry, initial_status=None, initial_review_reason=None):
 	if not inquiry or not frappe.db.exists("Inquiry", inquiry):
 		return {"sent": False, "skipped": True, "reason": "Inquiry no longer exists."}
 
@@ -61,6 +65,11 @@ def send_inquiry_admin_notification_job(inquiry):
 		return {"sent": False, "skipped": True, "duplicate": True}
 
 	doc = frappe.get_doc("Inquiry", inquiry)
+	if doc.inquiry_type == "Direct Enrollment" and initial_status in {"Planned", "Needs Review"}:
+		# Email describes the received application even if an operator has since handled it.
+		doc = frappe._dict(doc.as_dict())
+		doc.status = initial_status
+		doc.review_reason = initial_review_reason
 	recipient = inquiry_notification_email()
 	subject = _inquiry_admin_subject(doc)
 	message = _inquiry_admin_message(doc)
@@ -136,6 +145,12 @@ def _notification_event_exists(event_key):
 
 
 def _inquiry_admin_subject(doc):
+	if _document_value(doc, "inquiry_type") == "Direct Enrollment":
+		return _("New enrollment application — {0} — {1} — {2}").format(
+			_document_value(doc, "status"),
+			_document_value(doc, "submitted_student_name") or _document_value(doc, "student") or "Student",
+			doc.name,
+		)
 	return _("New Inquiry: {0} — {1} — {2}").format(
 		doc.name,
 		_document_value(doc, "inquiry_type") or "Inquiry",
@@ -161,6 +176,11 @@ def _inquiry_admin_message(doc):
 		(_("Appointment time"), _document_value(doc, "current_appointment_time")),
 		(_("Course Session"), _document_value(doc, "course_session") or _document_value(doc, "submitted_class_session")),
 	]
+	if _document_value(doc, "inquiry_type") == "Direct Enrollment":
+		rows.extend([
+			(_("Requested start date"), _document_value(doc, "requested_start_date")),
+			(_("Review reason"), _document_value(doc, "review_reason")),
+		])
 	body = "".join(
 		"<tr><th style='text-align:left;padding:7px 12px;border-bottom:1px solid #e5e7eb'>{0}</th>"
 		"<td style='padding:7px 12px;border-bottom:1px solid #e5e7eb'>{1}</td></tr>".format(
@@ -170,14 +190,17 @@ def _inquiry_admin_message(doc):
 		for label, value in rows
 	)
 	portal_url = _school_admin_portal_url()
+	is_direct = _document_value(doc, "inquiry_type") == "Direct Enrollment"
+	if is_direct:
+		portal_url += "?" + urlencode({"tab": "inquiries", "origin": "notification", "record": doc.name})
 	return (
 		"<p>{0}</p><table style='border-collapse:collapse'>{1}</table>"
 		"<p><a href='{2}'>{3}</a></p>"
 	).format(
-		escape_html(_("A new Inquiry has been created.")),
+		escape_html(_("A new enrollment application is awaiting your confirmation. No place, attendance or invoice has been created.") if is_direct else _("A new Inquiry has been created.")),
 		body,
 		escape_html(portal_url),
-		escape_html(_("Open School Admin Inquiries")),
+		escape_html(_("Review enrollment application") if is_direct else _("Open School Admin Inquiries")),
 	)
 
 

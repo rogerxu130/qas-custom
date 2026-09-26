@@ -19,7 +19,8 @@ class Inquiry(Document):
 		ensure_inquiry_attendance_entry(self)
 		queue_trial_parent_booking_change(self)
 		queue_school_visit_parent_booking_change(self)
-		queue_inquiry_admin_notification(self)
+		if not (getattr(self, "flags", None) or {}).get("defer_admin_notification"):
+			queue_inquiry_admin_notification(self)
 		if self.inquiry_type == "Trial Lesson" and self.course_session and self.student:
 			enqueue_session_staff_notification(
 				"trial_added",

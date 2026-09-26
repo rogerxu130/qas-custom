@@ -1,4 +1,5 @@
 from datetime import date
+from contextlib import ExitStack
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
@@ -85,11 +86,12 @@ class TestDirectEnrollment(DatabaseTestCase):
 
     def test_review_does_not_create_enrollment_or_invoice(self):
         payload = {'external_submission_id': 'site:form:1', 'email': 'parent@example.com', 'parent_name': 'Parent', 'date_of_birth': '2020-01-01'}
-        doc = Doc(name='INQ', insert=Mock(), save=Mock())
-        with patch.object(subject.inquiries, '_get_payload', return_value=payload), patch.object(subject.inquiries, '_validate_webhook_token'), patch.object(subject, 'validate_email_address'), patch.object(subject.frappe.db, 'get_value', return_value=None), patch.object(subject.frappe.db, 'savepoint'), patch.object(subject.frappe.db, 'sql'), patch.object(subject.frappe, 'new_doc', return_value=doc), patch.object(subject.inquiries, '_resolve_campus', return_value=None), patch.object(subject.inquiries, '_resolve_course', return_value=None), patch.object(subject.inquiries, '_resolve_parent', return_value='P'), patch.object(subject, '_student', return_value='S'), patch.object(subject, '_match', side_effect=subject.ReviewRequired('Wrong date')), patch.object(subject, '_complete') as complete:
+        doc = Doc(name='INQ', flags=Doc(), insert=Mock(), save=Mock())
+        with patch.object(subject.inquiries, '_get_payload', return_value=payload), patch.object(subject.inquiries, '_validate_webhook_token'), patch.object(subject, 'validate_email_address'), patch.object(subject.frappe.db, 'get_value', return_value=None), patch.object(subject.frappe.db, 'savepoint'), patch.object(subject.frappe.db, 'sql'), patch.object(subject.frappe, 'new_doc', return_value=doc), patch.object(subject.inquiries, '_resolve_campus', return_value=None), patch.object(subject.inquiries, '_resolve_course', return_value=None), patch.object(subject.inquiries, '_resolve_parent', return_value='P'), patch.object(subject, '_student', return_value='S'), patch.object(subject, '_match', side_effect=subject.ReviewRequired('Wrong date')), patch.object(subject, '_complete') as complete, patch.object(subject, 'queue_inquiry_admin_notification') as notify:
             result = subject.create_webhook(payload)
             self.assertEqual(result['status'], 'needs_review')
             self.assertEqual(doc.review_reason, 'Wrong date')
+            notify.assert_called_once_with(doc)
             doc.save.assert_called_once()
             complete.assert_not_called()
 
@@ -196,3 +198,90 @@ class TestCompletion(DatabaseTestCase):
             with self.assertRaises(ValueError):
                 subject.complete('INQ', {})
             complete.assert_not_called()
+
+
+class TestApplicationReview(DatabaseTestCase):
+    def test_valid_submission_stays_planned_without_enrollment_attendance_or_invoice(self):
+        payload = {'external_submission_id': 'web:12:1', 'email': 'parent@example.com',
+                   'parent_name': 'Parent', 'student_name': 'Child', 'date_of_birth': '2020-01-01',
+                   'start_date': '2026-10-10'}
+        doc = Doc(name='INQ', flags=Doc(), insert=Mock(), save=Mock())
+        first = Doc(name='CS', session_date='2026-10-10')
+        slot = Doc(campus='C', course='Art', start_time='09:00')
+        with ExitStack() as stack:
+            for obj, name, value in (
+                (subject.inquiries, '_get_payload', payload), (subject.inquiries, '_validate_webhook_token', None),
+                (subject, 'validate_email_address', None), (frappe.db, 'get_value', None),
+                (frappe.db, 'savepoint', None), (frappe.db, 'sql', None), (frappe, 'new_doc', doc),
+                (subject.inquiries, '_resolve_campus', 'C'), (subject.inquiries, '_resolve_course', 'Art'),
+                (subject.inquiries, '_resolve_parent', 'P'), (subject, '_student', 'S'),
+                (subject, '_match', 'CS'), (subject, '_context', (first, slot, [first]))):
+                stack.enter_context(patch.object(obj, name, return_value=value))
+            complete = stack.enter_context(patch.object(subject, '_complete'))
+            notice = stack.enter_context(patch.object(subject, 'queue_inquiry_admin_notification'))
+            result = subject.create_webhook(payload)
+        self.assertEqual(result['status'], 'planned')
+        self.assertEqual(result['inquiry_status'], 'Planned')
+        self.assertFalse(result['review_required'])
+        self.assertIsNone(result['enrollment'])
+        self.assertIsNone(result['invoice'])
+        self.assertEqual(doc.course_session, 'CS')
+        self.assertEqual(doc.requested_start_date, '2026-10-10')
+        self.assertTrue(doc.flags.defer_admin_notification)
+        doc.save.assert_called_once()
+        notice.assert_called_once_with(doc)
+        complete.assert_not_called()
+
+    def test_both_pending_states_can_be_reviewed_but_closed_states_cannot(self):
+        for status in ('Planned', 'Needs Review', 'Cancelled', 'Inactive'):
+            with self.subTest(status=status), patch('qas_custom.services.school_admin._require_school_admin'), \
+                 patch.object(frappe, 'get_doc', return_value=Doc(inquiry_type=subject.DIRECT, status=status)), \
+                 patch.object(frappe, 'throw', side_effect=ValueError):
+                if status in ('Planned', 'Needs Review'):
+                    self.assertEqual(subject._admin_doc('INQ').status, status)
+                else:
+                    with self.assertRaises(ValueError):
+                        subject._admin_doc('INQ')
+
+    def test_planned_submission_retry_does_not_notify_or_create_again(self):
+        payload = {'external_submission_id': 'web:12:1', 'email': 'parent@example.com', 'parent_name': 'Parent'}
+        doc = Doc(name='INQ', status='Planned', inquiry_type=subject.DIRECT, contact_email='parent@example.com')
+        with patch.object(subject.inquiries, '_get_payload', return_value=payload), \
+             patch.object(subject.inquiries, '_validate_webhook_token'), patch.object(subject, 'validate_email_address'), \
+             patch.object(frappe.db, 'get_value', return_value='INQ'), patch.object(frappe, 'get_doc', return_value=doc), \
+             patch.object(frappe, 'new_doc') as create, patch.object(subject, 'queue_inquiry_admin_notification') as notify:
+            result = subject.create_webhook(payload)
+        self.assertEqual(result['status'], 'planned')
+        self.assertTrue(result['duplicate'])
+        create.assert_not_called()
+        notify.assert_not_called()
+
+
+class TestReviewRevalidation(DatabaseTestCase):
+    def test_expired_or_full_selection_remains_review_without_financial_writes(self):
+        for operation in (subject.preview, subject.complete):
+            with self.subTest(operation=operation.__name__):
+                doc = Doc(name='INQ', status='Planned', save=Mock())
+                with patch.object(subject, '_admin_doc', return_value=doc), \
+                     patch.object(subject.inquiries, '_get_payload', return_value={}), \
+                     patch.object(subject.inquiries, 'build_inquiry_detail', return_value={'inquiry': {'status': 'Needs Review'}}), \
+                     patch.object(subject, '_manual_student'), \
+                     patch.object(subject, '_context', side_effect=subject.ReviewRequired('Class is full')), \
+                     patch.object(subject, '_complete') as create, \
+                     patch.object(subject, 'queue_inquiry_admin_notification') as notify:
+                    result = operation('INQ', {})
+                self.assertTrue(result['review_required'])
+                self.assertEqual(doc.status, 'Needs Review')
+                self.assertEqual(doc.review_reason, 'Class is full')
+                doc.save.assert_called_once()
+                create.assert_not_called()
+                notify.assert_not_called()
+
+    def test_preview_cannot_demote_a_completed_application(self):
+        doc = Doc(name='INQ', status='Converted', converted_enrollment='ENR')
+        with patch.object(subject, '_admin_doc', return_value=doc), \
+             patch.object(frappe, 'throw', side_effect=ValueError), \
+             patch.object(subject, '_context') as context:
+            with self.assertRaises(ValueError):
+                subject.preview('INQ', {})
+        context.assert_not_called()
