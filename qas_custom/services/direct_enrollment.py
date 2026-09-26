@@ -179,6 +179,9 @@ def _complete(doc, context, note=None):
     mark_converted(doc, enrollment, invoice)
     add_conversion_internal_note(doc, invoice, note, actor=frappe.session.user)
     add_conversion_note(doc, enrollment, invoice, session, slot, len(remaining), actor=frappe.session.user)
+    from qas_custom.modules.notifications.enrollment_terms import queue_enrollment_terms_notice
+
+    queue_enrollment_terms_notice(enrollment, invoice)
     # The request owns the transaction. Do not call the trial conversion workflow,
     # which commits internally and awards trial referral rewards.
     return _response(doc)

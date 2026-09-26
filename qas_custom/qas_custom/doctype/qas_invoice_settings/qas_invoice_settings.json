@@ -31,7 +31,9 @@
   "store_credit_bonus_rules",
   "referral_section",
   "referral_trial_discount",
-  "referral_conversion_reward"
+  "referral_conversion_reward",
+  "enrollment_terms_section",
+  "enrollment_terms"
  ],
  "fields": [
   {
@@ -189,6 +191,17 @@
    "fieldname": "referral_conversion_reward",
    "fieldtype": "Currency",
    "label": "Referral Conversion Reward"
+  },
+  {
+   "fieldname": "enrollment_terms_section",
+   "fieldtype": "Section Break",
+   "label": "Enrollment Terms and Conditions"
+  },
+  {
+   "fieldname": "enrollment_terms",
+   "fieldtype": "Long Text",
+   "label": "Terms and Conditions",
+   "description": "Sent separately after a successful enrollment conversion. Leave blank to disable. This is a notice, not recorded acceptance."
   }
  ],
  "index_web_pages_for_search": 0,

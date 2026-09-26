@@ -183,11 +183,13 @@ class TestCompletion(DatabaseTestCase):
             stack.enter_context(patch('qas_custom.modules.inquiry.commands.mark_converted', side_effect=lambda doc, en, inv: doc.update(status='Converted', converted_enrollment=en.name, converted_invoice=inv.name)))
             stack.enter_context(patch.object(frappe, 'session', Doc(user='Guest')))
             reward = stack.enter_context(patch('qas_custom.modules.trial_referrals.award_referral_conversion_reward'))
+            terms = stack.enter_context(patch('qas_custom.modules.notifications.enrollment_terms.queue_enrollment_terms_notice'))
             result = subject._complete(doc, (session, slot, [session]))
             self.assertEqual(result['status'], 'enrolled')
             create_enrollment.assert_called_once()
             create_invoice.assert_called_once_with(doc, enrollment, 'Drawing', 'T', 'SESSION', 1)
             attendance.assert_called_once_with([session], 'S', 'ENR')
+            terms.assert_called_once_with(enrollment, invoice)
             reward.assert_not_called()
             frappe.db.commit.assert_not_called()
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 
 import frappe
-from frappe.utils import add_days, cint, flt, getdate, nowdate
+from frappe.utils import add_days, cint, flt, getdate, nowdate, validate_email_address
 
 from qas_custom.modules.common import has_field, set_if_field
 
@@ -18,6 +18,7 @@ DEFAULT_INVOICE_SETTINGS = {
 	"school_phone": "",
 	"school_website": "",
 	"school_address": "",
+	"enrollment_terms": "",
 	"payment_due_days": 7,
 	"course_due_lead_days": 7,
 	"course_due_grace_days": 3,
@@ -109,6 +110,11 @@ def update_invoice_settings(payload):
 				doc.set(fieldname, max(0, flt(payload.get(fieldname))))
 			else:
 				doc.set(fieldname, (payload.get(fieldname) or "").strip())
+	if str(doc.get("enrollment_terms") or "").strip():
+		reply_to = str(doc.get("school_email") or "").strip()
+		if not reply_to:
+			frappe.throw("Set the school contact email before saving enrollment terms so parents can reply.")
+		validate_email_address(reply_to, throw=True)
 	doc.save(ignore_permissions=True)
 	return get_invoice_settings()
 

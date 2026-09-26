@@ -166,6 +166,9 @@ def _convert_inquiry_doc_to_full_term_core(inquiry_doc, course_session, actor=No
 		actor=actor,
 	)
 
+	from qas_custom.modules.notifications.enrollment_terms import queue_enrollment_terms_notice
+
+	terms_notice = queue_enrollment_terms_notice(enrollment, invoice)
 	frappe.db.commit()
 	try:
 		from qas_custom.services.ndis_friendly import refresh_ndis_friendly_capacity_alert
@@ -179,6 +182,7 @@ def _convert_inquiry_doc_to_full_term_core(inquiry_doc, course_session, actor=No
 
 	return {
 		"inquiry": build_inquiry_detail(inquiry_doc.name),
+		"terms_notice": terms_notice,
 		"conversion": {
 			"enrollment": enrollment.name,
 			"invoice": invoice.name,
