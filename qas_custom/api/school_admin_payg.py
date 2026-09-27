@@ -3,6 +3,7 @@ import frappe
 
 from qas_custom.modules.billing import payg_drafts
 from qas_custom.modules.payg import card_admin, cancellation, issue
+from qas_custom.modules.payg import pricing
 from qas_custom.services import payg_read_models
 from qas_custom.services.support_view import get_support_view_parent, get_support_view_token
 
@@ -32,15 +33,18 @@ def _operation_payload(operation):
             "family_parent": operation.family_parent, "product": operation.product,
             "status": operation.status, "card": operation.card, "invoice": operation.invoice,
             "source_card": operation.source_card, "target_card": operation.target_card,
-            "transferred_quantity": operation.quantity, "price_delta": operation.price_delta}
+            "transferred_quantity": operation.quantity, "price_delta": operation.price_delta,
+            "card_total": float(operation.new_price or 0) * 10 if operation.operation_type == "Purchase" else None,
+            "discount_percent": operation.get("discount_percent_snapshot")}
 
 
 @frappe.whitelist()
 def payg_admin_context(family_parent=None):
     _admin_read(family_parent)
     products = payg_read_models.product_payloads()
+    pricing_config = pricing.settings()
     if not family_parent:
-        return {"products": products}
+        return {"products": products, "pricing": pricing_config}
     if not frappe.db.exists("Parent", family_parent):
         frappe.throw("PAYG family Parent was not found")
     students = frappe.get_all("Student", filters={"guardian": family_parent},
@@ -55,9 +59,17 @@ def payg_admin_context(family_parent=None):
                               fields=["name", "student", "card", "course_session", "attendance_entry",
                                       "status", "cancellable_until", "cancelled_at", "card_expires_on_snapshot"],
                               order_by="creation desc", limit_page_length=0)
-    return {"family_parent": family_parent, "products": products, "students": students,
+    return {"family_parent": family_parent, "products": products, "pricing": pricing_config, "students": students,
             "cards": payg_read_models.enrich_cards(cards),
             "bookings": payg_read_models.enrich_booking_history(bookings, cards=cards)}
+
+
+@frappe.whitelist(methods=["POST"])
+def payg_configure_pricing(discount_percent=None):
+    _admin()
+    if get_support_view_token():
+        raise frappe.PermissionError("Support View cannot change PAYG pricing")
+    return pricing.configure(discount_percent)
 
 
 @frappe.whitelist()

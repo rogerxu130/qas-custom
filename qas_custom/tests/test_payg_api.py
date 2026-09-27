@@ -77,7 +77,9 @@ class TestPaygPortalAPI(TestCase):
              patch.object(school_admin_payg.payg_read_models, "enrich_cards", return_value=[{"name": "CARD-1"}]), \
              patch.object(school_admin_payg.payg_read_models, "enrich_booking_history", return_value=[{"name": "B-1"}]), \
              patch.object(school_admin_payg.frappe, "get_all", side_effect=get_all) as query:
-            self.assertEqual(school_admin_payg.payg_admin_context(), {"products": products})
+            context = school_admin_payg.payg_admin_context()
+            self.assertEqual(context["products"], products)
+            self.assertFalse(context["pricing"]["enabled"])
             result = school_admin_payg.payg_admin_context("P-1")
         self.assertEqual((result["students"][0].name, result["cards"][0]["name"], result["bookings"][0]["name"]),
                          ("S-1", "CARD-1", "B-1"))

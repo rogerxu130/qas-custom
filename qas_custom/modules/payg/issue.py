@@ -1,11 +1,12 @@
 """Issue a ten-session PAYG card against one stable Purchase operation."""
-from decimal import Decimal
 from uuid import uuid4
 
 import frappe
 from frappe.utils import get_datetime_in_timezone
 
 from qas_custom.modules.payg.money import stored_currency
+from qas_custom.modules.payg.pricing import card_price, discounted_card_price, settings as pricing_settings
+from qas_custom.modules.billing.commands import get_trial_class_fee
 from qas_custom.modules.payg.rules import add_six_months
 
 
@@ -45,7 +46,11 @@ def create_or_get_purchase_operation(family_parent, product, purchase_request_ke
     product_doc = frappe.get_doc("QAS PAYG Product", product, for_update=True)
     if not customer or not product_doc.enabled or not product_doc.course:
         frappe.throw("Family customer and enabled PAYG product are required")
-    unit_price = stored_currency(Decimal(str(product_doc.standard_card_price or 0)) / 10)
+    pricing_config = pricing_settings()
+    trial_price = get_trial_class_fee(product_doc.course) if pricing_config["enabled"] else None
+    card_total = (discounted_card_price(trial_price, pricing_config["discount_percent"], product_doc.course)
+                  if pricing_config["enabled"] else card_price(product_doc.course, product_doc, pricing_config))
+    unit_price = stored_currency(card_total / 10)
     if unit_price <= 0:
         frappe.throw("PAYG standard card price must be positive")
     savepoint = "payg_purchase_" + uuid4().hex
@@ -55,6 +60,8 @@ def create_or_get_purchase_operation(family_parent, product, purchase_request_ke
                                     "request_key": purchase_request_key, "family_parent": family_parent,
                                     "customer": customer, "product": product, "quantity": 10,
                                     "new_price": unit_price, "new_course": product_doc.course,
+                                    "trial_price_snapshot": trial_price,
+                                    "discount_percent_snapshot": pricing_config["discount_percent"] if pricing_config["enabled"] else None,
                                     "actor": frappe.session.user, "created_at": _now(), "status": "Pending"})
         operation.insert(ignore_permissions=True)
         return operation

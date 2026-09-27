@@ -5,6 +5,8 @@ import frappe
 from frappe.utils import getdate, get_time, get_datetime_in_timezone
 
 from qas_custom.modules.payg.rules import as_brisbane_datetime, can_parent_cancel
+from qas_custom.modules.payg.pricing import card_price, discounted_card_price, settings as pricing_settings
+from qas_custom.modules.billing.commands import get_trial_class_fee
 
 
 def _rows(doctype, names, fields):
@@ -30,12 +32,22 @@ def product_payloads(products=None):
                                   fields=["name", "course", "standard_card_price", "sessions_per_card", "enabled"],
                                   order_by="course asc", limit_page_length=0)
     labels = _course_labels({row.course for row in products if row.course})
-    return [{"name": row.name, "course": row.course,
-             "course_label": labels.get(row.course, row.course),
-             "product_label": _product_label(row, labels),
-             "standard_card_price": row.standard_card_price,
-             "sessions_per_card": row.sessions_per_card, "enabled": row.enabled}
-            for row in products]
+    config = pricing_settings()
+    result = []
+    for row in products:
+        trial_price = get_trial_class_fee(row.course) if config["enabled"] else None
+        has_trial_price = not config["enabled"] or trial_price > 0
+        price = (discounted_card_price(trial_price, config["discount_percent"], row.course)
+                 if config["enabled"] and has_trial_price else
+                 card_price(row.course, row, config) if has_trial_price else None)
+        result.append({"name": row.name, "course": row.course,
+                       "course_label": labels.get(row.course, row.course),
+                       "product_label": _product_label(row, labels),
+                       "standard_card_price": price,
+                       "single_class_price": trial_price,
+                       "sessions_per_card": row.sessions_per_card,
+                       "enabled": bool(row.enabled and has_trial_price)})
+    return result
 
 
 def enrich_cards(cards, products=None):

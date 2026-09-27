@@ -1,5 +1,6 @@
 """PAYG family/admin read payloads stay useful without extra per-row queries."""
 from datetime import datetime
+from decimal import Decimal
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
@@ -72,3 +73,11 @@ class TestPaygReadModels(TestCase):
         self.assertEqual(products[0]["standard_card_price"], 400)
         self.assertEqual((products[0]["course_label"], products[0]["product_label"]),
                          ("Drawing", "Drawing · 10 sessions"))
+
+    def test_product_option_uses_current_global_discount_for_admin_preview(self):
+        with patch.object(payg_read_models, "pricing_settings", return_value={
+                "enabled": True, "discount_percent": 4}), \
+             patch.object(payg_read_models, "get_trial_class_fee", return_value=68):
+            product = payg_read_models.product_payloads()[0]
+        self.assertEqual((product["single_class_price"], product["standard_card_price"]),
+                         (68, Decimal("652.80")))

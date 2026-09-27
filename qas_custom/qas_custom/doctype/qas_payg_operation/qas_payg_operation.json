@@ -111,6 +111,17 @@
    "label": "New Price"
   },
   {
+   "fieldname": "trial_price_snapshot",
+   "fieldtype": "Currency",
+   "label": "Trial Price Snapshot"
+  },
+  {
+   "fieldname": "discount_percent_snapshot",
+   "fieldtype": "Float",
+   "label": "Discount Percent Snapshot",
+   "precision": "2"
+  },
+  {
    "fieldname": "quantity",
    "fieldtype": "Int",
    "label": "Quantity",
@@ -171,6 +182,8 @@
   "new_expiry",
   "old_price",
   "new_price",
+  "trial_price_snapshot",
+  "discount_percent_snapshot",
   "quantity",
   "price_delta",
   "invoice",

@@ -68,6 +68,29 @@ class TestPaygDrafts(TestCase):
             payg_drafts.create_payg_draft("OP-1", "invoice-2")
         self.fake.db.commit.assert_not_called()
 
+    def test_discounted_purchase_draft_uses_operation_snapshot(self):
+        self.operation.new_price = Decimal("65.28")
+        self.operation.discount_percent_snapshot = Decimal("4")
+        self.operation.trial_price_snapshot = Decimal("68")
+        self.product.standard_card_price = Decimal("999")
+        invoice = payg_drafts.create_payg_draft("OP-1", "discounted-1")
+        self.assertEqual(invoice.get("items")[0].rate, Decimal("680.000000000"))
+        self.assertEqual((invoice.apply_discount_on, invoice.additional_discount_percentage),
+                         ("Grand Total", Decimal("4")))
+        self.assertIn("$68.00 single-class price x 10", invoice.get("items")[0].description)
+        self.assertEqual(invoice.get("items")[0].rate * (100 - invoice.additional_discount_percentage) / 100,
+                         Decimal("652.800000000"))
+
+    def test_discounted_purchase_rejects_a_mismatched_invoice_total(self):
+        self.operation.new_price = Decimal("65.28")
+        self.operation.discount_percent_snapshot = Decimal("4")
+        self.operation.trial_price_snapshot = Decimal("68")
+        self.invoice.grand_total = Decimal("680")
+        with self.assertRaisesRegex(ValueError, "differs from the purchase price snapshot"):
+            payg_drafts.create_payg_draft("OP-1", "discounted-wrong-total")
+        self.assertIsNone(self.operation.invoice)
+        self.fake.db.rollback.assert_called_once()
+
     def test_existing_invoice_requires_matching_line_source(self):
         payg_drafts.create_payg_draft("OP-1", "invoice-1")
         self.invoice.get("items")[0].qas_source_document = "OP-OTHER"

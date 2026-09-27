@@ -134,6 +134,19 @@ class TestIssue(TestCase):
         card = issue.issue_card(created.name, "snapshot-issue")
         self.assertEqual(card.unit_price_snapshot, Decimal("40.000000000"))
 
+    def test_global_discount_snapshots_four_percent_when_purchase_is_created(self):
+        config = {"enabled": True, "discount_percent": Decimal("4")}
+        with patch.object(issue, "pricing_settings", return_value=config), \
+             patch.object(issue, "discounted_card_price", return_value=Decimal("652.80")), \
+             patch.object(issue, "get_trial_class_fee", return_value=68):
+            created = issue.create_or_get_purchase_operation("P-1", "PROD-1", "discount-buy")
+        self.assertEqual((created.new_price, created.trial_price_snapshot,
+                          created.discount_percent_snapshot),
+                         (Decimal("65.280000000"), 68, Decimal("4")))
+        self.product.standard_card_price = Decimal("1000")
+        card = issue.issue_card(created.name, "discount-issue")
+        self.assertEqual(card.unit_price_snapshot, Decimal("65.280000000"))
+
     def test_purchase_requires_positive_product_price(self):
         self.product.standard_card_price = Decimal("0")
         with self.assertRaisesRegex(ValueError, "price"):

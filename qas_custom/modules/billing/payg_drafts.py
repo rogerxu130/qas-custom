@@ -155,6 +155,13 @@ def _create_payg_draft(operation_id, invoice_request_key):
         if rate <= 0:
             frappe.throw("Purchase operation price snapshot is missing")
         description = f"PAYG 10-session card for {course}"
+        if operation.get("discount_percent_snapshot") is not None:
+            percent = f"{operation.discount_percent_snapshot:g}"
+            trial = operation.get("trial_price_snapshot")
+            if trial is None or Decimal(str(trial)) <= 0:
+                frappe.throw("PAYG purchase trial price snapshot is missing")
+            rate = stored_currency(Decimal(str(trial)) * 10)
+            description += f" (${Decimal(str(trial)):.2f} single-class price x 10)"
     if product.invoice_item:
         if not frappe.db.exists("Item", product.invoice_item):
             frappe.throw("PAYG Invoice Item does not exist")
@@ -164,6 +171,11 @@ def _create_payg_draft(operation_id, invoice_request_key):
     disable_sales_invoice_auto_notifications()
     invoice = new_invoice_draft(customer=customer, parent=operation.family_parent,
                                 invoice_type="PAYG Card")
+    if operation.operation_type == "Purchase" and operation.get("discount_percent_snapshot") is not None:
+        # ERPNext shows this native discount below the item table. A negative
+        # item would require changing Selling Settings for every invoice.
+        invoice.apply_discount_on = "Grand Total"
+        invoice.additional_discount_percentage = operation.discount_percent_snapshot
     invoice.append("items", {"item_code": item_code, "item_name": course, "qty": 1, "rate": rate,
                                     "description": description, "course": course,
                                     "qas_line_type": line_type,
@@ -171,6 +183,11 @@ def _create_payg_draft(operation_id, invoice_request_key):
                                     "qas_source_document": operation.name})
     apply_invoice_payment_snapshot(invoice)
     run_invoice_mutation_as_administrator(lambda: invoice.insert(ignore_permissions=True))
+    if operation.operation_type == "Purchase" and operation.get("discount_percent_snapshot") is not None:
+        expected = (stored_currency(operation.new_price or 0) * 10).quantize(Decimal("0.01"))
+        actual = invoice.get("grand_total")
+        if actual is not None and Decimal(str(actual)).quantize(Decimal("0.01")) != expected:
+            frappe.throw("PAYG invoice total differs from the purchase price snapshot; review invoice taxes and discount")
     operation.invoice = invoice.name
     operation.invoice_request_key = invoice_request_key
     operation.save(ignore_permissions=True)

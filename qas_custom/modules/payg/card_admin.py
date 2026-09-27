@@ -11,6 +11,7 @@ import frappe
 from frappe.utils import getdate, get_time, get_datetime_in_timezone
 
 from qas_custom.modules.payg.money import stored_currency
+from qas_custom.modules.payg.pricing import card_price
 from qas_custom.modules.payg.rules import add_six_months, as_brisbane_datetime
 from qas_custom.services.support_view import get_support_view_token
 
@@ -226,7 +227,7 @@ def _exchange_card(card_id, target_product_id, request_key, issued_on, now, *, e
     if course.get("status") not in (None, "Active"):
         frappe.throw("Exchange target course is inactive")
     old_price = stored_currency(source.unit_price_snapshot)
-    new_price = stored_currency(Decimal(str(product.standard_card_price)) / Decimal(10))
+    new_price = stored_currency(card_price(product.course, product) / Decimal(10))
     delta = stored_currency((new_price - old_price) * quantity)
     operation = frappe.get_doc({"doctype": OPERATION, "operation_type": "Exchange",
                                 "request_key": request_key, "source_card": source.name,
