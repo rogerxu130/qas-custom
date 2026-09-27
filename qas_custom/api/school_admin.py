@@ -1689,3 +1689,9 @@ def school_admin_get_marketing_notification_settings():
 def school_admin_save_marketing_notification_settings(enabled=0, recipient=None):
     from qas_custom.services.marketing_notifications import save_settings
     return save_settings(enabled, recipient)
+
+
+@frappe.whitelist()
+def school_admin_get_action_items(kind="enrollment", start=0, limit=30):
+    from qas_custom.services.admin_action_items import get_action_items
+    return get_action_items(kind, start, limit)
