@@ -18,13 +18,18 @@ class ReviewRequired(Exception):
 
 
 def _date(value):
+    """Accept website DMY dates and existing ISO dates without locale guessing."""
+    value = str(value)
     try:
-        parsed = date.fromisoformat(str(value))
-        if parsed.isoformat() != str(value):
+        if re.fullmatch(r"[0-9]{2}/[0-9]{2}/[0-9]{4}", value):
+            day, month, year = map(int, value.split("/"))
+            return date(year, month, day)
+        parsed = date.fromisoformat(value)
+        if parsed.isoformat() != value:
             raise ValueError("Use extended ISO date format")
         return parsed
     except (ValueError, TypeError):
-        raise ReviewRequired("Start date must be a valid YYYY-MM-DD date.")
+        raise ReviewRequired("Start date must be a valid DD/MM/YYYY or YYYY-MM-DD date.")
 
 
 def _safe_answers(value):
@@ -53,7 +58,7 @@ def _student(parent, name, dob):
     try:
         dob = _date(dob)
     except ReviewRequired:
-        raise ReviewRequired("Student date of birth must be a valid YYYY-MM-DD date.")
+        raise ReviewRequired("Student date of birth must be a valid DD/MM/YYYY or YYYY-MM-DD date.")
     if not name or dob > getdate():
         raise ReviewRequired("Check the student's name and date of birth.")
     candidates = frappe.get_all("Student", filters={"guardian": parent, "date_of_birth": dob},

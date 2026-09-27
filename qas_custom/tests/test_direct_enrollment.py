@@ -1,4 +1,5 @@
 from datetime import date
+import json
 from contextlib import ExitStack
 from unittest import TestCase
 from unittest.mock import Mock, patch
@@ -20,6 +21,44 @@ class DatabaseTestCase(TestCase):
 
 
 class TestDirectEnrollment(DatabaseTestCase):
+    def test_australian_dates_are_day_first_and_keep_iso_compatibility(self):
+        for value, expected in (
+            ('05/10/2026', date(2026, 10, 5)),
+            ('10/05/2026', date(2026, 5, 10)),
+            ('29/02/2024', date(2024, 2, 29)),
+            ('2026-10-05', date(2026, 10, 5)),
+        ):
+            with self.subTest(value=value):
+                self.assertEqual(subject._date(value), expected)
+
+    def test_invalid_australian_dates_are_not_guessed_or_rolled_forward(self):
+        for value in ('31/04/2026', '29/02/2026', '10/31/2026', '00/10/2026',
+                      '05/00/2026', '05/10/26', '2026/10/05', '05-10-2026',
+                      '05/10/2026 09:00', '20261005', None, ''):
+            with self.subTest(value=value), self.assertRaises(subject.ReviewRequired):
+                subject._date(value)
+
+    def test_australian_start_date_selects_the_exact_calendar_day(self):
+        with patch.object(subject.frappe.db, 'exists', return_value=True), \
+             patch.object(subject.frappe, 'get_doc', return_value=Doc(day_of_week='Monday')), \
+             patch.object(subject.frappe, 'get_all', return_value=['S1']) as sessions:
+            self.assertEqual(subject._match({'weekly_timeslot': 'SLOT', 'start_date': '05/10/2026'}), 'S1')
+        self.assertEqual(sessions.call_args.kwargs['filters']['session_date'], date(2026, 10, 5))
+
+    def test_australian_dob_matches_existing_student_without_creating_another(self):
+        with patch.object(subject, 'getdate', return_value=date(2026, 9, 27)), \
+             patch.object(subject.frappe, 'get_all', return_value=[Doc(name='S1', student_name='Alice')]) as students, \
+             patch.object(subject.inquiries, '_resolve_student') as create:
+            self.assertEqual(subject._student('P', 'Alice', '05/10/2018'), 'S1')
+        self.assertEqual(students.call_args.kwargs['filters']['date_of_birth'], date(2018, 10, 5))
+        create.assert_not_called()
+
+    def test_invalid_australian_dob_does_not_create_student(self):
+        with patch.object(subject.inquiries, '_resolve_student') as create:
+            with self.assertRaisesRegex(subject.ReviewRequired, 'Student date of birth'):
+                subject._student('P', 'Alice', '31/02/2018')
+        create.assert_not_called()
+
     def test_bad_start_dates_do_not_roll_forward(self):
         for value in (None, '', '2026-02-30', 'next saturday', '2026-09-19T09:00:00'):
             with self.subTest(value=value), self.assertRaises(subject.ReviewRequired):
@@ -203,6 +242,52 @@ class TestCompletion(DatabaseTestCase):
 
 
 class TestApplicationReview(DatabaseTestCase):
+    def test_australian_website_dates_preserve_raw_input_and_require_admin_confirmation(self):
+        for start_date, expected_status in (('05/10/2026', 'Planned'), ('31/02/2026', 'Needs Review')):
+            with self.subTest(start_date=start_date), ExitStack() as stack:
+                payload = {'external_submission_id': 'web:12:1', 'email': 'parent@example.com',
+                           'parent_name': 'Parent', 'student_name': 'Child', 'date_of_birth': '05/10/2018',
+                           'form_name': 'Upper Mount Gravatt Realistic Art - Beginner',
+                           'available_sessions': 'Mon 16:00–17:30', 'start_date': start_date}
+                doc = Doc(name='INQ', flags=Doc(), insert=Mock(), save=Mock())
+                first = Doc(name='CS', session_date='2026-10-05')
+                slot = Doc(campus='C', course='Art', start_time='16:00')
+                def records(doctype, **kwargs):
+                    if doctype == 'Student':
+                        self.assertEqual(kwargs['filters']['date_of_birth'], date(2018, 10, 5))
+                        return [Doc(name='S', student_name='Child')]
+                    if doctype == 'Campus':
+                        return [Doc(name='C', campus_name='Upper Mount Gravatt')]
+                    if doctype == 'Course':
+                        return [Doc(name='Art', course_name='Realistic Art - Beginner')]
+                    raise AssertionError(doctype)
+                for obj, name, value in (
+                    (subject.inquiries, '_get_payload', payload), (subject.inquiries, '_validate_webhook_token', None),
+                    (subject, 'validate_email_address', None), (frappe.db, 'get_value', None),
+                    (frappe.db, 'savepoint', None), (frappe.db, 'sql', None), (frappe, 'new_doc', doc),
+                    (subject.inquiries, '_resolve_campus', None), (subject.inquiries, '_resolve_course', None),
+                    (subject.inquiries, '_resolve_parent', 'P'), (subject, 'getdate', date(2026, 9, 27)),
+                    (subject, '_context', (first, slot, [first]))):
+                    stack.enter_context(patch.object(obj, name, return_value=value))
+                stack.enter_context(patch.object(frappe, 'get_all', side_effect=records))
+                mapper = stack.enter_context(patch.object(subject.inquiries, '_map_trial_form_session', return_value={'course_session': 'CS'}))
+                complete = stack.enter_context(patch.object(subject, '_complete'))
+                notice = stack.enter_context(patch.object(subject, 'queue_inquiry_admin_notification'))
+                result = subject.create_webhook(payload)
+                self.assertEqual(result['inquiry_status'], expected_status)
+                self.assertIsNone(result['enrollment'])
+                self.assertIsNone(result['invoice'])
+                self.assertEqual(doc.requested_start_date, start_date)
+                self.assertEqual(doc.submitted_student_dob, date(2018, 10, 5))
+                self.assertEqual(json.loads(doc.raw_webhook_payload)['date_of_birth'], '05/10/2018')
+                self.assertEqual(json.loads(doc.raw_webhook_payload)['start_date'], start_date)
+                if expected_status == 'Planned':
+                    self.assertEqual(mapper.call_args.args[0]['submitted_trial_date'], date(2026, 10, 5))
+                else:
+                    mapper.assert_not_called()
+                notice.assert_called_once_with(doc)
+                complete.assert_not_called()
+
     def test_valid_submission_stays_planned_without_enrollment_attendance_or_invoice(self):
         payload = {'external_submission_id': 'web:12:1', 'email': 'parent@example.com',
                    'parent_name': 'Parent', 'student_name': 'Child', 'date_of_birth': '2020-01-01',
