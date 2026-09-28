@@ -410,6 +410,7 @@ def get_school_admin_family_attendance_data(parent=None, student=None, customer=
 			"comments": row.get("comments") or "",
 			"needs_attendance": str(session.get("session_date")) < today() and (row.get("status") or "To be started") == "To be started",
 		})
+	_attach_inquiry_teacher_labels(items)
 	items.sort(key=lambda item: (str(item.get("session_date") or ""), str(item.get("start_time") or "")), reverse=True)
 	return {"term": selected_term, "terms": terms, "items": items}
 
