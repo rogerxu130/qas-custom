@@ -9,7 +9,6 @@ from frappe.utils import add_days, cint, escape_html, getdate, now_datetime, val
 
 from qas_custom.modules.billing.invoice_settings import get_invoice_settings
 from qas_custom.services.support_view import reject_support_view_write
-from qas_custom.utils.environment import email_block_reason, sendmail_or_skip
 
 
 MESSAGE_DOCTYPE = "Parent Classroom Message"
@@ -22,6 +21,7 @@ MESSAGE_CATEGORIES = (
 	"Materials / homework",
 	"Other",
 )
+MESSAGING_DISABLED_REASON = "Teacher-to-parent classroom messaging has been disabled. Please contact School Admin."
 MAX_MESSAGE_LENGTH = 2000
 ADMIN_ROLES = {"School Admin", "System Manager"}
 
@@ -55,37 +55,7 @@ def create_teacher_parent_classroom_message_data(
 	client_request_id=None,
 ):
 	reject_support_view_write()
-	teacher = _require_teacher()
-	client_request_id = _required_text(client_request_id, _("Client request ID is required."), max_length=140)
-	existing = frappe.db.get_value(MESSAGE_DOCTYPE, {"client_request_id": client_request_id}, ["name", "teacher"], as_dict=True)
-	if existing:
-		if existing.teacher != teacher.name:
-			frappe.throw(_("This message request ID is already in use."), frappe.PermissionError)
-		return {"message": _message_payload(existing.name), "duplicate": True}
-
-	context = _teacher_message_context(teacher, course_session, attendance_entry, student)
-	category = _valid_category(category)
-	message = _valid_message(message)
-	mail_context = _school_mail_context()
-
-	doc = frappe.new_doc(MESSAGE_DOCTYPE)
-	doc.course_session = context["session"].name
-	doc.attendance_entry = context["attendance"].name
-	doc.student = context["student"].name
-	doc.parent = context["parent"].name
-	doc.teacher = teacher.name
-	doc.category = category
-	doc.message = message
-	doc.recipient_email = context["recipient_email"]
-	doc.client_request_id = client_request_id
-	doc.status = "Queued"
-	doc.attempt_count = 1
-	doc.created_by_user = frappe.session.user
-	_append_attempt(doc, 1, frappe.session.user, mail_context)
-	doc.insert(ignore_permissions=True)
-	frappe.db.commit()
-	_queue_delivery_or_mark_failed(doc.name, 1)
-	return {"message": _message_payload(doc.name), "duplicate": False}
+	frappe.throw(_(MESSAGING_DISABLED_REASON), frappe.PermissionError)
 
 
 def get_teacher_parent_classroom_messages_data(course_session=None, student=None, limit=50):
@@ -108,28 +78,7 @@ def get_teacher_parent_classroom_messages_data(course_session=None, student=None
 
 def retry_teacher_parent_classroom_message_data(parent_classroom_message=None):
 	reject_support_view_write()
-	teacher = _require_teacher()
-	if not parent_classroom_message:
-		frappe.throw(_("Parent classroom message is required."))
-	frappe.db.sql("select name from `tabParent Classroom Message` where name = %s for update", (parent_classroom_message,))
-	doc = frappe.get_doc(MESSAGE_DOCTYPE, parent_classroom_message)
-	if doc.teacher != teacher.name:
-		frappe.throw(_("You do not have access to this message."), frappe.PermissionError)
-	_get_owned_session(doc.course_session, teacher.name)
-	if doc.status != "Failed":
-		frappe.throw(_("Only a failed message can be retried."))
-	if any(row.status == "Queued" for row in doc.attempts or []):
-		frappe.throw(_("This message already has a queued delivery attempt."))
-
-	mail_context = _school_mail_context()
-	next_attempt = cint(doc.attempt_count) + 1
-	doc.status = "Queued"
-	doc.attempt_count = next_attempt
-	_append_attempt(doc, next_attempt, frappe.session.user, mail_context)
-	doc.save(ignore_permissions=True)
-	frappe.db.commit()
-	_queue_delivery_or_mark_failed(doc.name, next_attempt)
-	return {"message": _message_payload(doc.name)}
+	frappe.throw(_(MESSAGING_DISABLED_REASON), frappe.PermissionError)
 
 
 def get_school_admin_parent_classroom_messages_data(
@@ -196,28 +145,9 @@ def send_parent_classroom_message_job(parent_classroom_message, attempt_number):
 	if not attempt or attempt.status != "Queued" or doc.status != "Queued":
 		return {"sent": False, "skipped": True}
 
-	try:
-		mail_result = sendmail_or_skip(
-			action="teacher_parent_classroom_message",
-			recipients=[doc.recipient_email],
-			sender=_sender_label(attempt.sender_email),
-			reply_to=attempt.reply_to_email,
-			subject=_email_subject(doc),
-			message=_email_body(doc),
-			reference_doctype=MESSAGE_DOCTYPE,
-			reference_name=doc.name,
-			delayed=False,
-		)
-		if mail_result and isinstance(mail_result, dict) and mail_result.get("skipped"):
-			_mark_attempt(doc, attempt, "Failed", error=mail_result.get("reason") or email_block_reason())
-			return {"sent": False, "skipped": True, "reason": attempt.error_summary}
-		queue_name = getattr(mail_result, "name", None)
-		_mark_attempt(doc, attempt, "Sent", email_queue=queue_name)
-		return {"sent": True, "message": doc.name, "recipient": doc.recipient_email}
-	except Exception:
-		frappe.log_error(frappe.get_traceback(), "QAS classroom parent message failed: {0}".format(doc.name))
-		_mark_attempt(doc, attempt, "Failed", error="Email send failed.")
-		return {"sent": False, "reason": "Email send failed."}
+	# Existing queued jobs must not send after the feature is retired.
+	_mark_attempt(doc, attempt, "Failed", error=MESSAGING_DISABLED_REASON)
+	return {"sent": False, "skipped": True, "reason": MESSAGING_DISABLED_REASON}
 
 
 def _teacher_message_context(teacher, course_session, attendance_entry, student):
