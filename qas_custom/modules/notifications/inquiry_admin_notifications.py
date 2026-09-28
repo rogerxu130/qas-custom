@@ -65,7 +65,7 @@ def send_inquiry_admin_notification_job(inquiry, initial_status=None, initial_re
 		return {"sent": False, "skipped": True, "duplicate": True}
 
 	doc = frappe.get_doc("Inquiry", inquiry)
-	if doc.inquiry_type == "Direct Enrollment" and initial_status in {"Planned", "Needs Review"}:
+	if doc.inquiry_type == "Direct Enrollment" and initial_status in {"Planned", "Needs Review", "Converted"}:
 		# Email describes the received application even if an operator has since handled it.
 		doc = frappe._dict(doc.as_dict())
 		doc.status = initial_status
@@ -180,6 +180,8 @@ def _inquiry_admin_message(doc):
 		rows.extend([
 			(_("Requested start date"), _document_value(doc, "requested_start_date")),
 			(_("Review reason"), _document_value(doc, "review_reason")),
+			(_("Enrollment"), _document_value(doc, "converted_enrollment")),
+			(_("Draft invoice"), _document_value(doc, "converted_invoice")),
 		])
 	body = "".join(
 		"<tr><th style='text-align:left;padding:7px 12px;border-bottom:1px solid #e5e7eb'>{0}</th>"
@@ -191,16 +193,17 @@ def _inquiry_admin_message(doc):
 	)
 	portal_url = _school_admin_portal_url()
 	is_direct = _document_value(doc, "inquiry_type") == "Direct Enrollment"
+	is_enrolled = is_direct and bool(_document_value(doc, "converted_enrollment"))
 	if is_direct:
 		portal_url += "?" + urlencode({"tab": "inquiries", "origin": "notification", "record": doc.name})
 	return (
 		"<p>{0}</p><table style='border-collapse:collapse'>{1}</table>"
 		"<p><a href='{2}'>{3}</a></p>"
 	).format(
-		escape_html(_("A new enrollment application is awaiting your confirmation. No place, attendance or invoice has been created.") if is_direct else _("A new Inquiry has been created.")),
+		escape_html(_("Website enrollment and attendance have been created. The draft invoice is awaiting approval.") if is_enrolled else _("A new enrollment application is awaiting your confirmation. No place, attendance or invoice has been created.") if is_direct else _("A new Inquiry has been created.")),
 		body,
 		escape_html(portal_url),
-		escape_html(_("Review enrollment application") if is_direct else _("Open School Admin Inquiries")),
+		escape_html(_("View enrollment and draft invoice") if is_enrolled else _("Review enrollment application") if is_direct else _("Open School Admin Inquiries")),
 	)
 
 

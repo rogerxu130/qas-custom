@@ -214,6 +214,21 @@ def _context(doc, course_session, allow_unresolved=False):
     return first, slot, remaining
 
 
+def _website_invoice_note(doc, invoice):
+    """Append traceable website provenance, including on a reused family draft."""
+    from frappe.utils import escape_html
+    from qas_custom.modules.billing.commands import run_invoice_mutation_as_administrator
+    parts = ["Website enrollment via Fluent Form", f"Inquiry: {doc.name}"]
+    for label, field in (("Form", "submitted_form_name"), ("Form ID", "external_form_id"),
+                         ("Submission", "external_submission_id")):
+        if doc.get(field):
+            parts.append(f"{label}: {doc.get(field)}")
+    note = escape_html(" | ".join(parts))
+    existing = str(invoice.get("remarks") or "").rstrip()
+    invoice.set("remarks", f"{existing}\n{note}" if existing else note)
+    run_invoice_mutation_as_administrator(lambda: invoice.save(ignore_permissions=True))
+
+
 def _complete(doc, context, note=None):
     from qas_custom.modules.enrollment.commands import create_full_term_enrollment, link_invoice_to_enrollment
     from qas_custom.modules.billing.commands import create_prorata_invoice
@@ -226,6 +241,8 @@ def _complete(doc, context, note=None):
     enrollment = create_full_term_enrollment(doc, session, slot, len(remaining), actor=frappe.session.user)
     invoice = create_prorata_invoice(doc, enrollment, slot.course, slot.term, session.name, len(remaining))
     apply_conversion_invoice_note(invoice, note)
+    if doc.get("source") == "Fluent Form" or doc.get("webhook_source") == "Fluent Form":
+        _website_invoice_note(doc, invoice)
     link_invoice_to_enrollment(enrollment, invoice)
     create_full_term_attendance_entries(remaining, doc.student, enrollment.name)
     doc.course_session = session.name
@@ -311,7 +328,19 @@ def create_webhook(payload=None):
         doc.current_appointment_time = slot.start_time
         doc.review_reason = None
     doc.save(ignore_permissions=True)
-    # Register only after classification; the job runs after the request commits.
+    if doc.status == "Planned":
+        # The family and submitted application survive a business validation error,
+        # but never leave a partial enrollment, attendance or invoice behind.
+        frappe.db.savepoint("direct_auto_enrollment")
+        try:
+            _complete(doc, context)
+        except (ReviewRequired, frappe.ValidationError) as error:
+            frappe.db.rollback(save_point="direct_auto_enrollment")
+            doc.reload()
+            doc.status = "Needs Review"
+            doc.review_reason = str(error)
+            doc.save(ignore_permissions=True)
+    # Preserve the management notification; completed applications need invoice approval.
     queue_inquiry_admin_notification(doc)
     return _response(doc)
 

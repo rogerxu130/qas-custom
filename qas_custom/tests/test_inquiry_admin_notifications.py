@@ -278,3 +278,14 @@ class TestDirectEnrollmentNotification(NotificationTestCase):
 		self.assertIn('Planned', send.call_args.kwargs['subject'])
 		self.assertNotIn('Converted', send.call_args.kwargs['subject'])
 		self.assertEqual(doc.status, 'Converted')
+
+
+class TestAutomaticEnrollmentNotice(NotificationTestCase):
+	def test_successful_website_enrollment_requests_invoice_approval(self):
+		doc = inquiry(inquiry_type='Direct Enrollment', status='Converted',
+			converted_enrollment='ENR-1', converted_invoice='INV-1')
+		message = _inquiry_admin_message(doc)
+		self.assertIn('draft invoice is awaiting approval', message)
+		self.assertIn('ENR-1', message)
+		self.assertIn('INV-1', message)
+		self.assertNotIn('No place, attendance or invoice has been created', message)

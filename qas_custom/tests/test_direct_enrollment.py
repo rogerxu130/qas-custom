@@ -242,8 +242,8 @@ class TestCompletion(DatabaseTestCase):
 
 
 class TestApplicationReview(DatabaseTestCase):
-    def test_australian_website_dates_preserve_raw_input_and_require_admin_confirmation(self):
-        for start_date, expected_status in (('05/10/2026', 'Planned'), ('31/02/2026', 'Needs Review')):
+    def test_australian_website_dates_preserve_raw_input_and_enroll_when_valid(self):
+        for start_date, expected_status in (('05/10/2026', 'Converted'), ('31/02/2026', 'Needs Review')):
             with self.subTest(start_date=start_date), ExitStack() as stack:
                 payload = {'external_submission_id': 'web:12:1', 'email': 'parent@example.com',
                            'parent_name': 'Parent', 'student_name': 'Child', 'date_of_birth': '05/10/2018',
@@ -271,24 +271,28 @@ class TestApplicationReview(DatabaseTestCase):
                     stack.enter_context(patch.object(obj, name, return_value=value))
                 stack.enter_context(patch.object(frappe, 'get_all', side_effect=records))
                 mapper = stack.enter_context(patch.object(subject.inquiries, '_map_trial_form_session', return_value={'course_session': 'CS'}))
-                complete = stack.enter_context(patch.object(subject, '_complete'))
+                complete = stack.enter_context(patch.object(subject, '_complete', side_effect=lambda doc, context: doc.update(status='Converted', converted_enrollment='ENR', converted_invoice='INV')))
                 notice = stack.enter_context(patch.object(subject, 'queue_inquiry_admin_notification'))
                 result = subject.create_webhook(payload)
                 self.assertEqual(result['inquiry_status'], expected_status)
-                self.assertIsNone(result['enrollment'])
-                self.assertIsNone(result['invoice'])
+                self.assertEqual(result['enrollment'], 'ENR' if expected_status == 'Converted' else None)
+                self.assertEqual(result['invoice'], 'INV' if expected_status == 'Converted' else None)
                 self.assertEqual(doc.requested_start_date, start_date)
                 self.assertEqual(doc.submitted_student_dob, date(2018, 10, 5))
                 self.assertEqual(json.loads(doc.raw_webhook_payload)['date_of_birth'], '05/10/2018')
                 self.assertEqual(json.loads(doc.raw_webhook_payload)['start_date'], start_date)
-                if expected_status == 'Planned':
+                if expected_status == 'Converted':
                     self.assertEqual(mapper.call_args.args[0]['submitted_trial_date'], date(2026, 10, 5))
                 else:
                     mapper.assert_not_called()
-                notice.assert_called_once_with(doc)
-                complete.assert_not_called()
+                if expected_status == 'Converted':
+                    complete.assert_called_once()
+                    notice.assert_called_once_with(doc)
+                else:
+                    notice.assert_called_once_with(doc)
+                    complete.assert_not_called()
 
-    def test_valid_submission_stays_planned_without_enrollment_attendance_or_invoice(self):
+    def test_valid_submission_automatically_completes_enrollment(self):
         payload = {'external_submission_id': 'web:12:1', 'email': 'parent@example.com',
                    'parent_name': 'Parent', 'student_name': 'Child', 'date_of_birth': '2020-01-01',
                    'start_date': '2026-10-10'}
@@ -304,20 +308,20 @@ class TestApplicationReview(DatabaseTestCase):
                 (subject.inquiries, '_resolve_parent', 'P'), (subject, '_student', 'S'),
                 (subject, '_match', 'CS'), (subject, '_context', (first, slot, [first]))):
                 stack.enter_context(patch.object(obj, name, return_value=value))
-            complete = stack.enter_context(patch.object(subject, '_complete'))
+            complete = stack.enter_context(patch.object(subject, '_complete', side_effect=lambda doc, context: doc.update(status='Converted', converted_enrollment='ENR', converted_invoice='INV')))
             notice = stack.enter_context(patch.object(subject, 'queue_inquiry_admin_notification'))
             result = subject.create_webhook(payload)
-        self.assertEqual(result['status'], 'planned')
-        self.assertEqual(result['inquiry_status'], 'Planned')
+        self.assertEqual(result['status'], 'enrolled')
+        self.assertEqual(result['inquiry_status'], 'Converted')
         self.assertFalse(result['review_required'])
-        self.assertIsNone(result['enrollment'])
-        self.assertIsNone(result['invoice'])
+        self.assertEqual(result['enrollment'], 'ENR')
+        self.assertEqual(result['invoice'], 'INV')
         self.assertEqual(doc.course_session, 'CS')
         self.assertEqual(doc.requested_start_date, '2026-10-10')
         self.assertTrue(doc.flags.defer_admin_notification)
         doc.save.assert_called_once()
         notice.assert_called_once_with(doc)
-        complete.assert_not_called()
+        complete.assert_called_once_with(doc, (first, slot, [first]))
 
     def test_both_pending_states_can_be_reviewed_but_closed_states_cannot(self):
         for status in ('Planned', 'Needs Review', 'Cancelled', 'Inactive'):
@@ -372,3 +376,70 @@ class TestReviewRevalidation(DatabaseTestCase):
             with self.assertRaises(ValueError):
                 subject.preview('INQ', {})
         context.assert_not_called()
+
+
+class TestAutomaticEnrollmentFailure(DatabaseTestCase):
+    def test_validation_failure_rolls_back_conversion_and_keeps_review_application(self):
+        payload = {'external_submission_id': 'web:3:88', 'email': 'parent@example.com',
+                   'parent_name': 'Parent', 'date_of_birth': '2018-06-20'}
+        doc = Doc(name='INQ', flags=Doc(), insert=Mock(), save=Mock(), reload=Mock())
+        context = (Doc(name='CS', session_date='2026-10-11'),
+                   Doc(campus='C', course='Art', start_time='09:00'), [])
+        with ExitStack() as stack:
+            for obj, name, value in (
+                (subject.inquiries, '_get_payload', payload), (subject.inquiries, '_validate_webhook_token', None),
+                (subject, 'validate_email_address', None), (frappe.db, 'get_value', None),
+                (frappe, 'new_doc', doc), (subject.inquiries, '_resolve_campus', 'C'),
+                (subject.inquiries, '_resolve_course', 'Art'), (subject.inquiries, '_resolve_parent', 'P'),
+                (subject, '_student', 'S'), (subject, '_match', 'CS'), (subject, '_context', context)):
+                stack.enter_context(patch.object(obj, name, return_value=value))
+            stack.enter_context(patch.object(subject, '_complete', side_effect=frappe.ValidationError('Course fee missing')))
+            notify = stack.enter_context(patch.object(subject, 'queue_inquiry_admin_notification'))
+            result = subject.create_webhook(payload)
+        frappe.db.rollback.assert_called_once_with(save_point='direct_auto_enrollment')
+        doc.reload.assert_called_once()
+        self.assertEqual(result['status'], 'needs_review')
+        self.assertEqual(doc.review_reason, 'Course fee missing')
+        self.assertIsNone(result['enrollment'])
+        notify.assert_called_once_with(doc)
+
+    def test_website_source_note_preserves_existing_family_invoice_remarks(self):
+        doc = Doc(name='INQ-123', submitted_form_name='<Form>', external_form_id='3',
+                  external_submission_id='web:3:88')
+        invoice = Doc(remarks='Existing sibling note', save=Mock())
+        invoice.set = lambda field, value: invoice.update({field: value})
+        with patch('qas_custom.modules.billing.commands.run_invoice_mutation_as_administrator', side_effect=lambda fn: fn()):
+            subject._website_invoice_note(doc, invoice)
+        self.assertTrue(invoice.remarks.startswith('Existing sibling note\n'))
+        self.assertIn('Website enrollment via Fluent Form', invoice.remarks)
+        self.assertIn('INQ-123', invoice.remarks)
+        self.assertIn('web:3:88', invoice.remarks)
+        self.assertIn('&lt;Form&gt;', invoice.remarks)
+        invoice.save.assert_called_once_with(ignore_permissions=True)
+
+    def test_completion_links_draft_invoice_and_creates_remaining_attendance(self):
+        doc = Doc(name='INQ', student='S', source='Fluent Form')
+        first = Doc(name='CS1', session_date='2026-10-11')
+        slot = Doc(campus='C', course='Art', term='T', start_time='09:00')
+        remaining = [first, Doc(name='CS2')]
+        enrollment, invoice = Doc(name='ENR'), Doc(name='INV', docstatus=0)
+        with ExitStack() as stack:
+            create = stack.enter_context(patch('qas_custom.modules.enrollment.commands.create_full_term_enrollment', return_value=enrollment))
+            billing = stack.enter_context(patch('qas_custom.modules.billing.commands.create_prorata_invoice', return_value=invoice))
+            link = stack.enter_context(patch('qas_custom.modules.enrollment.commands.link_invoice_to_enrollment'))
+            attendance = stack.enter_context(patch('qas_custom.modules.attendance.commands.create_full_term_attendance_entries'))
+            stack.enter_context(patch('qas_custom.modules.inquiry.commands.mark_converted', side_effect=lambda d,e,i: d.update(status='Converted', converted_enrollment=e.name, converted_invoice=i.name)))
+            for target in ('qas_custom.modules.inquiry.notes.add_conversion_note',
+                           'qas_custom.modules.inquiry.notes.add_conversion_internal_note',
+                           'qas_custom.modules.workflows.trial_conversion.apply_conversion_invoice_note',
+                           'qas_custom.modules.notifications.enrollment_terms.queue_enrollment_terms_notice'):
+                stack.enter_context(patch(target))
+            source_note = stack.enter_context(patch.object(subject, '_website_invoice_note'))
+            stack.enter_context(patch.object(frappe, 'session', Doc(user='Guest')))
+            result = subject._complete(doc, (first, slot, remaining))
+        self.assertEqual(result['status'], 'enrolled')
+        self.assertEqual(invoice.docstatus, 0)
+        billing.assert_called_once_with(doc, enrollment, 'Art', 'T', 'CS1', 2)
+        link.assert_called_once_with(enrollment, invoice)
+        attendance.assert_called_once_with(remaining, 'S', 'ENR')
+        source_note.assert_called_once_with(doc, invoice)
