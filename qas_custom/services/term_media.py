@@ -124,10 +124,21 @@ def _inventory(term, media_type="all"):
                         if not media.image:
                             continue
                         stats["photos" if kind == "photo" else "videos"] += 1
-                        if media.image not in files:
-                            files[media.image] = frappe.db.get_value("File", {"file_url": media.image},
-                                ["name", "file_name", "file_size", "modified", "content_hash"], as_dict=True)
-                        file = files[media.image]
+                        # A shared URL may have a separate File record for each post.
+                        # Cache by attachment identity, not URL alone.
+                        attachment = (media.image, doctype, post.name)
+                        if attachment not in files:
+                            fields = ["name", "file_name", "file_size", "modified", "content_hash"]
+                            files[attachment] = frappe.db.get_value("File", {
+                                "file_url": media.image, "attached_to_doctype": doctype,
+                                "attached_to_name": post.name,
+                            }, fields, as_dict=True)
+                            if not files[attachment]:
+                                # Keep unmatched files visible in the manifest; _source
+                                # will reject the mismatched attachment before reading it.
+                                files[attachment] = frappe.db.get_value(
+                                    "File", {"file_url": media.image}, fields, as_dict=True)
+                        file = files[attachment]
                         if media_type not in {"all", kind}:
                             continue
                         key = _key(kind, post.name, cint(media.idx))
@@ -139,9 +150,10 @@ def _inventory(term, media_type="all"):
             path = "/".join([segment(term), segment(courses[course], course), segment(label, slot.name),
                              segment(f'{session.session_date} {session.name}', session.name), "class-notes.txt"])
             notes[path] = "\n\n".join(text) or "No published classroom notes."
-    stats["bytes"] = sum(cint(file.file_size) for file in {file.name: file for file in files.values() if file}.values())
+    unique_files = {attachment[0]: file for attachment, file in files.items() if file}
+    stats["bytes"] = sum(cint(file.file_size) for file in unique_files.values())
     stats["courses"] = len(courses)
-    stats["unique_files"] = len({file.name for file in files.values() if file})
+    stats["unique_files"] = len(unique_files)
     return entries, notes, stats
 
 
@@ -194,7 +206,11 @@ def payload(doc):
                 progress=cint(doc.progress), total=cint(doc.total), expires_at=str(doc.expires_at or ""),
                 backup_confirmed_at=str(doc.backup_confirmed_at or ""), parts=data.get("parts", []),
                 cleanup_status=doc.cleanup_status or "", cleanup_results=data.get("cleanup_results", []),
-                summary=data.get("summary", {}), error=doc.error or "")
+                summary=data.get("summary", {}), error=doc.error or "",
+                failures=[{key: row.get(key, "") for key in (
+                    "key", "filename", "kind", "course_label", "campus", "timeslot_label",
+                    "session_date", "post", "reason")}
+                    for row in data.get("entries", []) if row.get("status") == "failed"])
 
 
 def overview(term):
