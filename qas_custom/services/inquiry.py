@@ -1098,10 +1098,13 @@ def _map_trial_form_session(payload: dict):
 		or payload.get("class_type")
 		or derived_course_candidate
 	)
+	# Keep the requested course even when the submission cannot be scheduled.
+	course = _resolve_course(course_candidate)
 	parsed_session = _parse_class_session(class_session)
 	class_language = _parse_class_language(class_session)
 
 	result = {
+		"course": course,
 		"campus": campus,
 		"appointment_date": trial_date,
 		"appointment_time": parsed_session.get("start_time") if parsed_session else None,
@@ -1116,11 +1119,9 @@ def _map_trial_form_session(payload: dict):
 		result["reason"] = _("Trial date was not submitted.")
 		return result
 
-	course = _resolve_course(course_candidate)
 	if not course:
 		result["reason"] = _("Course could not be uniquely matched from the submitted trial form.")
 		return result
-	result["course"] = course
 
 	if getdate(trial_date).strftime("%A") != parsed_session["day_of_week"]:
 		result["reason"] = _("Submitted trial date weekday does not match class session weekday.")

@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 from frappe import _dict
 
-from qas_custom.services.inquiry import _map_trial_form_session, _parse_class_language
+from qas_custom.services.inquiry import _map_trial_form_session, _parse_class_language, _resolve_trial_session_context
 
 
 class TestInquiryTrialLanguageMatching(TestCase):
@@ -175,3 +175,40 @@ class TestInquiryTrialLanguageMatching(TestCase):
 	def test_chinese_marker_is_case_insensitive(self):
 		self.assertEqual(_parse_class_language("Sat 10:40-12:10 (IN CHINESE)"), "Chinese")
 		self.assertEqual(_parse_class_language("Sat 10:40-12:10"), "English")
+
+
+class TestInquiryIncompleteTrialCourse(TestCase):
+	def test_missing_or_invalid_time_preserves_course_without_booking(self):
+		for session in (None, "", "-", "invalid"):
+			with (
+				self.subTest(session=session),
+				patch("qas_custom.services.inquiry._derive_campus_and_course", return_value=("Upper Mount Gravatt", "Storytelling and Art - Beginner")),
+				patch("qas_custom.services.inquiry._resolve_campus", return_value="Upper Mount Gravatt"),
+				patch("qas_custom.services.inquiry._resolve_course", return_value="Storytelling and Art - Beginner") as resolve_course,
+				patch("qas_custom.services.inquiry._get_session_context") as get_session,
+				patch("qas_custom.services.inquiry._", side_effect=lambda value: value),
+			):
+				payload = {
+					"submitted_form_name": "Upper Mount Gravatt Storytelling and Art - Beginner",
+					"submitted_class_session": session,
+					"submitted_trial_date": "2026-10-05",
+				}
+				context, reason = _resolve_trial_session_context(payload, "Trial Lesson")
+				self.assertIsNone(context)
+				self.assertEqual(reason, "Class session time could not be parsed from submitted form.")
+				self.assertEqual(payload["course"], "Storytelling and Art - Beginner")
+				resolve_course.assert_called_once_with("Storytelling and Art - Beginner")
+				get_session.assert_not_called()
+
+	def test_ambiguous_course_is_not_assigned(self):
+		with (
+			patch("qas_custom.services.inquiry._derive_campus_and_course", return_value=("Upper Mount Gravatt", "Art")),
+			patch("qas_custom.services.inquiry._resolve_campus", return_value="Upper Mount Gravatt"),
+			patch("qas_custom.services.inquiry._resolve_course", return_value=None),
+			patch("qas_custom.services.inquiry._", side_effect=lambda value: value),
+		):
+			payload = {"submitted_form_name": "Upper Mount Gravatt Art"}
+			context, reason = _resolve_trial_session_context(payload, "Trial Lesson")
+			self.assertIsNone(context)
+			self.assertTrue(reason)
+			self.assertNotIn("course", payload)
