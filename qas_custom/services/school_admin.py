@@ -14,6 +14,7 @@ import re
 from urllib.parse import urlencode
 
 from qas_custom.services.term_media import annotate_media, assert_media_available
+from qas_custom.services.enrollment_billing_status import attach_billing_status
 
 import frappe
 from frappe import _
@@ -2631,7 +2632,7 @@ def get_school_admin_term_data(term=None):
 	)
 	payload["active_enrollment_count"] = _count("Enrollment", {"term": term, "status": "Active"})
 	payload["planned_enrollment_count"] = _count("Enrollment", {"term": term, "status": "Planned"})
-	payload["planned_enrollments"] = _get_enrollment_rows(filters={"term": term, "status": "Planned"}, limit=500)
+	payload["planned_enrollments"] = _get_enrollment_rows(filters={"term": term, "status": "Planned"}, limit=0)
 	payload["weekly_timeslots"] = get_school_admin_weekly_timeslots_data(
 		term=term,
 		include_inactive_terms=1,
@@ -3179,8 +3180,10 @@ def _activate_planned_enrollment(enrollment, term_doc, start_session=None):
 	_set_if_field(enrollment, "status", "Active")
 	start_date = frappe.db.get_value("Course Sessions", start_session, "session_date")
 	_set_if_field(enrollment, "enrollment_date", start_date or term_doc.get("start_date") or enrollment.get("enrollment_date") or today())
-	enrollment.save(ignore_permissions=True)
 	attendance_entries = _create_enrollment_attendance_entries(enrollment)
+	if not attendance_entries:
+		frappe.throw(_("No attendance was created. The enrollment remains Planned."))
+	enrollment.save(ignore_permissions=True)
 	_add_comment("Enrollment", enrollment.name, _("Planned enrollment activated for term {0}.").format(term_doc.name))
 	return {
 		"enrollment": enrollment.name,
@@ -3259,6 +3262,38 @@ def _first_course_session_for_timeslot(weekly_timeslot, term_doc):
 	return rows[0].name
 
 
+def _enrollment_invoice_start(doc, requested_start_session=None):
+	if doc.get("enrollment_type") != "Full-Term" or doc.get("status") not in ("Planned", "Active"):
+		frappe.throw(_("Only Planned or Active Full-Term enrollments can be invoiced."))
+	term = frappe.get_doc("Term", doc.term)
+	if term.get("status") not in ("Upcoming", "Active"):
+		frappe.throw(_("The term must be Upcoming or Active to create an invoice."))
+	timeslot = frappe.db.get_value("Weekly Timeslot", doc.get("weekly_timeslot"), ["name", "term", "course"], as_dict=True)
+	if not timeslot or timeslot.term != doc.term:
+		frappe.throw(_("Weekly timeslot must belong to the enrollment term."))
+	if doc.get("course") and doc.course != timeslot.course:
+		frappe.throw(_("Enrollment course does not match the weekly timeslot. Review the enrollment before billing."))
+	_set_if_field(doc, "course", timeslot.course)
+	persisted = doc.get("start_course_session")
+	if requested_start_session and requested_start_session != persisted:
+		frappe.throw(_("Start session has changed. Save the enrollment before creating an invoice."))
+	if persisted:
+		_validate_enrollment_start_session(persisted, doc.weekly_timeslot, term)
+	first = frappe.get_all("Course Sessions", filters={
+		"weekly_timeslot": doc.weekly_timeslot,
+		"session_date": ["between", [term.start_date, term.end_date]],
+		"status": ["!=", "Cancelled"],
+	}, fields=["name", "session_date"], order_by="session_date asc", limit=1)
+	# Explicit mid-term starts always retain pro-rata billing, even before attendance.
+	if persisted and first:
+		start_date = frappe.db.get_value("Course Sessions", persisted, "session_date")
+		if getdate(start_date) > getdate(first[0].session_date):
+			return persisted
+	if doc.get("status") == "Planned" or not first or not _enrollment_has_attendance(doc.name):
+		return None
+	return persisted or first[0].name
+
+
 def _create_term_enrollment_invoice(enrollment, start_session):
 	require_open_term(enrollment.get("term"))
 	parent = enrollment.get("parent")
@@ -3267,14 +3302,17 @@ def _create_term_enrollment_invoice(enrollment, start_session):
 		frappe.throw(_("Parent and course are required before generating an invoice."))
 	customer = get_invoice_customer(parent)
 	item_code = get_invoice_item(course)
-	session_count = _course_session_count_for_enrollment(enrollment, start_session)
+	advance = not start_session
+	if advance and not _has_field("Sales Invoice", "qas_advance_term_invoice"):
+		frappe.throw(_("Advance term invoicing requires the latest site migration."))
+	session_count = 9 if advance else _course_session_count_for_enrollment(enrollment, start_session)
 	if session_count <= 0:
 		frappe.throw(_("No billable sessions found for enrollment."))
 	full_term_fee = get_course_money(course, ("full_term_fee", "full_term_price", "term_fee"))
 	if full_term_fee <= 0:
 		frappe.throw(_("Course full term fee is required before generating an invoice."))
 	total_sessions = get_course_number(course, ("total_session_per_term", "total_sessions_per_term", "sessions_per_term")) or session_count
-	invoice_amount = _enrollment_invoice_amount(full_term_fee, total_sessions, session_count)
+	invoice_amount = flt(full_term_fee, 2) if advance else _enrollment_invoice_amount(full_term_fee, total_sessions, session_count)
 
 	disable_sales_invoice_auto_notifications()
 	invoice_name = _find_draft_family_invoice(parent=parent, customer=customer, term=enrollment.term)
@@ -3313,6 +3351,12 @@ def _create_term_enrollment_invoice(enrollment, start_session):
 		amount=invoice_amount,
 	)
 	_sync_invoice_student_summary(invoice)
+	if advance:
+		_set_if_field(invoice, "qas_advance_term_invoice", 1)
+		if created:
+			invoice.due_date = add_days(invoice.posting_date, 7)
+			for payment in invoice.get("payment_schedule", []):
+				payment.due_date = invoice.due_date
 	apply_course_invoice_dates(invoice, enrollment=enrollment, start_session=start_session)
 	apply_invoice_payment_snapshot(invoice)
 	if created:
@@ -3382,6 +3426,8 @@ def _append_enrollment_invoice_item(invoice, *, enrollment, start_session, item_
 	student_code = get_student_display_code(enrollment.student) or enrollment.student
 	schedule = invoice_item_schedule({"weekly_timeslot": enrollment.weekly_timeslot})
 	description = build_course_invoice_description(student_name, course, enrollment.term, session_count, schedule=schedule)
+	if not start_session:
+		description += " — Full term (advance billing)"
 	item = invoice.append(
 		"items",
 		{
@@ -3399,7 +3445,7 @@ def _append_enrollment_invoice_item(invoice, *, enrollment, start_session, item_
 	_set_if_field(item, "enrollment", enrollment.name)
 	_set_if_field(item, "course", course)
 	_set_if_field(item, "term", enrollment.term)
-	_set_if_field(item, "course_session", get_course_session_snapshot_label(start_session))
+	_set_if_field(item, "course_session", get_course_session_snapshot_label(start_session) if start_session else None)
 	_set_if_field(item, "session_count", session_count)
 	return item
 
@@ -3408,11 +3454,12 @@ def _course_session_count_for_enrollment(enrollment, start_session):
 	start_date = frappe.db.get_value("Course Sessions", start_session, "session_date")
 	if not start_date:
 		return 0
+	term = frappe.get_doc("Term", enrollment.term)
 	return frappe.db.count(
 		"Course Sessions",
 		{
 			"weekly_timeslot": enrollment.weekly_timeslot,
-			"session_date": [">=", getdate(start_date)],
+			"session_date": ["between", [getdate(start_date), getdate(term.end_date)]],
 			"status": ["!=", "Cancelled"],
 		},
 	)
@@ -3565,6 +3612,10 @@ def update_school_admin_enrollment_data(enrollment=None, payload=None):
 	doc = frappe.get_doc("Enrollment", enrollment)
 	previous_timeslot = doc.get("weekly_timeslot")
 	previous_status = doc.get("status")
+	if previous_status == "Planned" and _existing_invoice_for_enrollment(doc):
+		protected = ("student", "parent", "term", "course", "weekly_timeslot", "enrollment_type", "status", "start_course_session", "invoice", "invoice_status", "invoice_amount")
+		if any(key in payload and str(payload.get(key) or "") != str(doc.get(key) or "") for key in protected):
+			frappe.throw(_("This planned enrollment has an invoice. Resolve the invoice before changing the billed enrollment."))
 	if previous_status == "Planned" and payload.get("status") == "Active":
 		frappe.throw(_("Use Create Attendance to activate planned enrollments."))
 	_apply_enrollment_payload(doc, payload)
@@ -3658,35 +3709,16 @@ def create_school_admin_enrollment_invoice_data(enrollment=None, payload=None):
 	if not enrollment:
 		frappe.throw(_("Enrollment is required."))
 	payload = _get_payload(payload)
-	doc = frappe.get_doc("Enrollment", enrollment)
+	doc = frappe.get_doc("Enrollment", enrollment, for_update=True)
 	require_open_term(doc.get("term"))
-	if doc.get("status") != "Active":
-		frappe.throw(_("Set the enrollment to Active before creating a draft invoice."))
 	existing_invoice = _existing_invoice_for_enrollment(doc)
 	if existing_invoice:
 		frappe.throw(_("This enrollment already has an invoice: {0}.").format(existing_invoice))
-	if not doc.get("weekly_timeslot"):
-		frappe.throw(_("Weekly timeslot is required before creating an invoice."))
-	term_doc = frappe.get_doc("Term", doc.term)
-	persisted_start_session = doc.get("start_course_session")
-	requested_start_session = payload.get("start_course_session")
-	if requested_start_session and requested_start_session != persisted_start_session:
-		frappe.throw(_("Start session has changed. Save the enrollment or create attendance before creating an invoice."))
-	if not persisted_start_session:
-		frappe.throw(_("Start session is required. Save the enrollment or create attendance before creating an invoice."))
-	start_session = _validate_enrollment_start_session(
-		persisted_start_session,
-		doc.weekly_timeslot,
-		term_doc,
-	)
-	timeslot_course = frappe.db.get_value("Weekly Timeslot", doc.weekly_timeslot, "course")
-	_set_if_field(doc, "course", doc.get("course") or timeslot_course)
-	if not doc.get("enrollment_date"):
-		start_date = frappe.db.get_value("Course Sessions", start_session, "session_date")
-		_set_if_field(doc, "enrollment_date", start_date or term_doc.get("start_date") or today())
+	start_session = _enrollment_invoice_start(doc, payload.get("start_course_session"))
 
 	invoice = _create_term_enrollment_invoice(doc, start_session)
-	_set_if_field(doc, "start_course_session", start_session)
+	if start_session:
+		_set_if_field(doc, "start_course_session", start_session)
 	_set_if_field(doc, "invoice", invoice.name)
 	_set_if_field(doc, "invoice_status", "Draft")
 	_set_if_field(doc, "invoice_amount", invoice.get("grand_total"))
@@ -3848,6 +3880,9 @@ def end_school_admin_enrollment_data(enrollment=None, payload=None):
 	payload = _get_payload(payload)
 	doc = frappe.get_doc("Enrollment", enrollment)
 	end_date = payload.get("end_date") or today()
+	if doc.get("status") == "Planned" and _existing_invoice_for_enrollment(doc):
+		frappe.throw(_("This planned enrollment has an invoice. Cancel or adjust the invoice before ending the enrollment."))
+
 	target_status = payload.get("status")
 	if target_status not in {"Inactive", "Completed", "Cancelled"}:
 		target_status = "Cancelled" if doc.get("status") == "Planned" else "Inactive"
@@ -7671,7 +7706,7 @@ def _get_enrollment_rows(parent=None, students=None, filters=None, limit=80, ope
 		start=start,
 		limit=limit,
 	)
-	return _attach_enrollment_timeslot_details(_attach_course_labels([_normalize_row_payload("Enrollment", row) for row in rows]))
+	return attach_billing_status(_attach_enrollment_timeslot_details(_attach_course_labels([_normalize_row_payload("Enrollment", row) for row in rows])))
 
 
 def _attach_enrollment_timeslot_details(rows):
@@ -7774,7 +7809,7 @@ def _get_invoice_candidate_enrollment_names(parent=None, students=None, term=Non
 	if not _doctype_available("Enrollment"):
 		return []
 	filters = {
-		"status": "Active",
+		"status": ["in", ["Planned", "Active"]],
 		"enrollment_type": "Full-Term",
 	}
 	if parent:
@@ -7830,6 +7865,7 @@ def _create_enrollment_attendance_entries(doc, start_date=None):
 		return []
 	if doc.get("enrollment_type") != "Full-Term" or not doc.get("weekly_timeslot") or not doc.get("student"):
 		return []
+	term = frappe.get_doc("Term", doc.term)
 	filters = {"weekly_timeslot": doc.weekly_timeslot, "status": ["!=", "Cancelled"]}
 	if start_date:
 		filters["session_date"] = [">=", getdate(start_date)]
@@ -7837,6 +7873,8 @@ def _create_enrollment_attendance_entries(doc, start_date=None):
 		start_session_date = frappe.db.get_value("Course Sessions", doc.start_course_session, "session_date")
 		if start_session_date:
 			filters["session_date"] = [">=", getdate(start_session_date)]
+	start = filters.get("session_date", [None, term.start_date])[1]
+	filters["session_date"] = ["between", [max(getdate(start), getdate(term.start_date)), getdate(term.end_date)]]
 	rows = frappe.get_all("Course Sessions", filters=filters, fields=["name", "session_date"], order_by="session_date asc")
 	_ensure_enrollment_attendance_entries(doc, rows)
 	return [row.name for row in rows]
@@ -7979,32 +8017,18 @@ def _create_invoices_for_enrollment_names(enrollment_names, payload=None):
 		savepoint = f"invoice_enrollment_{enrollment}".replace("-", "_")
 		frappe.db.savepoint(savepoint)
 		try:
-			doc = frappe.get_doc("Enrollment", enrollment)
-			if doc.get("status") != "Active" or doc.get("enrollment_type") != "Full-Term":
+			doc = frappe.get_doc("Enrollment", enrollment, for_update=True)
+			if doc.get("status") not in ("Planned", "Active") or doc.get("enrollment_type") != "Full-Term":
 				summary["skipped"] += 1
 				continue
 			existing_invoice = _existing_invoice_for_enrollment(doc)
 			if existing_invoice:
 				summary["skipped"] += 1
 				continue
-			if not _enrollment_has_attendance(doc.name):
-				summary["warnings"].append({
-					"enrollment": doc.name,
-					"warning": _("No attendance rows found for this enrollment."),
-				})
-			term_doc = frappe.get_doc("Term", doc.term)
-			start_session = _validate_enrollment_start_session(
-				payload.get("start_course_session") or doc.get("start_course_session") or _first_course_session_for_timeslot(doc.weekly_timeslot, term_doc),
-				doc.weekly_timeslot,
-				term_doc,
-			)
-			timeslot_course = frappe.db.get_value("Weekly Timeslot", doc.weekly_timeslot, "course")
-			_set_if_field(doc, "course", doc.get("course") or timeslot_course)
-			if not doc.get("enrollment_date"):
-				start_date = frappe.db.get_value("Course Sessions", start_session, "session_date")
-				_set_if_field(doc, "enrollment_date", start_date or term_doc.get("start_date") or today())
+			start_session = _enrollment_invoice_start(doc, payload.get("start_course_session"))
 			invoice = _create_term_enrollment_invoice(doc, start_session)
-			_set_if_field(doc, "start_course_session", start_session)
+			if start_session:
+				_set_if_field(doc, "start_course_session", start_session)
 			_set_if_field(doc, "invoice", invoice.name)
 			_set_if_field(doc, "invoice_status", "Draft")
 			_set_if_field(doc, "invoice_amount", invoice.get("grand_total"))
@@ -8364,7 +8388,7 @@ def _cancel_future_enrollment_attendance(enrollment, effective_date=None):
 
 
 def _build_enrollment_payload(doc):
-	payload = _document_payload(doc)
+	payload = attach_billing_status([_document_payload(doc)])[0]
 	_attach_course_label(payload, payload.get("course"), _course_label_map([payload.get("course")]).get(payload.get("course")))
 	if payload.get("weekly_timeslot"):
 		payload["weekly_timeslot_detail"] = _get_timeslot_summary(payload.get("weekly_timeslot"))

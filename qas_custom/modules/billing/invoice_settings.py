@@ -225,6 +225,9 @@ def apply_course_invoice_dates(invoice, *, enrollment=None, start_session=None):
 	"""Set generated draft deadlines from each enrollment's actual first class."""
 	if cint(invoice.get("docstatus")) != 0:
 		return
+	# Advance bills keep their chosen deadline after scheduling, editing or combining drafts.
+	if cint(invoice.get("qas_advance_term_invoice")):
+		return
 	posting_date = invoice.get("posting_date") or nowdate()
 	enrollments = {item.get("enrollment"): None for item in invoice.get("items", []) if item.get("enrollment")}
 	if enrollment is not None:
