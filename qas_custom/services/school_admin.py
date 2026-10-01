@@ -129,7 +129,7 @@ from qas_custom.services.inquiry import (
 	update_inquiry_confirmation_core,
 )
 from qas_custom.services.teacher_revenue_share import get_teacher_revenue_share_session_rows
-from qas_custom.services.teacher_directory import get_active_teacher_directory_data
+from qas_custom.services.teacher_directory import get_active_teacher_directory_data, get_teacher_email_export_data
 from qas_custom.services.ndis_friendly import (
 	get_ndis_friendly_capacity_status,
 	get_ndis_friendly_capacity_statuses,
@@ -231,6 +231,11 @@ def get_school_admin_me_data():
 def get_school_admin_csrf_token_data():
 	_require_school_admin()
 	return {"csrf_token": frappe.sessions.get_csrf_token()}
+
+
+def get_school_admin_teacher_email_export_data(scope="active"):
+	_require_school_admin()
+	return get_teacher_email_export_data(scope=scope)
 
 
 def get_school_admin_teacher_directory_data(query=None, limit=300):

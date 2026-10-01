@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import frappe
-from frappe.utils import cint
+from frappe.utils import cint, validate_email_address
 
 
 CONTACT_FIELDS = ["name", "teacher_name", "email", "mobile", "phone"]
@@ -65,3 +65,38 @@ def _has_field(doctype, fieldname):
 		return frappe.get_meta(doctype).has_field(fieldname)
 	except Exception:
 		return False
+
+
+def get_teacher_email_export_data(scope="active"):
+	"""Complete, deduplicated Teacher.email list for School Admin export."""
+	if scope not in ("active", "all"):
+		frappe.throw(frappe._("Choose Active teachers or All teachers."))
+	if not _doctype_available("Teacher") or not _has_field("Teacher", "email"):
+		frappe.throw(frappe._("Teacher email records are unavailable."))
+	if scope == "active" and not _has_field("Teacher", "status"):
+		frappe.throw(frappe._("Teacher status is unavailable."))
+	rows = frappe.get_all(
+		"Teacher",
+		filters={"status": "Active"} if scope == "active" else {},
+		fields=_safe_fields("Teacher", ["name", "teacher_name", "email"]),
+		order_by="teacher_name asc, name asc" if _has_field("Teacher", "teacher_name") else "name asc",
+		limit_page_length=0,
+	)
+	items, seen = [], set()
+	missing = invalid = duplicates = 0
+	for row in rows:
+		email = (row.get("email") or "").strip().lower()
+		if not email:
+			missing += 1
+			continue
+		# One plain mailbox per Teacher: never accept lists or display-name syntax.
+		if any(char.isspace() or char in ",;<>" for char in email) or validate_email_address(email) != email:
+			invalid += 1
+			continue
+		if email in seen:
+			duplicates += 1
+			continue
+		seen.add(email)
+		items.append({"teacher_name": row.get("teacher_name") or row["name"], "email": email})
+	return {"scope": scope, "items": items, "teacher_count": len(rows), "email_count": len(items),
+		"missing_count": missing, "invalid_count": invalid, "duplicate_count": duplicates}

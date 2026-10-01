@@ -205,6 +205,7 @@ from qas_custom.services.school_admin import (
 	get_school_admin_term_data,
 	get_school_admin_terms_data,
 	get_school_admin_teacher_directory_data,
+	get_school_admin_teacher_email_export_data,
 	get_school_admin_vouchers_data,
 	issue_school_admin_manual_makeup_voucher_data,
 	get_school_admin_weekly_timeslot_data,
@@ -284,6 +285,11 @@ def school_admin_get_support_view_targets(target_type=None, query=None, limit=50
 @frappe.whitelist()
 def school_admin_create_support_view_token(target_type=None, target=None, reason=None):
 	return create_support_view_token(target_type=target_type, target=target, reason=reason)
+
+
+@frappe.whitelist()
+def school_admin_get_teacher_email_export(scope="active"):
+	return get_school_admin_teacher_email_export_data(scope=scope)
 
 
 @frappe.whitelist()
