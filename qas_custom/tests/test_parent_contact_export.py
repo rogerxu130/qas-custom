@@ -195,3 +195,27 @@ class TestDatedParentContactExport(TestCase):
 			self.assertEqual(dated.call_args.args[1], 'T2')
 			self.assertIn('2026-10-02', export.frappe.local.response.filename)
 			self.assertIn(b'parent@example.com', export.frappe.local.response.filecontent)
+
+	def test_date_options_and_export_query_only_real_course_session_columns(self):
+		"""Exercise the real shared session query against the checked-in schema."""
+		import json
+		from pathlib import Path
+		from qas_custom.services import parent_contact_export as export
+		schema_path = Path(__file__).resolve().parents[1] / 'qas_custom/doctype/course_sessions/course_sessions.json'
+		columns = {'name'} | {field['fieldname'] for field in json.loads(schema_path.read_text())['fields']}
+		self.assertNotIn('start_time', columns)
+
+		def query(doctype, **kwargs):
+			self.assertEqual(doctype, 'Course Sessions')
+			self.assertTrue(set(kwargs['fields']).issubset(columns))
+			for part in kwargs['order_by'].split(','):
+				self.assertIn(part.strip().split()[0], columns)
+			self.assertEqual(str(kwargs['filters']['session_date']), '2026-10-05')
+			self.assertEqual(kwargs['filters']['status'], ['!=', 'Cancelled'])
+			self.assertEqual(kwargs['limit'], 0)
+			return []
+
+		with patch.object(export, '_require_school_admin'), patch.object(export.frappe, 'get_meta', return_value=SimpleNamespace(has_field=lambda field: field in columns)), patch.object(export.frappe, 'get_all', side_effect=query) as get_all:
+			self.assertEqual(export.get_school_admin_parent_contact_export_options_data('date', session_date='2026-10-05'), {'items': []})
+			self.assertEqual(export.get_school_admin_parent_contact_export_summary_data('date', session_date='2026-10-05')['participant_count'], 0)
+			self.assertEqual(get_all.call_count, 2)

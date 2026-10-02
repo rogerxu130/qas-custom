@@ -609,7 +609,7 @@ def _sessions_on_date(session_date):
 			"Course Sessions",
 			["name", "weekly_timeslot", "session_date", "status", "teacher", "teacher_override", "course", "campus", "start_time"],
 		),
-		order_by="start_time asc, name asc",
+		order_by="name asc",
 		limit=0,
 	)
 
