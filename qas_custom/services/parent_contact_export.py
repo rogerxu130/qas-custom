@@ -392,7 +392,7 @@ def _dated_rows(session_date, teacher=""):
 	if not sessions:
 		return [], label
 	session_map = {row["name"]: row for row in sessions}
-	attendance = frappe.get_all("Attendance", filters={
+	attendance = frappe.get_all("Class Attendance Entry", filters={
 		"course_session": ["in", list(session_map)], "status": ["not in", sorted(NON_ATTENDING_STATUSES)],
 	}, fields=["student", "course_session", "enrollment_type"], limit=0)
 	students = _student_map([row.get("student") for row in attendance])

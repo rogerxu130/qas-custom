@@ -219,3 +219,63 @@ class TestDatedParentContactExport(TestCase):
 			self.assertEqual(export.get_school_admin_parent_contact_export_options_data('date', session_date='2026-10-05'), {'items': []})
 			self.assertEqual(export.get_school_admin_parent_contact_export_summary_data('date', session_date='2026-10-05')['participant_count'], 0)
 			self.assertEqual(get_all.call_count, 2)
+
+	def test_nonempty_date_pipeline_uses_installed_doctypes_and_fields(self):
+		"""Keep real roster/contact helpers; reject unknown tables/columns at the DB boundary."""
+		import json
+		from pathlib import Path
+		from contextlib import ExitStack
+		from qas_custom.services import parent_contact_export as export
+		root = Path(__file__).resolve().parents[1] / 'qas_custom/doctype'
+		schemas = {}
+		for path in root.glob('*/*.json'):
+			doc = json.loads(path.read_text())
+			if doc.get('doctype') == 'DocType':
+				schemas[doc['name']] = {'name'} | {f['fieldname'] for f in doc.get('fields', [])}
+		data = {
+			'Course Sessions': [dict(name='CS1', weekly_timeslot='W1', session_date='2026-10-05', status='Scheduled'), dict(name='CS2', weekly_timeslot='W2', session_date='2026-10-05', status='Scheduled'), dict(name='CANCELLED', weekly_timeslot='W1', session_date='2026-10-05', status='Cancelled')],
+			'Weekly Timeslot': [dict(name='W1', teacher='T1', start_time='10:00:00'), dict(name='W2', teacher='T2', start_time='11:00:00')],
+			'Teacher': [dict(name='T1', teacher_name='One'), dict(name='T2', teacher_name='Two')],
+			'Class Attendance Entry': [dict(name='A1', course_session='CS1', student='S1', enrollment_type='Full-Term', status='To be started'), dict(name='A2', course_session='CS2', student='S2', enrollment_type='Trial', status='To be started'), dict(name='A3', course_session='CS1', student='S2', enrollment_type='Makeup', status='Leave'), dict(name='A4', course_session='CANCELLED', student='S2', enrollment_type='Makeup', status='To be started')],
+			'Student': [dict(name='S1', student_name='Alice', guardian='P1'), dict(name='S2', student_name='Bob', guardian='P2')],
+			'Parent': [dict(name='P1', parent_name='Parent One', linked_user='one@example.com', mobile_number='0401'), dict(name='P2', parent_name='Parent Two', linked_user='two@example.com', mobile_number='0402')],
+		}
+		def query(doctype, filters=None, fields=None, order_by=None, **kwargs):
+			self.assertIn(doctype, schemas, f'Unknown DocType: {doctype}')
+			columns = schemas[doctype]
+			self.assertTrue(set(fields or []).issubset(columns), (doctype, fields))
+			self.assertTrue(set(filters or {}).issubset(columns), (doctype, filters))
+			if order_by:
+				for part in order_by.split(','):
+					self.assertIn(part.strip().split()[0], columns)
+			def matches(row):
+				for key, wanted in (filters or {}).items():
+					actual = row.get(key)
+					if isinstance(wanted, list):
+						op, values = wanted
+						if op == 'in' and actual not in values: return False
+						if op == 'not in' and actual in values: return False
+						if op == '!=' and actual == values: return False
+					elif str(actual) != str(wanted): return False
+				return True
+			return [frappe._dict({field: row.get(field) for field in fields}) for row in data.get(doctype, []) if matches(row)]
+		def get_value(doctype, name, fields, **kwargs):
+			rows = query(doctype, {'name': name}, fields)
+			return rows[0] if rows else None
+		with ExitStack() as stack:
+			stack.enter_context(patch.object(export, '_require_school_admin'))
+			stack.enter_context(patch.object(export, 'has_field', side_effect=lambda doctype, field: field in schemas[doctype]))
+			stack.enter_context(patch.object(export.frappe, 'get_meta', side_effect=lambda doctype: SimpleNamespace(has_field=lambda field: field in schemas[doctype])))
+			stack.enter_context(patch.object(export.frappe, 'get_all', side_effect=query))
+			stack.enter_context(patch.object(export.frappe, 'db', SimpleNamespace(get_value=get_value, exists=lambda doctype, name: any(row['name'] == name for row in data[doctype]))))
+			response = SimpleNamespace()
+			stack.enter_context(patch.object(export.frappe, 'local', SimpleNamespace(response=response)))
+			options = export.get_school_admin_parent_contact_export_options_data('date', session_date='2026-10-05')
+			self.assertEqual([row['name'] for row in options['items']], ['T1', 'T2'])
+			self.assertEqual(export.get_school_admin_parent_contact_export_summary_data('date', session_date='2026-10-05')['participant_count'], 2)
+			self.assertEqual(export.get_school_admin_parent_contact_export_summary_data('date', session_date='2026-10-05', teacher='T1')['participant_count'], 1)
+			export.export_school_admin_parent_contacts_data('date', session_date='2026-10-05', teacher='T1')
+			self.assertIn(b'one@example.com', response.filecontent)
+			self.assertNotIn(b'two@example.com', response.filecontent)
+			export.export_school_admin_parent_contacts_data('date', session_date='2026-10-05')
+			self.assertIn(b'two@example.com', response.filecontent)
