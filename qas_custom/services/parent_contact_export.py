@@ -14,15 +14,22 @@ from qas_custom.modules.common import has_field
 
 ADMIN_ROLES = {"School Admin", "System Manager"}
 BRISBANE_TIMEZONE = "Australia/Brisbane"
-SCOPE_TYPES = {"term", "weekly_timeslot", "workshop"}
+SCOPE_TYPES = {"term", "weekly_timeslot", "workshop", "date"}
 NON_ATTENDING_STATUSES = {"Cancelled", "Leave"}
 CSV_FORMULA_PREFIXES = ("=", "+", "-", "@")
 PARTICIPATION_ORDER = ("Full-Term", "Trial", "Makeup", "Pay-as-you-go", "Workshop")
 
 
-def get_school_admin_parent_contact_export_options_data(scope_type=None, term=None, query=None, limit=200):
+def get_school_admin_parent_contact_export_options_data(scope_type=None, term=None, query=None, limit=200, session_date=None):
 	_require_school_admin()
 	scope_type = _validate_scope_type(scope_type)
+	if scope_type == "date":
+		from qas_custom.services.parent_emails import _sessions_on_date, _timeslot_map, _effective_teacher, _teacher_map
+		date = _validate_date(session_date)
+		sessions = _sessions_on_date(date)
+		timeslots = _timeslot_map([row.get("weekly_timeslot") for row in sessions])
+		teachers = _teacher_map({_effective_teacher(row, timeslots.get(row.get("weekly_timeslot"))) for row in sessions})
+		return {"items": [{"name": name, "label": label} for name, label in sorted(teachers.items(), key=lambda item: (item[1].casefold(), item[0]))]}
 	query = str(query or "").strip().casefold()
 	limit = min(max(int(limit or 200), 1), 500)
 	if scope_type == "term":
@@ -72,9 +79,9 @@ def get_school_admin_parent_contact_export_options_data(scope_type=None, term=No
 	return {"items": items[:limit]}
 
 
-def get_school_admin_parent_contact_export_summary_data(scope_type=None, scope_name=None, term=None):
+def get_school_admin_parent_contact_export_summary_data(scope_type=None, scope_name=None, term=None, session_date=None, teacher=None):
 	_require_school_admin()
-	rows, _label = _resolve_export(scope_type, scope_name, term)
+	rows, _label = _resolve_export(scope_type, scope_name, term, session_date=session_date, teacher=teacher)
 	return {
 		"participant_count": len(rows),
 		"eligible_parent_count": len(rows),
@@ -83,9 +90,9 @@ def get_school_admin_parent_contact_export_summary_data(scope_type=None, scope_n
 	}
 
 
-def export_school_admin_parent_contacts_data(scope_type=None, scope_name=None, term=None):
+def export_school_admin_parent_contacts_data(scope_type=None, scope_name=None, term=None, session_date=None, teacher=None):
 	_require_school_admin()
-	rows, label = _resolve_export(scope_type, scope_name, term)
+	rows, label = _resolve_export(scope_type, scope_name, term, session_date=session_date, teacher=teacher)
 	if not rows:
 		frappe.throw(_("This selection has no parent contacts to export."))
 	frappe.local.response.filename = _export_filename(label)
@@ -96,8 +103,10 @@ def export_school_admin_parent_contacts_data(scope_type=None, scope_name=None, t
 	return None
 
 
-def _resolve_export(scope_type, scope_name, term=None):
+def _resolve_export(scope_type, scope_name, term=None, session_date=None, teacher=None):
 	scope_type = _validate_scope_type(scope_type)
+	if scope_type == "date":
+		return _dated_rows(_validate_date(session_date), str(teacher or "").strip())
 	scope_name = str(scope_name or "").strip()
 	if not scope_name:
 		frappe.throw(_("Export selection is required."))
@@ -336,7 +345,7 @@ def _add_unique(values, value):
 def _validate_scope_type(scope_type):
 	scope_type = str(scope_type or "").strip()
 	if scope_type not in SCOPE_TYPES:
-		frappe.throw(_("Export scope must be Term, Specific Class, or Workshop."))
+		frappe.throw(_("Export scope must be Term, Specific Class, Workshop, or Date."))
 	return scope_type
 
 
@@ -356,3 +365,60 @@ def _safe_fields(doctype, requested):
 def _require_school_admin():
 	if frappe.session.user == "Guest" or not set(frappe.get_roles(frappe.session.user)).intersection(ADMIN_ROLES):
 		frappe.throw(_("Only School Admin or System Manager users can export parent contacts."), frappe.PermissionError)
+
+
+def _validate_date(value):
+	# Reject missing/ambiguous dates instead of silently using today.
+	value = str(value or "").strip()
+	if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+		frappe.throw(_("Choose a class date (YYYY-MM-DD)."))
+	try:
+		from datetime import date
+		return date.fromisoformat(value)
+	except ValueError:
+		frappe.throw(_("Choose a valid class date."))
+
+
+def _dated_rows(session_date, teacher=""):
+	from qas_custom.services.parent_emails import _sessions_on_date, _timeslot_map, _effective_teacher, _teacher_map
+	if teacher and not frappe.db.exists("Teacher", teacher):
+		frappe.throw(_("Teacher was not found."))
+	sessions = _sessions_on_date(session_date)
+	timeslots = _timeslot_map([row.get("weekly_timeslot") for row in sessions])
+	if teacher:
+		sessions = [row for row in sessions if _effective_teacher(row, timeslots.get(row.get("weekly_timeslot"))) == teacher]
+	teacher_label = _teacher_map([teacher]).get(teacher, teacher) if teacher else "All teachers"
+	label = f"{session_date} {teacher_label}"
+	if not sessions:
+		return [], label
+	session_map = {row["name"]: row for row in sessions}
+	attendance = frappe.get_all("Attendance", filters={
+		"course_session": ["in", list(session_map)], "status": ["not in", sorted(NON_ATTENDING_STATUSES)],
+	}, fields=["student", "course_session", "enrollment_type"], limit=0)
+	students = _student_map([row.get("student") for row in attendance])
+	grouped = defaultdict(lambda: {"students": [], "types": [], "classes": [], "campuses": []})
+	for entry in attendance:
+		student = students.get(entry.get("student"), {})
+		parent = student.get("parent")
+		if not parent:
+			continue
+		session = session_map.get(entry.get("course_session"), {})
+		timeslot = timeslots.get(session.get("weekly_timeslot"), {})
+		group = grouped[parent]
+		_add_unique(group["students"], student.get("label") or entry.get("student"))
+		_add_unique(group["types"], entry.get("enrollment_type"))
+		_add_unique(group["classes"], " · ".join(str(value) for value in [session_date, session.get("course") or timeslot.get("course"), session.get("start_time") or timeslot.get("start_time"), session.get("name")] if value))
+		_add_unique(group["campuses"], session.get("campus") or timeslot.get("campus"))
+	# One row per mailbox; preserve all children/classes when families share an email.
+	merged = {}
+	for parent, group in sorted(grouped.items()):
+		row = _row(participant=", ".join(group["students"]), parent=parent, participation_types=group["types"], source_label="; ".join(group["classes"]), campus=", ".join(group["campuses"]))
+		row["email"] = row["email"].strip().lower()
+		key = ("email", row["email"]) if row["email"] else ("parent", parent)
+		if key not in merged:
+			merged[key] = row
+		else:
+			for field in ("participant_name", "parent_name", "sms_number", "participation_type", "source_label", "campus"):
+				if row[field] and row[field] != merged[key][field]:
+					merged[key][field] = "; ".join(filter(None, [merged[key][field], row[field]]))
+	return _sorted_rows(list(merged.values())), label

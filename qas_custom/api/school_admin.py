@@ -644,30 +644,35 @@ def school_admin_export_term_parent_emails(term=None):
 
 
 @frappe.whitelist()
-def school_admin_get_parent_contact_export_options(scope_type=None, term=None, query=None, limit=200):
+def school_admin_get_parent_contact_export_options(scope_type=None, term=None, query=None, limit=200, session_date=None):
 	return get_school_admin_parent_contact_export_options_data(
 		scope_type=scope_type,
 		term=term,
 		query=query,
 		limit=limit,
+		session_date=session_date,
 	)
 
 
 @frappe.whitelist()
-def school_admin_get_parent_contact_export_summary(scope_type=None, scope_name=None, term=None):
+def school_admin_get_parent_contact_export_summary(scope_type=None, scope_name=None, term=None, session_date=None, teacher=None):
 	return get_school_admin_parent_contact_export_summary_data(
 		scope_type=scope_type,
 		scope_name=scope_name,
 		term=term,
+		session_date=session_date,
+		teacher=teacher,
 	)
 
 
 @frappe.whitelist()
-def school_admin_export_parent_contacts(scope_type=None, scope_name=None, term=None):
+def school_admin_export_parent_contacts(scope_type=None, scope_name=None, term=None, session_date=None, teacher=None):
 	return export_school_admin_parent_contacts_data(
 		scope_type=scope_type,
 		scope_name=scope_name,
 		term=term,
+		session_date=session_date,
+		teacher=teacher,
 	)
 
 
