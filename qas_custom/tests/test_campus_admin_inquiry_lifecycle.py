@@ -16,7 +16,7 @@ class TestCampusAdminInquiryLifecycleQueues(TestCase):
 	def test_upcoming_excludes_outcome_statuses_even_when_future_dated(self):
 		filters, or_filters = _campus_admin_inquiry_queue_filters("upcoming", reference_date="2026-07-17")
 		self.assertEqual(filters["current_appointment_date"], [">=", getdate("2026-07-17")])
-		self.assertEqual(filters["status"], ["not in", list(POST_VISIT_INQUIRY_STATUSES)])
+		self.assertEqual(filters["status"], ["not in", list(POST_VISIT_INQUIRY_STATUSES) + ["Parked"]])
 		self.assertIsNone(or_filters)
 
 		filters, _ = _campus_admin_inquiry_queue_filters(
@@ -28,7 +28,7 @@ class TestCampusAdminInquiryLifecycleQueues(TestCase):
 
 	def test_post_visit_includes_outcome_statuses_regardless_of_date(self):
 		filters, or_filters = _campus_admin_inquiry_queue_filters("post_trial", reference_date="2026-07-17")
-		self.assertEqual(filters, {})
+		self.assertEqual(filters, {"status": ["!=", "Parked"]})
 		self.assertIn(
 			["Inquiry", "status", "in", list(POST_VISIT_INQUIRY_STATUSES)],
 			or_filters,
@@ -69,7 +69,7 @@ class TestCampusAdminInquiryLifecycleQueues(TestCase):
 			)
 
 		kwargs = get_all.call_args.kwargs
-		self.assertEqual(kwargs["filters"], {"campus": ["in", ["Indooroopilly"]]})
+		self.assertEqual(kwargs["filters"], {"campus": ["in", ["Indooroopilly"]], "status": ["!=", "Parked"]})
 		self.assertIn(
 			["Inquiry", "status", "in", list(POST_VISIT_INQUIRY_STATUSES)],
 			kwargs["or_filters"],

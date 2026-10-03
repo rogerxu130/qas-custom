@@ -153,6 +153,7 @@ INQUIRY_STATUSES = {
 	"Further Trial Booked",
 	"Converted",
 	"Inactive",
+	"Parked",
 }
 ACTIVE_TERM_STATUSES = ["Upcoming", "Active"]
 ACTIVE_TIMESLOT_STATUSES = ["Active"]
@@ -1192,7 +1193,7 @@ def get_school_admin_inquiries_data(
 	if status:
 		if status not in INQUIRY_STATUSES:
 			frappe.throw(_("Unsupported inquiry status filter."))
-		if queue == "needs_scheduling" and status != "Needs Review":
+		if (queue == "needs_scheduling" and status != "Needs Review") or (queue == "parked" and status != "Parked"):
 			return {
 				"items": [],
 				"total": 0,
@@ -1201,6 +1202,8 @@ def get_school_admin_inquiries_data(
 				"has_more": False,
 			}
 		filters["status"] = status
+	elif queue == "parked":
+		filters["status"] = "Parked"
 	elif queue == "post_visit":
 		filters["status"] = ["in", INQUIRY_POST_VISIT_STATUSES]
 	elif queue == "upcoming":

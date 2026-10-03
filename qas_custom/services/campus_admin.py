@@ -648,19 +648,23 @@ def _campus_admin_link_matches(doctype, fieldnames, pattern, *, limit):
 
 def _campus_admin_inquiry_queue_filters(queue, status=None, reference_date=None):
 	reference_date = getdate(reference_date or today())
+	if queue == "parked":
+		return {"status": "Parked"} if not status or status == "Parked" else {"name": "__qas_no_matching_inquiry__"}, None
+	if queue in {"upcoming", "post_trial"} and status == "Parked":
+		return {"name": "__qas_no_matching_inquiry__"}, None
 	if queue == "upcoming":
 		if status in POST_VISIT_INQUIRY_STATUSES:
 			return {"name": "__qas_no_matching_inquiry__"}, None
 		filters = {"current_appointment_date": [">=", reference_date]}
 		if not status:
-			filters["status"] = ["not in", list(POST_VISIT_INQUIRY_STATUSES)]
+			filters["status"] = ["not in", list(POST_VISIT_INQUIRY_STATUSES) + ["Parked"]]
 		return filters, None
 	if queue == "post_trial":
 		if status:
 			if status in POST_VISIT_INQUIRY_STATUSES:
 				return {}, None
 			return {"current_appointment_date": ["<", reference_date]}, None
-		return {}, [
+		return {"status": ["!=", "Parked"]}, [
 			["Inquiry", "status", "in", list(POST_VISIT_INQUIRY_STATUSES)],
 			["Inquiry", "current_appointment_date", "<", reference_date],
 		]

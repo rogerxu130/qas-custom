@@ -53,7 +53,10 @@
   "converted_trial_inquiry",
   "converted_enrollment",
   "converted_invoice",
-  "inactive_reason"
+  "inactive_reason",
+  "parked_at",
+  "parked_last_activity_at",
+  "parked_previous_status"
  ],
  "fields": [
   {
@@ -125,7 +128,7 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Status",
-   "options": "New\nPlanned\nBooked\nNeeds Review\nRescheduled\nCancelled\nCompleted\nNo-show\nFollow-up\nFurther Trial Booked\nConverted\nInactive",
+   "options": "New\nPlanned\nBooked\nNeeds Review\nRescheduled\nCancelled\nCompleted\nNo-show\nFollow-up\nFurther Trial Booked\nConverted\nInactive\nParked",
    "reqd": 1
   },
   {
@@ -352,6 +355,24 @@
    "fieldname": "requested_start_date",
    "fieldtype": "Data",
    "label": "Requested Enrollment Start Date",
+   "read_only": 1
+  },
+  {
+   "fieldname": "parked_at",
+   "fieldtype": "Datetime",
+   "label": "Parked At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "parked_last_activity_at",
+   "fieldtype": "Datetime",
+   "label": "Last Parked Progress",
+   "read_only": 1
+  },
+  {
+   "fieldname": "parked_previous_status",
+   "fieldtype": "Data",
+   "label": "Status Before Parking",
    "read_only": 1
   }
  ],

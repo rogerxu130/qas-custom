@@ -1,0 +1,35 @@
+{
+ "doctype": "DocType",
+ "name": "QAS Inquiry Settings",
+ "module": "QAS Custom",
+ "engine": "InnoDB",
+ "issingle": 1,
+ "track_changes": 1,
+ "field_order": [
+  "parked_wait_days"
+ ],
+ "fields": [
+  {
+   "fieldname": "parked_wait_days",
+   "fieldtype": "Int",
+   "label": "Parked inactivity days",
+   "default": "30",
+   "reqd": 1,
+   "description": "Global waiting period for all parked inquiries. Changes apply to existing parked inquiries on the next check."
+  }
+ ],
+ "permissions": [
+  {
+   "role": "School Admin",
+   "read": 1,
+   "write": 1,
+   "create": 1
+  },
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1
+  }
+ ]
+}

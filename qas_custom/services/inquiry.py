@@ -560,7 +560,10 @@ def build_inquiry_detail(inquiry: str):
 			reminder = {"status": inquiry_doc.reminder_status}
 		elif reminder.get("status") == "Logged":
 			reminder["status"] = inquiry_doc.reminder_status
+	from qas_custom.services.inquiry_parking import parking_summary
+
 	return {
+		"parking": parking_summary(inquiry_doc),
 		"inquiry": _build_inquiry_payload(inquiry_doc, include_campus_address=True),
 		"notes": _get_note_payloads(inquiry_doc.name),
 		"reminder": reminder,
@@ -1382,6 +1385,10 @@ def sync_inquiry_course_session(inquiry_doc):
 	if inquiry_doc.status == "Cancelled":
 		if not inquiry_doc.is_new():
 			cancel_trial_inquiry_attendance_entries(inquiry_doc.name)
+		return
+
+	# Parking and restoring a status must not reschedule the unchanged trial.
+	if (inquiry_doc.status == "Parked" or (old_doc and old_doc.status == "Parked")) and old_course_session == inquiry_doc.course_session:
 		return
 
 	if old_course_session and old_course_session != inquiry_doc.course_session:

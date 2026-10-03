@@ -4,7 +4,9 @@ from frappe.model.document import Document
 class Inquiry(Document):
 	def validate(self):
 		from qas_custom.services.inquiry import sync_inquiry_course_session
+		from qas_custom.services.inquiry_parking import validate_parking_transition
 
+		validate_parking_transition(self)
 		sync_inquiry_course_session(self)
 
 	def after_insert(self):
