@@ -1,8 +1,11 @@
 import frappe
 from frappe.model.document import Document
-from qas_custom.qas_custom.doctype.payg_validation import require_equal
+from qas_custom.qas_custom.doctype.payg_validation import require_equal, normalize_datetimes_for_storage
 
 class QASPAYGBooking(Document):
+    def before_save(self):
+        normalize_datetimes_for_storage(self, 'cancellable_until', 'cancelled_at')
+
     # An object identity cannot be supplied through DocType JSON or a form post.
     _SERVICE_CREATE_TOKEN = object()
     _SERVICE_MUTATION_TOKEN = object()

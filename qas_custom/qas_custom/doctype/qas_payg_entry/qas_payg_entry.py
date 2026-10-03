@@ -1,9 +1,12 @@
 import frappe
 from frappe.model.document import Document
-from qas_custom.qas_custom.doctype.payg_validation import integer
+from qas_custom.qas_custom.doctype.payg_validation import integer, normalize_datetimes_for_storage
 
 
 class QASPAYGEntry(Document):
+    def before_save(self):
+        normalize_datetimes_for_storage(self, 'occurred_at')
+
     def validate(self):
         if not self.is_new():
             frappe.throw("PAYG entries are append-only")

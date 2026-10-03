@@ -3,7 +3,7 @@ from frappe.model.document import Document
 from qas_custom.modules.payg.money import stored_currency
 from qas_custom.modules.payg.rules import as_brisbane_datetime
 from qas_custom.modules.payg.invoice_links import permitted_invoice_relink
-from qas_custom.qas_custom.doctype.payg_validation import nonnegative, integer
+from qas_custom.qas_custom.doctype.payg_validation import nonnegative, integer, normalize_datetimes_for_storage
 
 
 def _audit_value(field, value):
@@ -15,6 +15,9 @@ def _audit_value(field, value):
 
 
 class QASPAYGOperation(Document):
+    def before_save(self):
+        normalize_datetimes_for_storage(self, 'created_at')
+
     def validate(self):
         if self.is_new():
             if self.status != "Pending":

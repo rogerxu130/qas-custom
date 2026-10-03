@@ -396,6 +396,37 @@ class TestPaygControllers(TestCase):
             with self.assertRaises(ValueError):
                 op.validate()
 
+    def test_payg_datetime_writes_are_brisbane_wall_time_without_offsets(self):
+        from zoneinfo import ZoneInfo
+        cases = (
+            ("operation", "created_at"),
+            ("entry", "occurred_at"),
+            ("booking", "cancellable_until"),
+            ("booking", "cancelled_at"),
+        )
+        expected = datetime(2026, 10, 3, 20, 55, 37, 431446)
+        inputs = (
+            "2026-10-03 20:55:37.431446+10:00",
+            expected.replace(tzinfo=ZoneInfo("Australia/Brisbane")),
+            datetime(2026, 10, 3, 10, 55, 37, 431446, tzinfo=timezone.utc),
+            expected,
+            "2026-10-03 20:55:37.431446",
+        )
+        for kind, field in cases:
+            controller = self.controller(kind)
+            for value in inputs:
+                with self.subTest(kind=kind, field=field, value=value):
+                    doc = self.doc(**{field: value})
+                    controller.before_save(doc)
+                    self.assertEqual(doc.get(field), expected)
+                    self.assertIsNone(doc.get(field).tzinfo)
+                    controller.before_save(doc)
+                    self.assertEqual(doc.get(field), expected)
+            for value in (None, ""):
+                doc = self.doc(**{field: value})
+                controller.before_save(doc)
+                self.assertEqual(doc.get(field), value)
+
     def test_operation_audit_survives_currency_and_datetime_db_reload(self):
         controller = self.controller("operation")
         before = self.doc(operation_type="Exchange", request_key="exchange-1",
