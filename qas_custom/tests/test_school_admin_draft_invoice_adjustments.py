@@ -51,37 +51,61 @@ class _Invoice(frappe._dict):
 
 
 class TestSchoolAdminDraftInvoiceAdjustments(TestCase):
-	def test_payg_draft_delete_has_explicit_business_error_without_detach(self):
-		invoice = _Invoice(name="SINV-PAYG", docstatus=0, customer="CUS-1", parent="PAR-1",
-			qas_invoice_type="PAYG Card", items=[_Child(name="ROW-1", qas_source_doctype="QAS PAYG Operation",
-				qas_source_document="OP-1")])
-		operation = frappe._dict(name="OP-1", invoice=invoice.name, family_parent="PAR-1", customer="CUS-1")
+	def _delete_payg_draft(self, *, fail=False, submitted=False, merged=False):
+		invoice = _Invoice(name="SINV-PAYG", docstatus=1 if submitted else 0, customer="CUS-1", parent="PAR-1",
+			qas_invoice_type="PAYG Card", items=[_Child(name="ROW-1", qas_source_doctype="QAS PAYG Operation", qas_source_document="OP-1")])
+		operations = {"OP-1": frappe._dict(name="OP-1", invoice=invoice.name, family_parent="PAR-1", customer="CUS-1",
+			invoice_request_key="original-key", card="CARD-1", status="Completed", save=Mock(), add_comment=Mock())}
+		if merged:
+			invoice["items"].append(_Child(name="ROW-2", qas_source_doctype="QAS PAYG Operation", qas_source_document="OP-2"))
+			operations["OP-2"] = frappe._dict(name="OP-2", invoice=invoice.name, family_parent="PAR-1", customer="CUS-1",
+				invoice_request_key="second-key", card="CARD-2", status="Completed", save=Mock(), add_comment=Mock())
 		fake_db = SimpleNamespace(savepoint=Mock(), rollback=Mock(), commit=Mock())
-		fake_frappe = SimpleNamespace(db=fake_db, delete_doc=Mock(),
+		fake_frappe = SimpleNamespace(db=fake_db, delete_doc=Mock(side_effect=RuntimeError("delete failed") if fail else None),
 			throw=lambda message, *_args: (_ for _ in ()).throw(ValueError(message)))
 		order = []
 		with patch("qas_custom.services.school_admin.frappe", fake_frappe), patch(
 			"qas_custom.services.school_admin._require_invoice_cancellation_actor"
-		), patch(
-			"qas_custom.services.school_admin.lock_payg_operations_for_invoices",
-			side_effect=lambda _names: (order.append("operation"), {"OP-1": operation})[1]
-		), patch(
-			"qas_custom.services.school_admin.reject_payg_support_view_write"
-		), patch(
+		), patch("qas_custom.services.school_admin.lock_payg_operations_for_invoices",
+			side_effect=lambda _names: (order.append("operation"), operations)[1]
+		), patch("qas_custom.services.school_admin.reject_payg_support_view_write"), patch(
 			"qas_custom.services.school_admin._lock_school_admin_draft_invoice",
 			side_effect=lambda _name: (order.append("invoice"), invoice)[1]
-		), patch(
-			"qas_custom.services.school_admin._detach_invoice_operation_report_links"
-		) as detach, patch(
+		), patch("qas_custom.services.school_admin._detach_invoice_operation_report_links"), patch(
 			"qas_custom.services.school_admin._clear_deleted_invoice_enrollment_snapshot"
-		) as clear:
-			with self.assertRaisesRegex(ValueError, "PAYG.*cannot be deleted"):
-				delete_school_admin_draft_invoice_data("SINV-PAYG")
+		):
+			if submitted or fail:
+				with self.assertRaisesRegex(ValueError if submitted else RuntimeError, "Only draft" if submitted else "delete failed"):
+					delete_school_admin_draft_invoice_data(invoice.name)
+				fake_db.rollback.assert_called_once_with(save_point="school_admin_delete_draft_invoice")
+				fake_db.commit.assert_not_called()
+			else:
+				self.assertEqual(delete_school_admin_draft_invoice_data(invoice.name), {"deleted": invoice.name})
+				fake_frappe.delete_doc.assert_called_once_with("Sales Invoice", invoice.name, ignore_permissions=True)
+				fake_db.commit.assert_called_once()
+				for op in operations.values():
+					self.assertIsNone(op.invoice)
+					self.assertEqual(op.status, "Completed")
+					self.assertTrue(op.card)
+					self.assertTrue(op.invoice_request_key)
+					op.save.assert_called_once_with(ignore_permissions=True)
+					op.add_comment.assert_called_once()
 		self.assertEqual(order, ["operation", "invoice"])
-		detach.assert_not_called()
-		clear.assert_not_called()
-		fake_frappe.delete_doc.assert_not_called()
-		fake_db.commit.assert_not_called()
+		if submitted:
+			operations["OP-1"].save.assert_not_called()
+			fake_frappe.delete_doc.assert_not_called()
+
+	def test_payg_draft_delete_preserves_card_and_invoice_request_key(self):
+		self._delete_payg_draft()
+
+	def test_merged_payg_draft_delete_detaches_all_operations(self):
+		self._delete_payg_draft(merged=True)
+
+	def test_payg_draft_delete_rolls_back_if_delete_fails(self):
+		self._delete_payg_draft(fail=True)
+
+	def test_payg_submitted_invoice_cannot_be_deleted(self):
+		self._delete_payg_draft(submitted=True)
 
 	def test_support_view_cannot_delete_linked_payg_draft(self):
 		from qas_custom.modules.billing import payg_drafts

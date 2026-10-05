@@ -68,6 +68,16 @@ class TestPaygDrafts(TestCase):
             payg_drafts.create_payg_draft("OP-1", "invoice-2")
         self.fake.db.commit.assert_not_called()
 
+    def test_deleted_draft_can_be_recreated_with_original_key_and_same_card(self):
+        self.operation.status = "Completed"
+        self.operation.invoice_request_key = "original-key"
+        with self.assertRaisesRegex(ValueError, "another invoice request key"):
+            payg_drafts.create_payg_draft("OP-1", "new-key")
+        invoice = payg_drafts.create_payg_draft("OP-1", "original-key")
+        self.assertEqual(self.operation.invoice, invoice.name)
+        self.assertEqual(self.operation.invoice_request_key, "original-key")
+        self.assertEqual((self.operation.card, self.operation.status), ("CARD-1", "Completed"))
+
     def test_discounted_purchase_draft_uses_operation_snapshot(self):
         self.operation.new_price = Decimal("65.28")
         self.operation.discount_percent_snapshot = Decimal("4")

@@ -104,7 +104,7 @@ class TestSchoolAdminInvoiceCancellation(TestCase):
 			"reference_name": "ENR-2026-00001",
 			"raw_row_json": "{}",
 		}
-		fake_db = SimpleNamespace(set_value=Mock(), commit=Mock())
+		fake_db = SimpleNamespace(set_value=Mock(), commit=Mock(), savepoint=Mock(), rollback=Mock())
 		fake_frappe = SimpleNamespace(
 			get_doc=Mock(return_value=doc),
 			get_all=Mock(return_value=[report_row]),

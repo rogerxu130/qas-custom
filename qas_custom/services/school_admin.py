@@ -2045,22 +2045,30 @@ def delete_school_admin_draft_invoice_data(invoice=None, allow_campus_admin=Fals
 		frappe.throw(_("Invoice is required."))
 	payg_operations = lock_payg_operations_for_invoices([invoice])
 	reject_payg_support_view_write(payg_operations)
-	if payg_operations:
-		# Match the PAYG Operation → Invoice lock order. A linked draft needs a
-		# new operation or explicit correction chain; deleting it would orphan
-		# the immutable invoice request key and audit line.
-		payg_doc = _lock_school_admin_draft_invoice(invoice)
-		validate_payg_bindings(payg_doc, payg_operations)
-		frappe.throw(_("PAYG invoice draft cannot be deleted. Create a new operation or correction chain."))
-	doc = frappe.get_doc("Sales Invoice", invoice)
-	if cint(doc.docstatus) != 0:
-		frappe.throw(_("Only draft invoices can be deleted. Cancel submitted invoices instead."))
-	_detach_invoice_operation_report_links(doc.name)
-	_clear_deleted_invoice_enrollment_snapshot(doc)
-	deleted = doc.name
-	frappe.delete_doc("Sales Invoice", deleted, ignore_permissions=True)
-	frappe.db.commit()
-	return {"deleted": deleted}
+	savepoint = "school_admin_delete_draft_invoice"
+	frappe.db.savepoint(savepoint)
+	try:
+		# Operations are locked before the invoice, as in issue and consolidation.
+		doc = _lock_school_admin_draft_invoice(invoice) if payg_operations else frappe.get_doc("Sales Invoice", invoice)
+		if cint(doc.docstatus) != 0:
+			frappe.throw(_("Only draft invoices can be deleted. Cancel submitted invoices instead."))
+		if payg_operations:
+			from qas_custom.modules.payg.invoice_links import allow_invoice_relink
+			validate_payg_bindings(doc, payg_operations)
+			for operation in payg_operations.values():
+				operation.invoice = None
+				with allow_invoice_relink(operation.name, doc.name, None):
+					operation.save(ignore_permissions=True)
+				operation.add_comment("Comment", _("Draft invoice {0} was deleted by School Admin. Card and purchase status were retained.").format(doc.name))
+		_detach_invoice_operation_report_links(doc.name)
+		_clear_deleted_invoice_enrollment_snapshot(doc)
+		deleted = doc.name
+		frappe.delete_doc("Sales Invoice", deleted, ignore_permissions=True)
+		frappe.db.commit()
+		return {"deleted": deleted}
+	except Exception:
+		frappe.db.rollback(save_point=savepoint)
+		raise
 
 
 def submit_school_admin_invoice_data(invoice=None, enqueue_notification=False, send_notifications=True, payload=None):

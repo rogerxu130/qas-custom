@@ -32,6 +32,7 @@ def _operation_payload(operation):
     return {"operation": operation.name, "operation_type": operation.operation_type,
             "family_parent": operation.family_parent, "product": operation.product,
             "status": operation.status, "card": operation.card, "invoice": operation.invoice,
+            "invoice_request_key": operation.get("invoice_request_key"),
             "source_card": operation.source_card, "target_card": operation.target_card,
             "transferred_quantity": operation.quantity, "price_delta": operation.price_delta,
             "card_total": float(operation.new_price or 0) * 10 if operation.operation_type == "Purchase" else None,
