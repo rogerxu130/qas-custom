@@ -117,6 +117,8 @@ def _create_payg_draft(operation_id, invoice_request_key):
     operation = frappe.get_doc("QAS PAYG Operation", operation_id, for_update=True)
     if operation.operation_type not in ("Purchase", "Exchange") or operation.status == "Cancelled":
         frappe.throw("Only an active Purchase or Exchange operation can be invoiced")
+    if operation.operation_type == "Purchase" and not operation.card:
+        frappe.throw("Issue the PAYG card before creating its invoice")
     if operation.invoice:
         if operation.invoice_request_key != invoice_request_key:
             frappe.throw("PAYG operation already has an invoice with another key")
@@ -206,6 +208,95 @@ def exchange_card_with_draft(card_id, target_product_id, request_key, invoice_re
         result = create_payg_draft(operation.name, invoice_request_key)
         return {"operation": operation, "invoice": result if not isinstance(result, dict) else None,
                 "reason": result.get("reason") if isinstance(result, dict) else None}
+    except Exception:
+        frappe.db.rollback(save_point=savepoint)
+        raise
+
+
+def issue_purchase_with_draft(operation_id, request_key):
+    """Issue and invoice atomically, including safe retries of legacy purchases."""
+    _admin()
+    from qas_custom.modules.payg.issue import issue_card
+    savepoint = "payg_issue_invoice_" + uuid4().hex
+    frappe.db.savepoint(savepoint)
+    try:
+        operation = frappe.get_doc("QAS PAYG Operation", operation_id, for_update=True)
+        if operation.invoice and int(_linked_invoice(operation).docstatus) == 2:
+            frappe.throw("The purchase invoice is cancelled. Create a new purchase instead")
+        issue_card(operation_id, request_key)
+        create_payg_draft(operation_id, operation.invoice_request_key or f"issue-invoice:{operation_id}")
+        operation = frappe.get_doc("QAS PAYG Operation", operation_id, for_update=True)
+        operation.status = "Completed"
+        operation.save(ignore_permissions=True)
+        return operation
+    except Exception:
+        frappe.db.rollback(save_point=savepoint)
+        raise
+
+
+def cancel_purchase(operation_id, family_parent, reason, *, cancel_invoice=False):
+    """Cancel the purchase and unused card, optionally its exclusive invoice."""
+    _admin()
+    from frappe.utils import escape_html, get_datetime_in_timezone
+    from qas_custom.services.school_admin import cancel_school_admin_invoice_data
+    reason = str(reason or "").strip()
+    if not operation_id or not family_parent or not reason:
+        frappe.throw("Purchase, family and cancellation reason are required")
+    savepoint = "payg_cancel_purchase_" + uuid4().hex
+    frappe.db.savepoint(savepoint)
+    try:
+        operation = frappe.get_doc("QAS PAYG Operation", operation_id, for_update=True)
+        if operation.operation_type != "Purchase" or operation.family_parent != family_parent:
+            frappe.throw("Purchase does not belong to this family")
+        if operation.status == "Cancelled":
+            return {"operation": operation, "invoice": operation.invoice, "invoice_action": "unchanged"}
+        if operation.status not in ("Pending", "Completed") or operation.target_card:
+            frappe.throw("This purchase cannot be cancelled")
+        frappe.db.sql("SELECT name FROM `tabParent` WHERE name=%s FOR UPDATE", (family_parent,))
+        card = frappe.get_doc("QAS PAYG Card", operation.card, for_update=True) if operation.card else None
+        if card:
+            if (card.family_parent != family_parent or card.customer != operation.customer or
+                    card.status not in ("Active", "Paused") or int(card.available_count or 0) != 10 or
+                    int(card.reserved_count or 0) != 0 or int(card.consumed_count or 0) != 0):
+                frappe.throw("Only a completely unused, unbooked card can be cancelled here")
+            if frappe.db.exists("QAS PAYG Booking", {"card": card.name, "status": ["!=", "Cancelled"]}) or frappe.db.exists(
+                    "QAS PAYG Entry", {"card": card.name, "kind": ["in", ["Consume", "Transfer Out", "Transfer In"]]}):
+                frappe.throw("Used, booked or transferred cards need separate balance and invoice review")
+        invoice_name = operation.invoice
+        action, credit = "unchanged", 0
+        invoice = _linked_invoice(operation) if invoice_name and cancel_invoice else None
+        if invoice and (len(invoice.get("items") or []) != 1 or
+                        set(payg_sources(invoice).values()) != {operation.name} or invoice.get("is_return")):
+            frappe.throw("This invoice includes other charges. Uncheck invoice cancellation and handle it separately")
+        if card:
+            frappe.get_doc({"doctype": "QAS PAYG Entry", "card": card.name, "operation": operation.name,
+                            "kind": "Correction", "available_delta": -10, "reserved_delta": 0, "consumed_delta": 0,
+                            "operation_key": f"cancel-purchase:{operation.name}", "actor": frappe.session.user,
+                            "occurred_at": get_datetime_in_timezone("Australia/Brisbane"), "reason": reason}).insert(ignore_permissions=True)
+            card.reload()
+            card.status = "Cancelled"
+            card.save(ignore_permissions=True)
+        if invoice:
+            if int(invoice.docstatus) == 0:
+                # Detach only this reviewed, exclusive draft before ordinary link checks.
+                operation.invoice = None
+                with allow_invoice_relink(operation.name, invoice_name, None):
+                    operation.save(ignore_permissions=True)
+                run_invoice_mutation_as_administrator(lambda: frappe.delete_doc("Sales Invoice", invoice_name, ignore_permissions=True))
+                action = "deleted"
+            elif int(invoice.docstatus) == 1:
+                result = cancel_school_admin_invoice_data(invoice=invoice_name, reason=reason, commit=False)
+                credit = result.get("cancellation_store_credit_amount", 0)
+                action = "cancelled"
+            elif int(invoice.docstatus) == 2:
+                action = "already_cancelled"
+            else:
+                frappe.throw("Invoice status does not allow cancellation")
+        operation.status = "Cancelled"
+        operation.save(ignore_permissions=True)
+        note = f"Purchase cancelled: {escape_html(reason)}. Invoice {escape_html(invoice_name or 'none')}: {action}."
+        operation.add_comment("Comment", note)
+        return {"operation": operation, "invoice": invoice_name, "invoice_action": action, "store_credit_amount": credit}
     except Exception:
         frappe.db.rollback(save_point=savepoint)
         raise

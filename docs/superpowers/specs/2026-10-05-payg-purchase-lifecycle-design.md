@@ -1,0 +1,11 @@
+# PAYG purchase lifecycle and family purchase list
+
+Approved user behavior (2026-10-05): preparing a purchase creates only a pending purchase operation, with no card or invoice. Issue creates the card and invoice draft in one transaction. Pending purchases can be cancelled. Cancelling issued purchases asks whether to cancel the invoice too, checked by default. Replace manual Operation ID input with this family’s purchase history; records can be reopened by clicking. Existing pre-Issue drafts remain visible as legacy records rather than being deleted during rollout.
+
+Cancellation supports completely unused cards with all ten available sessions, no active bookings, and no usage or transfer history. Other cards require separate balance/booking review. A Correction entry removes ten available sessions and the card becomes Cancelled, permanently unbookable. Purchase, original card and cancellation comments retain the audit trail. Cancelled purchases cannot Issue or create a new invoice.
+
+Invoice choice: unchecking leaves the invoice unchanged. Checking deletes an exclusive draft after a narrowly authorized operation unlink, or uses the existing submitted-invoice cancellation and Store Credit rules. Other charges/consolidated invoices are rejected for automatic cancellation and can be handled separately. Invoice cancellation leaves transaction commit to the purchase command; failures roll back card, ledger and purchase changes. Notifications enqueue after commit. Legacy pending purchases with an invoice default to retaining it; issued purchases default to cancelling it.
+
+Validation: backend lifecycle, schema, issue, draft, API, booking, cancellation, card-admin, read models and invoice-cancellation tests (140 total); Python compile; frontend production build; mocked-API Playwright checks at 1440px and 390px for no invoice before Issue, list reopening, Issue failure/retry, pending cancellation, issued cancellation with invoice option checked, cancellation failure/retry and overflow. No production financial records were changed.
+
+Deployment: backend first, then frontend. Update QAS Custom in Frappe Cloud and migrate to sync the Card status option Cancelled. Frontend deploys through Netlify. Work is committed locally; publication requires the user’s publish request.

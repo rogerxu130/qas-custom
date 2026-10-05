@@ -68,7 +68,7 @@ class TestPaygPortalAPI(TestCase):
         products = [{"name": "PROD-1"}]
         rows = {"Student": [frappe._dict(name="S-1")],
                 "QAS PAYG Card": [frappe._dict(name="CARD-1")],
-                "QAS PAYG Booking": [frappe._dict(name="B-1")]}
+                "QAS PAYG Booking": [frappe._dict(name="B-1")], "QAS PAYG Operation": []}
         def get_all(doctype, **_kwargs):
             return rows[doctype]
         with patch.object(school_admin_payg, "get_support_view_token", return_value=""), \
@@ -83,7 +83,7 @@ class TestPaygPortalAPI(TestCase):
             result = school_admin_payg.payg_admin_context("P-1")
         self.assertEqual((result["students"][0].name, result["cards"][0]["name"], result["bookings"][0]["name"]),
                          ("S-1", "CARD-1", "B-1"))
-        self.assertTrue(all(call.kwargs["filters"] in ({"guardian": "P-1"}, {"family_parent": "P-1"})
+        self.assertTrue(all(call.kwargs["filters"] in ({"guardian": "P-1"}, {"family_parent": "P-1"}, {"family_parent": "P-1", "operation_type": "Purchase"})
                             for call in query.call_args_list))
         with patch.object(school_admin_payg, "get_support_view_token", return_value="token"), \
              patch.object(school_admin_payg, "get_support_view_parent", return_value=frappe._dict(name="P-1")), \

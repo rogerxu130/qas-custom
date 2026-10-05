@@ -51,7 +51,7 @@ class TestPaygSchema(TestCase):
                       "available_count", "reserved_count", "consumed_count"):
             self.assertIn(field, card)
         self.assertEqual(card["status"]["options"].split("\n"),
-                         ["Active", "Paused", "Transferred"])
+                         ["Active", "Paused", "Transferred", "Cancelled"])
 
     def test_entry_booking_operation_history_and_keys(self):
         entry = fields("QAS PAYG Entry")
@@ -339,6 +339,32 @@ class TestPaygControllers(TestCase):
             controller.validate(booking)
         self.frappe.db.exists.assert_called_once_with(
             "QAS PAYG Entry", {"booking": booking.name, "kind": "Return"})
+
+    def test_cancelled_purchase_requires_its_issued_card_to_be_cancelled(self):
+        controller = self.controller("operation")
+        op = self.doc(status="Cancelled", card="CARD", customer="CUS", product="PROD",
+                      new_price=40, new_course="COURSE")
+        linked = self.doc(status="Active", product="PROD", course="COURSE")
+        self.frappe.db.get_value.return_value = "COURSE"
+        with self.assertRaises(ValueError):
+            controller._validate_purchase(op, {"card": linked}, "CUS")
+        linked.status = "Cancelled"
+        controller._validate_purchase(op, {"card": linked}, "CUS")
+
+    def test_cancelled_card_cannot_retain_sessions_or_be_reactivated(self):
+        controller = self.controller("card")
+        card = self.doc(status="Cancelled", available_count=10, reserved_count=0, consumed_count=0)
+        with self.assertRaises(ValueError):
+            controller.validate(card)
+        card.available_count = 0
+        card.status = "Active"
+        card.family_parent, card.customer, card.product, card.course = "P", "CUS", "PROD", "COURSE"
+        before = self.doc(**{**card.__dict__, "status": "Cancelled"})
+        card.is_new = lambda: False
+        card.get_doc_before_save = lambda: before
+        self.frappe.db.get_value.side_effect = ["CUS", "COURSE"]
+        with self.assertRaises(ValueError):
+            controller.validate(card)
 
     def test_operation_action_key_cannot_be_replaced(self):
         controller = self.controller("operation")

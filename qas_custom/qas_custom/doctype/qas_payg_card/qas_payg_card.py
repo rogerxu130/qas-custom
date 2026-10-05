@@ -11,6 +11,8 @@ class QASPAYGCard(Document):
             frappe.throw("Card expiry cannot precede issue date")
         require_equal(self, "customer", frappe.db.get_value("Parent", self.family_parent, "customer"))
         require_equal(self, "course", frappe.db.get_value("QAS PAYG Product", self.product, "course"))
+        if self.status == "Cancelled" and any(balances):
+            frappe.throw("Cancelled card must have no remaining sessions")
         if self.is_new() and any(balances):
             frappe.throw("New PAYG cards must start with empty balances")
         if self.is_new() and self.status != "Active":
@@ -24,9 +26,10 @@ class QASPAYGCard(Document):
                 if str(self.get(field) or "") != str(before.get(field) or ""):
                     frappe.throw(f"PAYG card {field} cannot change")
             transitions = {
-                "Active": {"Active", "Paused", "Transferred"},
-                "Paused": {"Paused", "Active", "Transferred"},
+                "Active": {"Active", "Paused", "Transferred", "Cancelled"},
+                "Paused": {"Paused", "Active", "Transferred", "Cancelled"},
                 "Transferred": {"Transferred"},
+                "Cancelled": {"Cancelled"},
             }
             if self.status not in transitions.get(before.status, set()):
                 frappe.throw("PAYG card status transition is invalid")

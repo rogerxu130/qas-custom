@@ -37,7 +37,7 @@ class QASPAYGOperation(Document):
             if self.get(field):
                 linked = frappe.db.get_value(
                     "QAS PAYG Card", self.get(field),
-                    ("family_parent", "customer", "product", "course"), as_dict=True)
+                    ("family_parent", "customer", "product", "course", "status"), as_dict=True)
                 if not linked or linked.family_parent != self.family_parent or linked.customer != family_customer:
                     frappe.throw(f"{field} does not match operation family/customer")
                 cards[field] = linked
@@ -69,11 +69,13 @@ class QASPAYGOperation(Document):
                     continue
                 frappe.throw(f"PAYG operation {field} can only be set once")
         transitions = {"Pending": {"Pending", "Completed", "Cancelled"},
-                       "Completed": {"Completed"}, "Cancelled": {"Cancelled"}}
+                       "Completed": {"Completed", "Cancelled"} if self.operation_type == "Purchase" else {"Completed"}, "Cancelled": {"Cancelled"}}
         if self.status not in transitions.get(before.status, set()):
             frappe.throw("PAYG operation status transition is invalid")
 
     def _validate_purchase(self, cards, family_customer):
+        if self.status == "Cancelled" and any(linked.status != "Cancelled" for linked in cards.values()):
+            frappe.throw("Cancel the issued card before cancelling its purchase")
         if not self.customer or not family_customer or not self.product:
             frappe.throw("Purchase requires family customer and product")
         if self.source_card:

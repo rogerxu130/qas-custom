@@ -2201,6 +2201,7 @@ def cancel_school_admin_invoice_data(
 	send_notifications=True,
 	payment_plan_store_credit_disposition="keep",
 	allow_campus_admin=False,
+	commit=True,
 ):
 	_require_invoice_cancellation_actor(allow_campus_admin=allow_campus_admin)
 	if not invoice:
@@ -2216,7 +2217,8 @@ def cancel_school_admin_invoice_data(
 	doc = frappe.get_doc("Sales Invoice", invoice)
 	if cint(doc.docstatus) == 2:
 		_clear_deleted_invoice_enrollment_snapshot(doc, action="cancelled")
-		frappe.db.commit()
+		if commit:
+			frappe.db.commit()
 		payload = _build_invoice_payload(doc)
 		payload["cancellation_notification"] = _skipped_invoice_notification("Invoice was already cancelled; no duplicate notification was sent.")
 		return payload
@@ -2251,7 +2253,8 @@ def cancel_school_admin_invoice_data(
 		if reason:
 			comment = _("{0} Reason: {1}").format(comment, reason)
 		_add_comment("Sales Invoice", doc.name, comment)
-		frappe.db.commit()
+		if commit:
+			frappe.db.commit()
 		doc = frappe.get_doc("Sales Invoice", invoice)
 		if send_notifications:
 			try:
@@ -2264,7 +2267,8 @@ def cancel_school_admin_invoice_data(
 		else:
 			_add_comment("Sales Invoice", doc.name, "Parent cancellation notification skipped by School Admin.")
 			notification = _skipped_invoice_notification("Parent cancellation notification was skipped by School Admin.")
-		frappe.db.commit()
+		if commit:
+			frappe.db.commit()
 		payload = _build_invoice_payload(frappe.get_doc("Sales Invoice", invoice))
 		cancellation_credit_amount = flt(paid_credit_amount) + flt(applied_store_credit_amount)
 		payload["cancellation_store_credit_amount"] = cancellation_credit_amount

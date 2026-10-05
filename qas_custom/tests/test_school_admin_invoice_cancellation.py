@@ -1,6 +1,9 @@
 from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import Mock, patch
+from contextlib import ExitStack
+import frappe
+from qas_custom.services import school_admin
 
 from qas_custom.services.school_admin import (
 	bulk_school_admin_invoice_action_data,
@@ -129,3 +132,32 @@ class TestSchoolAdminInvoiceCancellation(TestCase):
 		fake_frappe.delete_doc.assert_called_once_with("Sales Invoice", doc.name, ignore_permissions=True)
 		fake_db.commit.assert_called_once()
 		self.assertEqual(result, {"deleted": doc.name})
+
+
+class TestInvoiceCancellationTransactionOwnership(TestCase):
+    def test_submitted_invoice_can_leave_commit_to_purchase_command(self):
+        doc = frappe._dict(name="INV", docstatus=1)
+        fake = SimpleNamespace(get_doc=Mock(return_value=doc), db=SimpleNamespace(commit=Mock()))
+        helpers = {
+            "_require_invoice_cancellation_actor": None,
+            "payment_mutations_enabled": True,
+            "_invoice_payment_amount": 120,
+            "get_invoice_store_credit_applied": 0,
+            "_cancel_invoice_payment_entries": None,
+            "cancel_store_credit_journal_entries": None,
+            "_reverse_invoice_store_credit_application": None,
+            "_create_invoice_cancellation_store_credit": frappe._dict(name="CREDIT"),
+            "_cancel_submitted_invoice_as_admin": None,
+            "_clear_deleted_invoice_enrollment_snapshot": None,
+            "_add_comment": None,
+            "enqueue_parent_invoice_cancellation_notification": {"queued": True},
+            "_build_invoice_payload": {},
+        }
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(school_admin, "frappe", fake))
+            stack.enter_context(patch.object(school_admin, "_", side_effect=lambda value: value))
+            for name, value in helpers.items():
+                stack.enter_context(patch.object(school_admin, name, return_value=value))
+            result = cancel_school_admin_invoice_data(invoice="INV", reason="Purchase cancelled", commit=False)
+        self.assertEqual(result["cancellation_store_credit_amount"], 120)
+        fake.db.commit.assert_not_called()

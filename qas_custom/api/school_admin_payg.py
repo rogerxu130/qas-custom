@@ -59,7 +59,11 @@ def payg_admin_context(family_parent=None):
                               fields=["name", "student", "card", "course_session", "attendance_entry",
                                       "status", "cancellable_until", "cancelled_at", "card_expires_on_snapshot"],
                               order_by="creation desc", limit_page_length=0)
-    return {"family_parent": family_parent, "products": products, "pricing": pricing_config, "students": students,
+    operations = frappe.get_all("QAS PAYG Operation", filters={"family_parent": family_parent, "operation_type": "Purchase"},
+                                fields=["name", "operation_type", "family_parent", "product", "status", "card", "invoice",
+                                        "source_card", "target_card", "quantity", "price_delta", "new_price", "discount_percent_snapshot"],
+                                order_by="creation desc", limit_page_length=0)
+    return {"operations": [_operation_payload(row) for row in operations], "family_parent": family_parent, "products": products, "pricing": pricing_config, "students": students,
             "cards": payg_read_models.enrich_cards(cards),
             "bookings": payg_read_models.enrich_booking_history(bookings, cards=cards)}
 
@@ -90,10 +94,9 @@ def payg_get_operation(operation_id=None):
 @frappe.whitelist()
 def payg_issue_card(operation_id=None, request_key=None):
     _admin()
-    card = issue.issue_card(operation_id, _required_key(request_key))
-    return {"card": card.name, "operation": operation_id, "status": card.status,
-            "available_count": card.available_count, "reserved_count": card.reserved_count,
-            "consumed_count": card.consumed_count}
+    result = payg_drafts.issue_purchase_with_draft(operation_id, _required_key(request_key))
+    return _operation_payload(result)
+
 
 
 @frappe.whitelist()
@@ -130,3 +133,12 @@ def payg_admin_cancel_booking(booking_id=None, reason=None, request_key=None):
     _admin()
     result = cancellation.cancel_by_admin(booking_id, reason=reason, request_key=_required_key(request_key))
     return {"booking": result.name, "status": result.status, "card": result.card}
+
+
+@frappe.whitelist(methods=["POST"])
+def payg_cancel_purchase_operation(operation_id=None, family_parent=None, reason=None, cancel_invoice=0):
+    _admin()
+    from frappe.utils import cint
+    result = payg_drafts.cancel_purchase(operation_id, family_parent, reason, cancel_invoice=bool(cint(cancel_invoice)))
+    return {**_operation_payload(result["operation"]), "invoice_action": result["invoice_action"],
+            "cancelled_invoice": result["invoice"], "store_credit_amount": result.get("store_credit_amount", 0)}

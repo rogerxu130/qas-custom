@@ -144,6 +144,8 @@ def _change_expiry(card_id, expiry, reason, request_key):
     card, bookings, existing = _lock_context(card_id, "ExpiryChange", request_key)
     if existing:
         return _same_expiry(existing, card_id, expiry, reason)
+    if card.status == "Cancelled":
+        frappe.throw("Cancelled cards cannot be renewed")
     if expiry < getdate(card.issued_on):
         frappe.throw("PAYG card expiry cannot precede issue date")
     starts = _booking_starts(bookings)

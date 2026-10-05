@@ -27,7 +27,7 @@ class TestPaygDrafts(TestCase):
     def setUp(self):
         self.operation = Doc(name="OP-1", operation_type="Purchase", status="Pending",
                              family_parent="P-1", customer="C-1", product="PROD-1",
-                             invoice=None, invoice_request_key=None, card=None,
+                             invoice=None, invoice_request_key=None, card="CARD-1",
                              new_price=Decimal("40"), new_course="COURSE-1")
         self.product = Doc(name="PROD-1", course="COURSE-1", enabled=1,
                            standard_card_price=Decimal("400"), invoice_item="ITEM-1")
@@ -55,14 +55,14 @@ class TestPaygDrafts(TestCase):
         for p in self.patches:
             p.start(); self.addCleanup(p.stop)
 
-    def test_purchase_source_and_idempotency_without_card(self):
+    def test_issued_purchase_source_and_idempotency(self):
         invoice = payg_drafts.create_payg_draft("OP-1", "invoice-1")
         self.assertEqual((invoice.qas_invoice_type, invoice.get("items")[0].qas_line_type), ("PAYG Card", "PAYG Card"))
         self.assertEqual((invoice.get("items")[0].qas_source_doctype, invoice.get("items")[0].qas_source_document),
                          ("QAS PAYG Operation", "OP-1"))
         self.assertEqual((invoice.get("items")[0].qty, invoice.get("items")[0].rate), (1, Decimal("400")))
         self.assertEqual((self.operation.invoice, self.operation.invoice_request_key), ("SINV-NEW", "invoice-1"))
-        self.assertIsNone(self.operation.card)
+        self.assertEqual(self.operation.card, "CARD-1")
         self.assertIs(payg_drafts.create_payg_draft("OP-1", "invoice-1"), invoice)
         with self.assertRaisesRegex(ValueError, "another key"):
             payg_drafts.create_payg_draft("OP-1", "invoice-2")
@@ -254,9 +254,12 @@ class TestPaygCrossModuleOrders(TestCase):
                     patch.object(payg_drafts, "apply_invoice_payment_snapshot"), \
                     patch.object(payg_drafts, "run_invoice_mutation_as_administrator", side_effect=lambda f: f()):
                 if invoice_first:
-                    created = payg_drafts.create_payg_draft("OP-1", "invoice-1")
+                    with self.assertRaisesRegex(ValueError, "Issue the PAYG card"):
+                        payg_drafts.create_payg_draft("OP-1", "invoice-1")
+                    self.assertIsNone(case.operation.invoice)
                     case.product.standard_card_price = Decimal("900")
                     card = issue_card("OP-1", "issue-1")
+                    created = payg_drafts.create_payg_draft("OP-1", "invoice-1")
                 else:
                     card = issue_card("OP-1", "issue-1")
                     case.product.standard_card_price = Decimal("900")
@@ -272,7 +275,7 @@ class TestPaygCrossModuleOrders(TestCase):
         finally:
             case.doCleanups()
 
-    def test_invoice_then_issue_uses_same_operation(self):
+    def test_unissued_invoice_is_rejected_then_issue_can_continue(self):
         self._run_order(True)
 
     def test_issue_then_invoice_uses_same_operation(self):

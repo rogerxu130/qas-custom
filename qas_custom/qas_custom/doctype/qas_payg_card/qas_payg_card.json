@@ -87,7 +87,7 @@
    "fieldname": "status",
    "fieldtype": "Select",
    "label": "Status",
-   "options": "Active\nPaused\nTransferred",
+   "options": "Active\nPaused\nTransferred\nCancelled",
    "default": "Active",
    "reqd": 1
   }
