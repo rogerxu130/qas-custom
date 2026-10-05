@@ -4493,10 +4493,6 @@ def create_school_admin_course_session_attendance_data(course_session=None, payl
 		frappe.throw(_("Student is required."))
 	if not frappe.db.exists("Student", student):
 		frappe.throw(_("Student was not found."))
-	if _has_field("Student", "status"):
-		student_status = frappe.db.get_value("Student", student, "status")
-		if student_status and student_status != "Active":
-			frappe.throw(_("Only active students can be added to a course session."))
 	if not frappe.db.exists("Course Sessions", course_session):
 		frappe.throw(_("Course session was not found."))
 	session = frappe.get_doc("Course Sessions", course_session)
@@ -4520,6 +4516,8 @@ def create_school_admin_course_session_attendance_data(course_session=None, payl
 		attendance_entry,
 		_("Manually added to course session {0} by School Admin.").format(course_session),
 	)
+	if status != "Cancelled" and _has_field("Student", "status"):
+		frappe.db.set_value("Student", student, "status", "Active")
 	frappe.db.commit()
 	return {
 		"attendance_entry": attendance_entry,

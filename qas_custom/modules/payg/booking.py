@@ -103,7 +103,6 @@ def _age_reason(student, course, session_date):
 
 def _basic_reasons(student, session, slot, term, course, now):
     reasons = []
-    if student.status != "Active": reasons.append("student_inactive")
     if course.status != "Active": reasons.append("course_inactive")
     if session.status != "Scheduled": reasons.append("session_not_scheduled")
     if slot.status != "Active" or term.status not in ("Upcoming", "Active"):
@@ -264,6 +263,12 @@ def _same_booking(booking, family, student, session):
     return booking
 
 
+def _activate_booking_student(pupil, booking):
+    if booking.status != "Cancelled" and pupil.status != "Active":
+        frappe.db.set_value("Student", pupil.name, "status", "Active")
+    return booking
+
+
 def confirm_booking(student, session, preview_card, request_key, *, confirmed_rules=False, parent=None):
     if confirmed_rules is not True:
         frappe.throw("Please confirm the PAYG booking rules before reserving")
@@ -277,7 +282,7 @@ def confirm_booking(student, session, preview_card, request_key, *, confirmed_ru
         pupil = _student(student, family.name, lock=True)
         existing = _booking_by_request_key(request_key)
         if existing:
-            return _same_booking(existing, family.name, student, session)
+            return _activate_booking_student(pupil, _same_booking(existing, family.name, student, session))
         # Serialize candidate-card discovery with issue actions for this family.
         frappe.db.sql("SELECT name FROM `tabParent` WHERE name=%s FOR UPDATE", (family.name,))
         # Resolve identifiers without locking Session, then lock all family cards by stable name.
@@ -344,14 +349,14 @@ def confirm_booking(student, session, preview_card, request_key, *, confirmed_ru
         finally:
             booking.flags.payg_mutation_token = None
             booking.flags.ignore_links = False
-        return booking
+        return _activate_booking_student(pupil, booking)
     except (frappe.DuplicateEntryError, frappe.UniqueValidationError):
         frappe.db.rollback(save_point=savepoint)
         if booking_insert_conflict:
-            _student(student, family.name, lock=True)
+            pupil = _student(student, family.name, lock=True)
             existing = _booking_by_request_key(request_key, after_duplicate=True)
             if existing:
-                return _same_booking(existing, family.name, student, session)
+                return _activate_booking_student(pupil, _same_booking(existing, family.name, student, session))
         raise
     except Exception:
         frappe.db.rollback(save_point=savepoint)

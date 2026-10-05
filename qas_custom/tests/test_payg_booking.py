@@ -214,6 +214,21 @@ class TestBooking(TestCase):
         self.assertFalse(saved.flags.ignore_links)
         self.assertIsNone(saved.flags.payg_mutation_token)
 
+    def test_inactive_student_can_preview_and_book_and_is_activated_on_success(self):
+        self.student.status = "Inactive"
+        preview = booking.preview_booking("S-1", "CS-1")
+        self.assertTrue(preview["bookable"])
+        result = booking.confirm_booking("S-1", "CS-1", "A", "inactive-success", confirmed_rules=True)
+        self.assertEqual(result.status, "Reserved")
+        self.db.set_value.assert_called_once_with("Student", "S-1", "status", "Active")
+
+    def test_failed_booking_does_not_activate_student(self):
+        self.student.status = "Inactive"
+        self.card.status = "Cancelled"
+        with self.assertRaises(Exception):
+            booking.confirm_booking("S-1", "CS-1", "A", "inactive-failure", confirmed_rules=True)
+        self.db.set_value.assert_not_called()
+
     def test_rules_must_be_explicitly_confirmed(self):
         with self.assertRaisesRegex(ValueError, "confirm.*rules"):
             booking.confirm_booking("S-1", "CS-1", "A", "req-1")

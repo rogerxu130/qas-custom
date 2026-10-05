@@ -142,9 +142,25 @@ def _get_students_with_active_business():
 	))
 	students.update(_pluck_students("Inquiry", {"status": ["in", ACTIVE_INQUIRY_STATUSES]}))
 	students.update(_pluck_students("Adhoc Booking", {"status": ["in", ACTIVE_ADHOC_BOOKING_STATUSES]}))
+	students.update(_get_students_with_active_payg_cards())
 	students.update(_get_students_with_future_attendance())
 	students.update(_get_students_with_open_course_invoices())
 	return {student for student in students if student}
+
+
+def _get_students_with_active_payg_cards():
+	"""Keep actual pass users active without activating every sibling in a family."""
+	if not _doctype_available("QAS PAYG Card") or not _doctype_available("QAS PAYG Booking"):
+		return set()
+	return set(frappe.db.sql("""
+		SELECT DISTINCT b.student
+		FROM `tabQAS PAYG Booking` b
+		JOIN `tabQAS PAYG Card` c ON c.name=b.card AND c.family_parent=b.family_parent
+		JOIN `tabStudent` s ON s.name=b.student AND s.guardian=c.family_parent
+		WHERE b.status!='Cancelled' AND c.status='Active'
+		  AND c.issued_on<=%s AND c.expires_on>=%s
+		  AND (c.available_count>0 OR c.reserved_count>0)
+	""", (today(), today()), pluck=True))
 
 
 def _get_students_with_future_attendance():
