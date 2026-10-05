@@ -104,6 +104,34 @@ class TestPaygDrafts(TestCase):
         self.assertIs(payg_drafts.create_payg_draft("OP-1", "invoice-1"), self.invoice)
         self.fake.get_doc.assert_any_call("Sales Invoice", "SINV-NEW", for_update=True)
 
+    def test_legacy_invoice_without_parent_uses_unique_customer_family(self):
+        payg_drafts.create_payg_draft("OP-1", "invoice-1")
+        self.invoice.parent = None
+        self.invoice.get("items")[0].name = "ROW-1"
+        self.fake.get_all.return_value = ["P-1"]
+        self.assertIs(payg_drafts.create_payg_draft("OP-1", "invoice-1"), self.invoice)
+        self.assertEqual(payg_drafts.validate_payg_bindings(self.invoice, {"OP-1": self.operation}),
+                         {self.invoice.get("items")[0].name: "OP-1"})
+
+    def test_legacy_invoice_without_parent_rejects_shared_or_other_customer_family(self):
+        payg_drafts.create_payg_draft("OP-1", "invoice-1")
+        self.invoice.parent = None
+        for parents in ([], ["P-OTHER"], ["P-1", "P-OTHER"]):
+            with self.subTest(parents=parents):
+                self.fake.get_all.return_value = parents
+                with self.assertRaisesRegex(ValueError, "uniquely"):
+                    payg_drafts.create_payg_draft("OP-1", "invoice-1")
+
+    def test_explicit_invoice_customer_and_family_mismatch_still_rejected(self):
+        payg_drafts.create_payg_draft("OP-1", "invoice-1")
+        self.invoice.customer = "C-OTHER"
+        with self.assertRaisesRegex(ValueError, "customer does not match"):
+            payg_drafts.create_payg_draft("OP-1", "invoice-1")
+        self.invoice.customer = "C-1"
+        self.invoice.parent = "P-OTHER"
+        with self.assertRaisesRegex(ValueError, "family does not match"):
+            payg_drafts.create_payg_draft("OP-1", "invoice-1")
+
     def test_exchange_positive_uses_delta_and_negative_has_no_invoice(self):
         self.operation.operation_type = "Exchange"
         self.operation.status = "Completed"

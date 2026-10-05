@@ -149,6 +149,29 @@ class TestPurchaseLifecycle(TestCase):
             self.assertEqual(drafting.call_args.args, ("OP", "issue-invoice:OP"))
         self.fake.db.commit.assert_not_called()
 
+    def test_legacy_pending_issue_with_blank_invoice_family(self):
+        self.op.invoice = "INV"
+        self.op.invoice_request_key = "legacy-key"
+        self.invoice.parent = None
+        def issue_card(op_id, key):
+            self.op.card = "CARD"
+            return self.card
+        with patch.object(self.fake, "get_all", create=True, return_value=["P"]), \
+                patch.object(issue, "issue_card", side_effect=issue_card), \
+                patch.object(payg_drafts, "create_payg_draft", return_value=self.invoice) as draft:
+            result = payg_drafts.issue_purchase_with_draft("OP", "key")
+        self.assertEqual((result.status, result.card, result.invoice), ("Completed", "CARD", "INV"))
+        draft.assert_called_once_with("OP", "legacy-key")
+
+    def test_legacy_pending_cancel_with_blank_invoice_family(self):
+        self.op.invoice = "INV"
+        self.invoice.parent = None
+        with patch.object(self.fake, "get_all", create=True, return_value=["P"]):
+            result = payg_drafts.cancel_purchase("OP", "P", "Not proceeding", cancel_invoice=True)
+        self.assertEqual((result["operation"].status, result["invoice_action"]), ("Cancelled", "deleted"))
+        self.fake.delete_doc.assert_called_once_with("Sales Invoice", "INV", ignore_permissions=True)
+        self.assertEqual(self.entries, [])
+
     def test_issue_rolls_back_when_invoice_creation_fails(self):
         def issue_card(op_id, key):
             self.op.card = "CARD"

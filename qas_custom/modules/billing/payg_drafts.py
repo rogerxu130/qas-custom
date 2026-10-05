@@ -26,10 +26,25 @@ def reject_payg_support_view_write(locked_operations):
         frappe.throw("Support View cannot change PAYG invoices", frappe.PermissionError)
 
 
+def _validate_invoice_family(invoice, operation):
+    """Legacy invoices may omit Parent; require an unambiguous Customer owner."""
+    if not operation.customer or invoice.customer != operation.customer:
+        frappe.throw("PAYG invoice customer does not match operation")
+    parent = invoice.get("parent")
+    if parent:
+        if parent != operation.family_parent:
+            frappe.throw("PAYG invoice family does not match operation")
+        return
+    # Never guess from the first Parent row when a Customer is shared.
+    parents = frappe.get_all("Parent", filters={"customer": operation.customer},
+                             pluck="name", limit_page_length=2)
+    if parents != [operation.family_parent]:
+        frappe.throw("PAYG invoice has no family and its customer does not uniquely identify this family")
+
+
 def _linked_invoice(operation):
     invoice = frappe.get_doc("Sales Invoice", operation.invoice, for_update=True)
-    if invoice.customer != operation.customer or invoice.get("parent") != operation.family_parent:
-        frappe.throw("PAYG invoice customer or family does not match operation")
+    _validate_invoice_family(invoice, operation)
     matching = [row for row in (invoice.get("items") or [])
                 if (row.get("qas_source_doctype"), row.get("qas_source_document")) ==
                 ("QAS PAYG Operation", operation.name)]
@@ -63,8 +78,8 @@ def validate_payg_bindings(invoice, locked_operations):
         frappe.throw("PAYG invoice sources changed; retry")
     for operation_id in sources.values():
         operation = locked_operations[operation_id]
-        if (operation.invoice != invoice.name or operation.customer != invoice.customer
-                or operation.family_parent != invoice.get("parent")):
+        _validate_invoice_family(invoice, operation)
+        if operation.invoice != invoice.name:
             frappe.throw("PAYG invoice source family/customer or link does not match operation")
     return sources
 
@@ -87,7 +102,8 @@ def relink_consolidated_payg_operations(invoices, target, locked_operations):
         frappe.throw("Consolidated PAYG invoice sources changed; retry")
     for operation_id in sorted(locked_operations):
         operation = locked_operations[operation_id]
-        if operation.invoice not in selected or operation.customer != target.customer or operation.family_parent != target.get("parent"):
+        _validate_invoice_family(target, operation)
+        if operation.invoice not in selected:
             frappe.throw("PAYG operation cannot be consolidated into another family")
         if operation.invoice == target.name:
             continue
