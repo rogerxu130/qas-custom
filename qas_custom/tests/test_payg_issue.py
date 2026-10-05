@@ -26,7 +26,7 @@ class Document(frappe._dict):
                 card[count] = card.get(count, 0) + self.get(field + "_delta", 0)
         return self
 
-    def save(self, **_kwargs):
+    def save(self, ignore_permissions=None, ignore_version=None):
         return self
 
 

@@ -344,8 +344,9 @@ def confirm_booking(student, session, preview_card, request_key, *, confirmed_ru
                             ignore_permissions=True, ignore_links=True)
         booking.attendance_entry = attendance
         booking.flags.payg_mutation_token = QASPAYGBooking._SERVICE_MUTATION_TOKEN
+        booking.flags.ignore_links = True
         try:
-            booking.save(ignore_permissions=True, ignore_links=True)
+            booking.save(ignore_permissions=True)
         finally:
             booking.flags.payg_mutation_token = None
             booking.flags.ignore_links = False

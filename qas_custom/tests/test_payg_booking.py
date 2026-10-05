@@ -214,6 +214,47 @@ class TestBooking(TestCase):
         self.assertFalse(saved.flags.ignore_links)
         self.assertIsNone(saved.flags.payg_mutation_token)
 
+    def test_save_uses_frappe_signature_and_scoped_link_flag(self):
+        from inspect import signature
+        from frappe.model.document import Document as FrappeDocument
+        original = self.fake.get_doc.side_effect
+        saved = []
+        class CheckedBooking(Document):
+            def save(self, **kwargs):
+                # Bind against the installed framework rather than a permissive mock.
+                signature(FrappeDocument._save).bind(self, **kwargs)
+                saved.append((dict(kwargs), self.flags.ignore_links, self.flags.payg_mutation_token))
+                return super().save(**kwargs)
+        def get_doc(dt, name=None, **kwargs):
+            if isinstance(dt, dict) and dt.get("doctype") == "QAS PAYG Booking":
+                return CheckedBooking(self.state, **dt)
+            return original(dt, name, **kwargs)
+        self.fake.get_doc.side_effect = get_doc
+        result = booking.confirm_booking("S-1", "CS-1", "A", "save-contract", confirmed_rules=True)
+        self.assertEqual(saved[0][:2], ({"ignore_permissions": True}, True))
+        self.assertIsNotNone(saved[0][2])
+        self.assertFalse(result.flags.ignore_links)
+        self.assertIsNone(result.flags.payg_mutation_token)
+
+    def test_save_failure_clears_scoped_flags_and_rolls_back(self):
+        original = self.fake.get_doc.side_effect
+        created = []
+        class FailedBooking(Document):
+            def save(self, ignore_permissions=None, ignore_version=None):
+                raise RuntimeError("database save failed")
+        def get_doc(dt, name=None, **kwargs):
+            if isinstance(dt, dict) and dt.get("doctype") == "QAS PAYG Booking":
+                doc = FailedBooking(self.state, **dt)
+                created.append(doc)
+                return doc
+            return original(dt, name, **kwargs)
+        self.fake.get_doc.side_effect = get_doc
+        with self.assertRaisesRegex(RuntimeError, "database save failed"):
+            booking.confirm_booking("S-1", "CS-1", "A", "save-failure", confirmed_rules=True)
+        self.db.rollback.assert_called_once()
+        self.assertFalse(created[0].flags.ignore_links)
+        self.assertIsNone(created[0].flags.payg_mutation_token)
+
     def test_inactive_student_can_preview_and_book_and_is_activated_on_success(self):
         self.student.status = "Inactive"
         preview = booking.preview_booking("S-1", "CS-1")
