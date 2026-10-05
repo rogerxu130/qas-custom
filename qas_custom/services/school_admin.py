@@ -4120,6 +4120,7 @@ def get_school_admin_course_session_data(course_session=None):
 	payload["student_count"] = len(attending_attendance_rows)
 	payload["trial_count"] = sum(1 for row in attending_attendance_rows if row.get("source_doctype") == "Inquiry")
 	payload["makeup_count"] = _count_makeup_attendance_rows(attending_attendance_rows)
+	payload["payg_count"] = _count_payg_attendance_rows(attending_attendance_rows)
 	payload["leave_count"] = _count_leave_attendance_rows(attendance_rows)
 	if payload.get("weekly_timeslot"):
 		_timeslot_teacher = (payload.get("weekly_timeslot_detail") or {}).get("teacher")
@@ -8487,6 +8488,7 @@ def _get_course_session_rows(
 	student_counts = _get_course_session_student_counts([row.get("name") for row in rows])
 	trial_counts = _get_course_session_trial_counts([row.get("name") for row in rows])
 	makeup_counts = _get_course_session_makeup_counts([row.get("name") for row in rows])
+	payg_counts = _get_course_session_payg_counts([row.get("name") for row in rows])
 	leave_counts = _get_course_session_leave_counts([row.get("name") for row in rows])
 	items = []
 	for row in rows:
@@ -8500,6 +8502,7 @@ def _get_course_session_rows(
 		item["student_count"] = student_counts.get(row.get("name"), 0)
 		item["trial_count"] = trial_counts.get(row.get("name"), 0)
 		item["makeup_count"] = makeup_counts.get(row.get("name"), 0)
+		item["payg_count"] = payg_counts.get(row.get("name"), 0)
 		item["leave_count"] = leave_counts.get(row.get("name"), 0)
 		if item.get("weekly_timeslot_detail"):
 			_attach_course_label(item, item["weekly_timeslot_detail"].get("course"), item["weekly_timeslot_detail"])
@@ -8561,6 +8564,27 @@ def _get_course_session_trial_counts(course_sessions):
 		limit_page_length=0,
 	)
 	return {row.get("course_session"): cint(row.get("trial_count")) for row in rows}
+
+
+def _count_payg_attendance_rows(rows):
+	return sum(1 for row in rows if row.get("source_doctype") == "QAS PAYG Booking"
+		or row.get("enrollment_type") == "Pay-as-you-go")
+
+
+def _get_course_session_payg_counts(course_sessions):
+	course_sessions = sorted({name for name in course_sessions if name})
+	if not course_sessions or not _doctype_available(ATTENDANCE_DOCTYPE):
+		return {}
+	filters = {"course_session": ["in", course_sessions]}
+	if _has_field(ATTENDANCE_DOCTYPE, "status"):
+		filters["status"] = ["not in", sorted(NON_ATTENDING_ATTENDANCE_STATUSES)]
+	fields = _safe_fields(ATTENDANCE_DOCTYPE, ["course_session", "source_doctype", "enrollment_type"])
+	counts = {}
+	for row in frappe.get_all(ATTENDANCE_DOCTYPE, filters=filters, fields=fields, limit_page_length=0):
+		if _count_payg_attendance_rows([row]):
+			name = row.get("course_session")
+			counts[name] = counts.get(name, 0) + 1
+	return counts
 
 
 def _get_course_session_makeup_counts(course_sessions):

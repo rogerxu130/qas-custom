@@ -150,6 +150,7 @@ class TestSchoolAdminCourseSessions(TestCase):
 			},
 		)
 
+	@patch("qas_custom.services.school_admin._get_course_session_payg_counts", return_value={"SESSION-WEEKLY": 1})
 	@patch("qas_custom.services.school_admin._get_course_session_leave_counts", return_value={})
 	@patch("qas_custom.services.school_admin._get_course_session_makeup_counts", return_value={})
 	@patch("qas_custom.services.school_admin._get_course_session_trial_counts", return_value={})
@@ -168,6 +169,7 @@ class TestSchoolAdminCourseSessions(TestCase):
 		_trial_counts,
 		_makeup_counts,
 		_leave_counts,
+		_payg_counts,
 	):
 		get_all.return_value = [
 			_dict(name="SESSION-WEEKLY", weekly_timeslot="WT-1", session_date="2026-08-01", status="Scheduled", teacher_override=None),
@@ -183,4 +185,6 @@ class TestSchoolAdminCourseSessions(TestCase):
 		result = _get_course_session_rows(teacher="TEACHER-1", limit=160)
 
 		self.assertEqual([item["name"] for item in result], ["SESSION-OVERRIDE", "SESSION-WEEKLY"])
+		self.assertEqual(result[1]["payg_count"], 1)
+		self.assertEqual(result[0]["payg_count"], 0)
 		self.assertEqual(get_all.call_args.kwargs["limit"], 3000)

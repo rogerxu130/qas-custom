@@ -28,6 +28,7 @@ from qas_custom.services.inquiry import (
 from qas_custom.services.school_admin import (
 	_create_payment_entry_for_invoice,
 	_count_leave_attendance_rows,
+	_count_payg_attendance_rows,
 	_course_session_sort_key,
 	_document_payload,
 	_get_course_session_rows,
@@ -837,6 +838,7 @@ def get_campus_admin_course_session_data(course_session=None):
 	attending_rows = _visible_course_session_attendance_rows(attendance_rows)
 	payload["attendance"] = _roster_course_session_attendance_rows(attendance_rows)
 	payload["student_count"] = len(attending_rows)
+	payload["payg_count"] = _count_payg_attendance_rows(attending_rows)
 	payload["trial_count"] = sum(1 for row in attending_rows if row.get("source_doctype") == "Inquiry")
 	payload["leave_count"] = _count_leave_attendance_rows(attendance_rows)
 	timeslot_teacher = (payload.get("weekly_timeslot_detail") or {}).get("teacher")

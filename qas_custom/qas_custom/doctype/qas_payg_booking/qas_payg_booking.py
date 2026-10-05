@@ -62,6 +62,23 @@ class QASPAYGBooking(Document):
                 "QAS PAYG Entry", {"booking": self.name, "kind": "Return"}):
             frappe.throw("PAYG booking must return its session before cancellation")
 
+    def on_update(self):
+        if not self.attendance_entry:
+            return
+        before = self.get_doc_before_save()
+        event = None
+        if self.status == "Reserved" and (not before or not before.get("attendance_entry")):
+            event = "payg_booked"
+        elif self.status == "Cancelled" and before and before.get("status") != "Cancelled":
+            event = "payg_cancelled"
+        if event:
+            from qas_custom.modules.notifications.commands import enqueue_session_staff_notification
+            try:
+                enqueue_session_staff_notification(event, course_session=self.course_session,
+                    student=self.student, source_doctype="QAS PAYG Booking", source_document=self.name)
+            except Exception:
+                frappe.log_error(frappe.get_traceback(), f"PAYG staff notification queue failed: {self.name}")
+
     def _validate_service_creation(self):
         flags = getattr(self, "flags", None)
         context = flags.get("payg_create_context") if flags else None

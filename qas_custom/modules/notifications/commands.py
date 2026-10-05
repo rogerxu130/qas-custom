@@ -23,6 +23,8 @@ SESSION_STAFF_NOTIFICATION_EVENTS = {
 	"trial_added",
 	"trial_cancelled",
 	"trial_rescheduled",
+	"payg_booked",
+	"payg_cancelled",
 }
 TRIAL_NOTIFICATION_EVENTS = {"trial_added", "trial_cancelled", "trial_rescheduled"}
 TRIAL_ADDED_NOTIFICATION_CONFIG = "qas_trial_added_notification_enabled"
@@ -808,6 +810,8 @@ def _session_staff_notification_context(
 			context["missing_recipients"].append("teacher email")
 		if not context["school_email"]:
 			context["missing_recipients"].append("school email")
+	if event in {"payg_booked", "payg_cancelled"}:
+		context["recipients"] = list(dict.fromkeys(context["recipients"] + _payg_school_admin_emails()))
 	if event == "trial_rescheduled":
 		if not previous_course_session:
 			frappe.throw(_("Previous course session is required for a trial reschedule notification."))
@@ -825,6 +829,14 @@ def _session_staff_notification_context(
 		if not context["teacher_recipients"]:
 			context["missing_recipients"].append("new session teacher email")
 	return context
+
+
+def _payg_school_admin_emails():
+	users = frappe.get_all("Has Role", filters={"role": "School Admin", "parenttype": "User"}, pluck="parent", limit_page_length=0)
+	if not users:
+		return []
+	emails = frappe.get_all("User", filters={"name": ["in", users], "enabled": 1}, pluck="email", limit_page_length=0)
+	return sorted({email.strip().lower() for email in emails if email and email.strip()})
 
 
 def _session_staff_course_context(course_session: str, student: str):
@@ -932,6 +944,12 @@ def _session_staff_notification_is_current(
 	*,
 	previous_course_session=None,
 ):
+	if event in {"payg_booked", "payg_cancelled"}:
+		row = frappe.db.get_value("QAS PAYG Booking", source_document,
+			["status", "course_session", "student", "attendance_entry"], as_dict=True)
+		statuses = {"Reserved", "Locked", "Completed"} if event == "payg_booked" else {"Cancelled"}
+		return bool(row and row.get("status") in statuses and row.get("attendance_entry")
+			and row.get("course_session") == course_session and row.get("student") == student)
 	if event == "leave_requested":
 		row = frappe.db.get_value("Leave Request", source_document, ["status", "course_session", "student"], as_dict=True)
 		return bool(row and row.get("status") == "Approved" and row.get("course_session") == course_session and row.get("student") == student)
@@ -985,6 +1003,8 @@ def _session_staff_notification_subject(context):
 	prefixes = {
 		"leave_requested": "Leave request",
 		"makeup_booked": "Makeup class booked",
+		"payg_booked": "Pay-as-you-go class booked",
+		"payg_cancelled": "Pay-as-you-go class cancelled",
 		"makeup_cancelled": "Makeup class cancelled",
 		"trial_added": "Trial student added",
 		"trial_cancelled": "Trial student cancelled",
@@ -1000,6 +1020,8 @@ def _session_staff_notification_email_message(context):
 	intro = {
 		"leave_requested": "A parent has requested leave for this student.",
 		"makeup_booked": "This student has been booked into your session as a makeup class.",
+		"payg_booked": "This student has booked your session using a PSU Go class pass. Please prepare for their attendance.",
+		"payg_cancelled": "This student’s PSU Go booking has been cancelled. They will no longer attend this session.",
 		"makeup_cancelled": "This student's makeup booking has been cancelled.",
 		"trial_added": "This session now has a trial student.",
 		"trial_cancelled": "This trial student will no longer attend the session.",
