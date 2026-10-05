@@ -1577,8 +1577,8 @@ def _invoice_pdf_payment_plan_block(context):
 	)
 	return """<div class="payment-plan">
 		<strong>Payment plan</strong>
-		<p>This invoice total remains unchanged. Please follow the agreed payment schedule below.</p>
-		<p>Total paid: AUD ${paid:.2f} &middot; Outstanding: AUD ${outstanding:.2f}</p>
+		<p>This payment plan covers the outstanding balance when the plan was set. Please follow the agreed payment schedule below.</p>
+		<p>Paid towards plan: AUD ${paid:.2f} &middot; Outstanding: AUD ${outstanding:.2f}</p>
 		{shortfall}
 		<table>{rows}</table>
 	</div>""".format(
@@ -1862,7 +1862,7 @@ def _invoice_payment_plan_html(payment_plan):
 	current = payment_plan.get("current_installment") or {}
 	return """<div style='margin:0 0 18px;padding:14px;border:1px solid #99f6e4;border-radius:10px;background:#f0fdfa;'>
 	<p style='margin:0 0 8px;font-size:16px;font-weight:700;'>Payment plan</p>
-	<p style='margin:0 0 8px;font-size:14px;'>Total paid: AUD ${paid:.2f} · Outstanding: AUD ${outstanding:.2f}</p>
+	<p style='margin:0 0 8px;font-size:14px;'>Paid towards plan: AUD ${paid:.2f} · Outstanding: AUD ${outstanding:.2f}</p>
 	{current_line}<table style='width:100%;border-collapse:collapse'>{rows}</table></div>""".format(
 		paid=flt(payment_plan.get("total_paid")), outstanding=flt(payment_plan.get("outstanding")),
 		current_line=("<p style='margin:0 0 8px;font-size:14px;'><strong>Current installment shortfall: AUD ${0:.2f}</strong></p>".format(flt(current.get("shortfall"))) if current else ""), rows=rows

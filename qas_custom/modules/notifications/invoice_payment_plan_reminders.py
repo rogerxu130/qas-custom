@@ -88,7 +88,7 @@ def _message(doc, plan, current):
 		)
 	return """<div style='font-family:Arial,sans-serif;color:#172033;line-height:1.55'>
 <h2>Payment plan reminder</h2><p>Your payment-plan installment for invoice <strong>{invoice}</strong> is now due.</p>
-<p><strong>Current installment shortfall: ${shortfall:,.2f}</strong><br>Invoice total: ${total:,.2f}<br>Paid so far: ${paid:,.2f}<br>Outstanding: ${outstanding:,.2f}</p>
+<p><strong>Current installment shortfall: ${shortfall:,.2f}</strong><br>Payment plan total: ${total:,.2f}<br>Paid towards plan: ${paid:,.2f}<br>Outstanding: ${outstanding:,.2f}</p>
 <table cellspacing='0' cellpadding='0' style='border-collapse:collapse;width:100%'><thead><tr><th align='left'>Due date</th><th align='left'>Cumulative amount due</th></tr></thead><tbody>{rows}</tbody></table>
 <p style='margin-top:20px'><a href='{link}' style='background:#1a2b4a;color:#fff;padding:10px 14px;border-radius:8px;text-decoration:none'>View invoice in Parent Portal</a></p></div>""".format(
 		invoice=escape_html(doc.name), shortfall=flt(current["shortfall"]), total=flt(plan["total"]), paid=flt(plan["total_paid"]), outstanding=flt(plan["outstanding"]), rows="".join(rows), link=parent_portal_invoice_link(doc.name)

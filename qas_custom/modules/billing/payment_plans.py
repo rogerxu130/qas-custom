@@ -29,11 +29,14 @@ def has_active_payment_plan(invoice_doc) -> bool:
 def payment_plan_payload(invoice_doc, today=None):
 	doc = _invoice_doc(invoice_doc)
 	today = _brisbane_date(today)
-	total = flt(doc.get("grand_total"))
+	plan_rows = _plan_rows(doc)
+	# The final target fixes the balance at creation. Existing plans already
+	# store the original invoice total here, so their progress is preserved.
+	total = flt(plan_rows[-1].get("cumulative_amount_due")) if plan_rows else flt(doc.get("grand_total"))
 	outstanding = max(flt(doc.get("outstanding_amount")), 0)
 	total_paid = max(total - outstanding, 0)
 	rows = []
-	for index, row in enumerate(_plan_rows(doc), start=1):
+	for index, row in enumerate(plan_rows, start=1):
 		target = flt(row.get("cumulative_amount_due"))
 		shortfall = max(target - total_paid, 0)
 		due_date = getdate(row.get("due_date")) if row.get("due_date") else None
@@ -68,8 +71,8 @@ def validate_payment_plan(invoice_doc, installments):
 		frappe.throw(_("A payment plan can only be added after the invoice is submitted."))
 	if flt(doc.get("outstanding_amount")) <= EPSILON:
 		frappe.throw(_("A payment plan cannot be added to a paid invoice."))
-	if _has_payment_or_store_credit(doc):
-		frappe.throw(_("A payment plan can only be added before any payment or store credit is applied."))
+	if cint(doc.get(PLAN_FLAG_FIELD)) or _plan_rows(doc):
+		frappe.throw(_("A payment plan has already been set for this invoice."))
 	rows = _normalise_installments(installments)
 	if len(rows) not in (2, 3):
 		frappe.throw(_("Choose either 2 or 3 payment installments."))
@@ -82,8 +85,8 @@ def validate_payment_plan(invoice_doc, installments):
 			frappe.throw(_("Each cumulative amount must be greater than the previous one."))
 		previous_date = row["due_date"]
 		previous_amount = row["cumulative_amount_due"]
-	if abs(rows[-1]["cumulative_amount_due"] - flt(doc.get("grand_total"))) > EPSILON:
-		frappe.throw(_("The final cumulative amount must equal the invoice total."))
+	if abs(rows[-1]["cumulative_amount_due"] - flt(doc.get("outstanding_amount"))) > EPSILON:
+		frappe.throw(_("The final cumulative amount must equal the current outstanding balance. Reload the invoice if the balance has changed."))
 	last_session_date = _last_linked_enrollment_session_date(doc)
 	if last_session_date and rows[-1]["due_date"] > last_session_date:
 		frappe.throw(_("The final payment-plan due date cannot be after the last scheduled class ({0}).").format(last_session_date))
@@ -91,7 +94,10 @@ def validate_payment_plan(invoice_doc, installments):
 
 
 def apply_payment_plan(invoice_doc, installments, actor=None):
-	doc = _invoice_doc(invoice_doc)
+	# Validate a fresh, locked invoice so concurrent balance changes or a
+	# second plan cannot overwrite the balance used for this schedule.
+	name = invoice_doc if isinstance(invoice_doc, str) else invoice_doc.name
+	doc = frappe.get_doc("Sales Invoice", name, for_update=True)
 	rows = validate_payment_plan(doc, installments)
 	doc.set(PLAN_ROWS_FIELD, [])
 	for row in rows:
@@ -114,7 +120,7 @@ def _invoice_doc(invoice_doc):
 		return frappe.get_doc("Sales Invoice", invoice_doc)
 	# Reminder eligibility receives database rows rather than full documents. Load
 	# the submitted invoice so the child-table plan rows are available.
-	if isinstance(invoice_doc, dict) and invoice_doc.get("name") and not invoice_doc.get(PLAN_ROWS_FIELD):
+	if isinstance(invoice_doc, dict) and invoice_doc.get("name") and PLAN_ROWS_FIELD not in invoice_doc:
 		return frappe.get_doc("Sales Invoice", invoice_doc["name"])
 	return invoice_doc
 
@@ -134,14 +140,6 @@ def _normalise_installments(installments):
 			frappe.throw(_("Every installment needs a due date and cumulative amount."))
 		rows.append({"due_date": due_date, "cumulative_amount_due": amount})
 	return rows
-
-
-def _has_payment_or_store_credit(doc):
-	from qas_custom.modules.billing.store_credit import get_invoice_store_credit_applied
-
-	if flt(get_invoice_store_credit_applied(doc.name)) > EPSILON:
-		return True
-	return flt(doc.get("grand_total")) - flt(doc.get("outstanding_amount")) > EPSILON
 
 
 def _last_linked_enrollment_session_date(doc):
