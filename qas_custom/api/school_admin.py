@@ -1706,3 +1706,15 @@ def school_admin_save_marketing_notification_settings(enabled=0, recipient=None)
 def school_admin_get_action_items(kind="enrollment", start=0, limit=30):
     from qas_custom.services.admin_action_items import get_action_items
     return get_action_items(kind, start, limit)
+
+
+@frappe.whitelist()
+def school_admin_get_voucher_transfer_options(parent=None):
+    from qas_custom.services.voucher_transfer import get_transfer_options
+    return get_transfer_options(parent=parent)
+
+
+@frappe.whitelist(methods=["POST"])
+def school_admin_transfer_vouchers(parent=None, voucher_ids=None, source_course=None, target_course=None, reason=None):
+    from qas_custom.services.voucher_transfer import transfer_vouchers
+    return transfer_vouchers(parent, voucher_ids, source_course, target_course, reason)
