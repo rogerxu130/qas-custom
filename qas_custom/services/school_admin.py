@@ -460,7 +460,7 @@ def get_school_admin_parents_data(query=None, status=None, invite_status=None, l
 	# Referral verification needs an exact, auditable match.  Include the ERPNext
 	# Customer ID here as well as the usual family contact fields so School Admin
 	# can find the right family without guessing from a free-text referral note.
-	or_filters = _text_search_filters("Parent", query, ["name", "parent_name", "mobile_number", "phone", "email", "email_id", "customer"])
+	or_filters = _text_search_filters("Parent", query, ["name", "parent_name", "mobile_number", "phone", "email", "email_id", "linked_user", "customer"])
 	student_parent_ids = _matching_student_parent_ids(query)
 	if student_parent_ids:
 		or_filters = or_filters or []
@@ -6948,7 +6948,7 @@ def _get_invoice_rows(
 	from qas_custom.services.payment_collection_requests import get_invoice_payment_request_summaries
 
 	payment_request_summaries = get_invoice_payment_request_summaries(row.get("name") for row in rows)
-	return [_invoice_row_payload(row, payment_request_summaries.get(row.get("name"))) for row in rows]
+	return _attach_invoice_display_names([_invoice_row_payload(row, payment_request_summaries.get(row.get("name"))) for row in rows])
 
 
 def _get_invoice_outstanding_amount_filters(outstanding_min=None, outstanding_max=None):
@@ -7046,6 +7046,38 @@ def _invoice_names_for_students(students):
 	return names
 
 
+def _attach_invoice_display_names(rows):
+	customers = sorted({row.get("customer") for row in rows if row.get("customer")})
+	parent_ids = sorted({row.get("parent") for row in rows if row.get("parent")})
+	customer_names = {}
+	if customers and _doctype_available("Customer"):
+		customer_names = {row.name: row.customer_name for row in frappe.get_all(
+			"Customer", filters={"name": ["in", customers]}, fields=["name", "customer_name"], limit_page_length=0,
+		)}
+	parent_names = {}
+	parents_by_customer = defaultdict(list)
+	if _doctype_available("Parent"):
+		or_filters = []
+		if parent_ids:
+			or_filters.append(["Parent", "name", "in", parent_ids])
+		if customers and _has_field("Parent", "customer"):
+			or_filters.append(["Parent", "customer", "in", customers])
+		if or_filters:
+			for parent in frappe.get_all("Parent", or_filters=or_filters,
+				fields=_safe_fields("Parent", ["name", "parent_name", "customer"]), limit_page_length=0):
+				parent_names[parent.name] = parent.get("parent_name")
+				if parent.get("customer"):
+					parents_by_customer[parent.customer].append(parent.get("parent_name"))
+	for row in rows:
+		row["customer_name"] = customer_names.get(row.get("customer")) or row.get("customer_name") or ""
+		row["parent_name"] = parent_names.get(row.get("parent")) or ""
+		if not row.get("parent"):
+			matches = parents_by_customer.get(row.get("customer"), [])
+			if len(matches) == 1:
+				row["parent_name"] = matches[0] or ""
+	return rows
+
+
 def _build_invoice_payload(doc):
 	from qas_custom.services.stripe_trial_payments import payment_url
 	from qas_custom.services.payment_collection_requests import get_invoice_payment_request_summary
@@ -7063,7 +7095,7 @@ def _build_invoice_payload(doc):
 	payload["payment_plan"] = payment_plan_payload(doc)
 	payload["notifications"] = get_invoice_notification_summary(doc.name)
 	payload.update(get_invoice_payment_request_summary(doc.name))
-	return payload
+	return _attach_invoice_display_names([payload])[0]
 
 
 def _apply_invoice_payment_payload(doc, payload):
