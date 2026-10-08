@@ -1273,7 +1273,7 @@ def _set_inquiry_reminder_status(inquiry, status):
 
 
 def _invoice_recipient(invoice_doc):
-	parent = invoice_doc.get("parent") or _parent_for_customer(invoice_doc.customer)
+	parent = invoice_doc.get("parent") or _parent_from_invoice_enrollments(invoice_doc) or _parent_for_customer(invoice_doc.customer)
 	linked_user = None
 	email = None
 
@@ -1285,6 +1285,10 @@ def _invoice_recipient(invoice_doc):
 		parent_info = frappe.db.get_value("Parent", parent, fields, as_dict=True) or {}
 		linked_user = parent_info.get("linked_user")
 		email = _first_value(parent_info, ["email", "email_id", "contact_email"])
+		if not email and linked_user:
+			email = frappe.db.get_value("User", linked_user, "email") or linked_user
+		# An identified family must not fall back to an invoice's old email.
+		return {"email": email, "for_user": linked_user, "parent": parent, "customer": invoice_doc.customer}
 
 	if not email:
 		for fieldname in ["contact_email", "email", "email_id"]:
@@ -1304,10 +1308,31 @@ def _invoice_recipient(invoice_doc):
 	if not email and invoice_doc.customer:
 		email = _customer_contact_email(invoice_doc.customer)
 
-	if not email and linked_user:
-		email = frappe.db.get_value("User", linked_user, "email") or linked_user
-
 	return {"email": email, "for_user": linked_user, "parent": parent, "customer": invoice_doc.customer}
+
+
+def _parent_from_invoice_enrollments(invoice_doc):
+	"""Resolve the current family through Enrollment -> Student -> guardian."""
+	enrollments = {row.get("enrollment") for row in invoice_doc.get("items", []) or [] if row.get("enrollment")}
+	if invoice_doc.get("enrollment"):
+		enrollments.add(invoice_doc.get("enrollment"))
+	if invoice_doc.get("source_doctype") == "Enrollment" and invoice_doc.get("source_document"):
+		enrollments.add(invoice_doc.get("source_document"))
+	if not frappe.db.exists("DocType", "Enrollment") or not frappe.db.has_column("Student", "guardian"):
+		return None
+	# Also covers older invoices and reminder previews without invoice items.
+	if invoice_doc.get("name") and frappe.db.has_column("Enrollment", "invoice"):
+		enrollments.update(frappe.get_all("Enrollment", filters={"invoice": invoice_doc.get("name")}, pluck="name"))
+	parents = set()
+	for enrollment in sorted(enrollments):
+		student = frappe.db.get_value("Enrollment", enrollment, "student")
+		if student:
+			parent = frappe.db.get_value("Student", student, "guardian")
+			if parent:
+				parents.add(parent)
+	if len(parents) > 1:
+		frappe.throw(_("Invoice enrollments belong to multiple parents. Review the family links before sending email."))
+	return next(iter(parents), None)
 
 
 def _parent_for_customer(customer):
