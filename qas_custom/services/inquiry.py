@@ -26,6 +26,7 @@ from qas_custom.modules.trial_referrals import (
 	referral_requires_review,
 	referral_summary,
 )
+from qas_custom.services.class_attendance import get_student_session_attendance_entry
 from qas_custom.utils.environment import sendmail_or_skip
 
 
@@ -1401,6 +1402,18 @@ def sync_inquiry_course_session(inquiry_doc):
 
 	session_context = _get_session_context(inquiry_doc.course_session)
 	_apply_session_to_inquiry(inquiry_doc, session_context)
+	if inquiry_doc.is_new():
+		existing = get_student_session_attendance_entry(inquiry_doc.student, inquiry_doc.course_session)
+		if existing and not (existing.get("status") == "Cancelled" and existing.get("enrollment_type") == "Trial"):
+			# Keep intake reviewable without booking or changing the existing attendance.
+			reason = _("This student is already listed for Course Session {0} (attendance {1}). Review this request before assigning another session or cancelling it.").format(
+				inquiry_doc.course_session, existing.get("name")
+			)
+			inquiry_doc.review_reason = " ".join(filter(None, [inquiry_doc.get("review_reason"), reason]))
+			inquiry_doc.course_session = None
+			inquiry_doc.status = NEEDS_REVIEW_STATUS
+			inquiry_doc.confirmation_status = "Not Required"
+			return
 	if referral_requires_review(inquiry_doc):
 		inquiry_doc.status = NEEDS_REVIEW_STATUS
 		return
