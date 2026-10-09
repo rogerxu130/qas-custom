@@ -96,6 +96,7 @@ from qas_custom.services.school_admin_reporting import (
 	get_school_admin_term_paid_invoice_summary_data,
 	get_school_admin_voucher_report_data,
 	get_school_admin_reporting_family_detail_data,
+	export_school_admin_reporting_families_data,
 	get_school_admin_reporting_rows_data,
 	get_school_admin_reporting_snapshot_data,
 	start_school_admin_reporting_generation_data,
@@ -692,6 +693,7 @@ def school_admin_get_reporting_rows(
 	query=None,
 	page=1,
 	page_length=50,
+	day_of_week=None,
 ):
 	return get_school_admin_reporting_rows_data(
 		term=term,
@@ -703,7 +705,18 @@ def school_admin_get_reporting_rows(
 		query=query,
 		page=page,
 		page_length=page_length,
+		day_of_week=day_of_week,
 	)
+
+
+@frappe.whitelist()
+def school_admin_export_reporting_families(term=None, attendance=None, invoice=None, query=None, day_of_week=None):
+	payload = export_school_admin_reporting_families_data(term=term, attendance=attendance, invoice=invoice, query=query, day_of_week=day_of_week)
+	frappe.local.response.filename = payload["filename"]
+	frappe.local.response.filecontent = payload["content"]
+	frappe.local.response.content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+	frappe.local.response.type = "download"
+
 
 
 @frappe.whitelist()

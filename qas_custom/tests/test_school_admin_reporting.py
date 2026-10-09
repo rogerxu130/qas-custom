@@ -13,6 +13,8 @@ from qas_custom.services.school_admin_reporting import (
 	_attendance_counts,
 	_build_reporting_rows,
 	_enrollment_class_schedules,
+	_family_row_names_for_weekday,
+	export_school_admin_reporting_families_data,
 	_invoice_summary,
 	_parent_map,
 	_session_end_datetime,
@@ -447,6 +449,76 @@ class TestSchoolAdminTermPaidInvoiceSummary(TestCase):
 		self.assertEqual(result["paid_invoice_count"], 0)
 		self.assertEqual(result["paid_invoice_total"], 0.0)
 		mock_get_all.assert_not_called()
+
+
+class TestSchoolAdminReportingWeekday(TestCase):
+	@patch("qas_custom.services.school_admin_reporting.frappe.get_all")
+	def test_matches_any_students_regular_class_day_and_ignores_course_text(self, mock_get_all):
+		mock_get_all.return_value = [
+			{"name": "Wednesday-family", "student_details_json": json.dumps([
+				{"class_schedule": [{"day_of_week": "Monday", "course": "Drawing"}]},
+				{"class_schedule": [{"day_of_week": "Wednesday", "course": "Painting"}]},
+			])},
+			{"name": "Friday-family", "student_details_json": json.dumps([{"class_schedule": [{"day_of_week": "Friday", "course": "Wednesday art"}]}])},
+			{"name": "Legacy-family", "student_details_json": json.dumps([{"student_name": "Amy"}])},
+		]
+		self.assertEqual(_family_row_names_for_weekday({"snapshot": "S1"}, "Wednesday"), ["Wednesday-family"])
+		self.assertEqual(mock_get_all.call_args.kwargs["limit_page_length"], 0)
+
+	@patch("qas_custom.services.school_admin_reporting._report_filter_options", return_value={})
+	@patch("qas_custom.services.school_admin_reporting._latest_completed_snapshot")
+	@patch("qas_custom.services.school_admin_reporting._validate_reporting_term")
+	@patch("qas_custom.services.school_admin_reporting._require_school_admin")
+	@patch("qas_custom.services.school_admin_reporting._family_row_names_for_weekday", return_value=["R60"])
+	def test_weekday_combines_with_outstanding_and_filters_before_pagination(self, mock_names, _require, _validate, mock_latest, _options):
+		mock_latest.return_value = frappe._dict(name="S1", status="Completed")
+		fake = SimpleNamespace(db=SimpleNamespace(count=Mock(return_value=1)), get_all=Mock(return_value=[]))
+		with patch("qas_custom.services.school_admin_reporting.frappe", fake):
+			result = get_school_admin_reporting_rows_data(term="Term 4 2026", report_type=FAMILY_REPORT_TYPE, invoice="Outstanding", day_of_week="Wednesday", page=2)
+		filters = fake.get_all.call_args.kwargs["filters"]
+		self.assertEqual(filters["invoice_classification"], "Outstanding")
+		self.assertEqual(filters["name"], ["in", ["R60"]])
+		self.assertEqual(fake.db.count.call_args.kwargs["filters"], filters)
+		self.assertEqual(fake.get_all.call_args.kwargs["limit_start"], 50)
+		self.assertEqual(result["total"], 1)
+
+
+class TestSchoolAdminReportingExcel(TestCase):
+	@patch("frappe.utils.xlsxutils.get_excel_date_format", return_value=("yyyy-mm-dd", "hh:mm:ss"))
+	@patch("qas_custom.services.school_admin_reporting.get_school_admin_reporting_rows_data")
+	def test_exports_all_pages_with_filters_numeric_amounts_and_safe_text(self, mock_rows, _date_format):
+		from io import BytesIO
+		from openpyxl import load_workbook
+		row = {"parent_name": "=HYPERLINK(""https://example.test"")", "outstanding_amount": 100.5,
+			"students": [{"student_name": "Amy", "class_schedule": [{"day_of_week": "Wednesday", "course": "Drawing"}]}]}
+		snapshot = {"name": "S1", "completed_at": "2026-10-09 17:00:00"}
+		mock_rows.side_effect = [{"snapshot": snapshot, "items": [row], "has_more": True}, {"snapshot": snapshot, "items": [dict(row, parent_name="Ben")], "has_more": False}]
+		result = export_school_admin_reporting_families_data(term="Term 4 2026", invoice="Outstanding", day_of_week="Wednesday", query="Amy")
+		book = load_workbook(BytesIO(result["content"]))
+		self.assertTrue(result["filename"].endswith(".xlsx"))
+		self.assertEqual(book.active.freeze_panes, "A2")
+		self.assertEqual(book.active.auto_filter.ref, "A1:M3")
+		self.assertTrue(book.active["E2"].alignment.wrap_text)
+		self.assertEqual(book.active["M2"].value, 100.5)
+		self.assertEqual(book.active["E2"].value, "Amy: Wednesday · Drawing")
+		self.assertEqual(book.active["A2"].data_type, "s")
+		self.assertEqual(book.active["A3"].value, "Ben")
+		self.assertEqual(mock_rows.call_args_list[1].kwargs["page"], 2)
+		for call in mock_rows.call_args_list:
+			self.assertEqual(call.kwargs["day_of_week"], "Wednesday")
+			self.assertEqual(call.kwargs["invoice"], "Outstanding")
+			self.assertEqual(call.kwargs["query"], "Amy")
+
+
+	@patch("qas_custom.services.school_admin_reporting.frappe.throw", side_effect=RuntimeError)
+	@patch("qas_custom.services.school_admin_reporting.get_school_admin_reporting_rows_data")
+	def test_rejects_an_export_if_report_changes_between_pages(self, mock_rows, _throw):
+		mock_rows.side_effect = [
+			{"snapshot": {"name": "S1"}, "items": [], "has_more": True},
+			{"snapshot": {"name": "S2"}, "items": [], "has_more": False},
+		]
+		with self.assertRaises(RuntimeError):
+			export_school_admin_reporting_families_data(term="Term 4 2026")
 
 
 class TestSchoolAdminReportingRows(TestCase):

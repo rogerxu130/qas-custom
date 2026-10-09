@@ -158,6 +158,7 @@ def get_school_admin_reporting_rows_data(
 	query=None,
 	page=1,
 	page_length=50,
+	day_of_week=None,
 ):
 	_require_school_admin()
 	_validate_reporting_term(term)
@@ -184,6 +185,12 @@ def get_school_admin_reporting_rows_data(
 	if query:
 		filters["search_text"] = ["like", f"%{query}%"]
 
+	if day_of_week:
+		if report_type != FAMILY_REPORT_TYPE or day_of_week not in ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"):
+			frappe.throw(_("Choose a valid class weekday for the family report."))
+		# Apply the weekday before counting and pagination, using the same snapshot.
+		filters["name"] = ["in", _family_row_names_for_weekday(filters, day_of_week) or ["__no_matching_report_family__"]]
+
 	page = max(1, cint(page) or 1)
 	page_length = _page_length(page_length)
 	total = frappe.db.count(ROW_DOCTYPE, filters=filters)
@@ -205,6 +212,86 @@ def get_school_admin_reporting_rows_data(
 		"has_more": page * page_length < total,
 		"options": _report_filter_options(snapshot.name, report_type),
 	}
+
+
+def export_school_admin_reporting_families_data(term=None, attendance=None, invoice=None, query=None, day_of_week=None):
+	from frappe.utils.xlsxutils import handle_html, make_xlsx
+	from io import BytesIO
+	from openpyxl import load_workbook
+	from openpyxl.styles import Alignment, Font
+
+	def text(value):
+		value = handle_html(str(value or ""))
+		return "'" + value if value.startswith("=") else value
+
+	rows = []
+	page = 1
+	snapshot = None
+	while True:
+		result = get_school_admin_reporting_rows_data(
+			term=term, report_type=FAMILY_REPORT_TYPE, attendance=attendance,
+			invoice=invoice, query=query, day_of_week=day_of_week, page=page, page_length=200,
+		)
+		current = result.get("snapshot") or {}
+		if not current:
+			frappe.throw(_("Generate this Term report before exporting."))
+		if snapshot and snapshot.get("name") != current.get("name"):
+			frappe.throw(_("The report changed during export. Please download it again."))
+		snapshot = current
+		rows.extend(result.get("items") or [])
+		if not result.get("has_more"):
+			break
+		page += 1
+
+	data = [["Family", "Parent Email", "Parent Phone", "Students", "Class Schedule", "Attendance", "Present / Late", "Absent", "Leave", "Cancelled", "To be started (past)", "Invoice", "Outstanding (AUD)"]]
+	for row in rows:
+		students = row.get("students") or []
+		schedule = "\n".join(
+			f"{student.get('student_name') or student.get('student')}: {item.get('day_of_week') or 'Day not set'} · {item.get('course') or 'Course not set'}"
+			for student in students for item in student.get("class_schedule", [])
+		)
+		data.append([
+			text(row.get("parent_name") or row.get("parent_record")), text(row.get("parent_email")), text(row.get("parent_phone")),
+			text(", ".join(student.get("student_name") or student.get("student") or "" for student in students)), text(schedule), text(row.get("attendance_classification")),
+			cint(row.get("present_late_count")), cint(row.get("absent_count")), cint(row.get("leave_count")), cint(row.get("cancelled_count")),
+			cint(row.get("to_be_started_count")), text(row.get("invoice_classification")), flt(row.get("outstanding_amount")),
+		])
+	data.extend([[], ["Term", text(term)], ["Class weekday filter", text(day_of_week or "All")], ["Attendance filter", text(attendance or "All")],
+		["Invoice filter", text(invoice or "All")], ["Search filter", text(query)], ["Report generated at", text(snapshot.get("completed_at"))], ["Families", len(rows)]])
+	book = load_workbook(make_xlsx(data, "Term Attendance", column_widths=[30, 34, 22, 35, 65, 24, 16, 12, 12, 12, 24, 22, 22]))
+	sheet = book.active
+	sheet.freeze_panes = "A2"
+	sheet.auto_filter.ref = f"A1:M{len(rows) + 1}"
+	for cell in sheet[1]:
+		cell.font = Font(bold=True)
+	for index in range(2, len(rows) + 2):
+		for cell in sheet[index]:
+			cell.alignment = Alignment(vertical="top", wrap_text=True)
+		sheet.cell(index, 13).number_format = '#,##0.00'
+		sheet.row_dimensions[index].height = max(30, 15 * (str(sheet.cell(index, 5).value or "").count("\n") + 1))
+	content = BytesIO()
+	book.save(content)
+	return {
+		"filename": f"term-attendance-outstanding-{frappe.scrub(term)}-{day_of_week or 'all'}.xlsx",
+		"content": content.getvalue(),
+	}
+
+
+def _family_row_names_for_weekday(filters, day_of_week):
+	rows = frappe.get_all(
+		ROW_DOCTYPE,
+		filters=filters,
+		fields=["name", "student_details_json"],
+		limit_page_length=0,
+	)
+	return [
+		row["name"] for row in rows
+		if any(
+			item.get("day_of_week") == day_of_week
+			for student in _decode_json(row.get("student_details_json"), [])
+			for item in student.get("class_schedule", [])
+		)
+	]
 
 
 def get_school_admin_reporting_family_detail_data(row=None):
