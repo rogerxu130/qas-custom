@@ -21,6 +21,7 @@
   "present_late_count",
   "absent_count",
   "leave_count",
+  "to_be_started_count",
   "cancelled_count",
   "attendance_total",
   "attendance_entry",
@@ -131,7 +132,7 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Attendance Classification",
-   "options": "Attended\nAbsent\nLeave\nCancelled only\nNo attendance records",
+   "options": "Attended\nAbsent\nLeave\nTo be started\nCancelled only\nNo attendance records",
    "read_only": 1
   },
   {
@@ -151,6 +152,13 @@
    "fieldtype": "Int",
    "label": "Leave",
    "read_only": 1
+  },
+  {
+   "fieldname": "to_be_started_count",
+   "fieldtype": "Int",
+   "label": "To be started (past sessions)",
+   "read_only": 1,
+   "default": "0"
   },
   {
    "fieldname": "cancelled_count",

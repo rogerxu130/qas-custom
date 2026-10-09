@@ -169,7 +169,11 @@ def get_school_admin_reporting_rows_data(
 
 	filters = {"snapshot": snapshot.name, "report_type": report_type}
 	if report_type == FAMILY_REPORT_TYPE and attendance:
-		filters["attendance_classification"] = attendance
+		if attendance == "To be started":
+			# Unmarked sessions may coexist with Present, Absent, or Leave.
+			filters["to_be_started_count"] = [">", 0]
+		else:
+			filters["attendance_classification"] = attendance
 	if invoice:
 		filters["invoice_classification"] = invoice
 	if report_type == UNMARKED_REPORT_TYPE and campus:
@@ -1091,6 +1095,7 @@ def _build_reporting_rows(term, generated_at):
 	)
 	student_ids = sorted({row.get("student") for row in enrollments if row.get("student")})
 	students = _student_map(student_ids)
+	class_schedules = _enrollment_class_schedules(enrollments)
 	parent_field = _student_parent_field()
 	families = defaultdict(lambda: {"students": set(), "enrollments": set()})
 	skipped_count = 0
@@ -1135,6 +1140,7 @@ def _build_reporting_rows(term, generated_at):
 				{
 					"student": student,
 					"student_name": _student_label(students.get(student), student),
+					"class_schedule": class_schedules.get(student, []),
 					"attendance_classification": _attendance_classification(student_counts),
 					**student_counts,
 				}
@@ -1223,6 +1229,37 @@ def _build_reporting_rows(term, generated_at):
 		)
 
 	return {"family_rows": family_rows, "unmarked_rows": unmarked_rows, "skipped_count": skipped_count}
+
+
+def _enrollment_class_schedules(enrollments):
+	"""Include enrolled classes even when attendance has not been generated yet."""
+	timeslot_ids = sorted({row.get("weekly_timeslot") for row in enrollments if row.get("weekly_timeslot")})
+	timeslots = {}
+	if timeslot_ids:
+		timeslots = {
+			row.get("name"): row
+			for row in frappe.get_all(
+				"Weekly Timeslot",
+				filters={"name": ["in", timeslot_ids]},
+				fields=_safe_fields("Weekly Timeslot", ["name", "course", "day_of_week"]),
+				limit_page_length=0,
+			)
+		}
+	classes = defaultdict(set)
+	for enrollment in enrollments:
+		student = enrollment.get("student")
+		if not student:
+			continue
+		timeslot = timeslots.get(enrollment.get("weekly_timeslot")) or {}
+		course = timeslot.get("course") or enrollment.get("course") or ""
+		day = timeslot.get("day_of_week") or ""
+		if course or day:
+			classes[student].add((day, course))
+	weekdays = {day: index for index, day in enumerate(("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"))}
+	return {
+		student: [{"day_of_week": day, "course": course} for day, course in sorted(rows, key=lambda item: (weekdays.get(item[0], 7), item[1]))]
+		for student, rows in classes.items()
+	}
 
 
 def _student_map(student_ids):
@@ -1469,7 +1506,7 @@ def _empty_invoice_summary():
 
 
 def _attendance_counts(rows):
-	counts = {"present_late_count": 0, "absent_count": 0, "leave_count": 0, "cancelled_count": 0, "attendance_total": 0}
+	counts = {"present_late_count": 0, "absent_count": 0, "leave_count": 0, "cancelled_count": 0, "to_be_started_count": 0, "attendance_total": 0}
 	for row in rows:
 		status = row.get("status")
 		if status in {"Present", "Late"}:
@@ -1478,6 +1515,9 @@ def _attendance_counts(rows):
 			counts["absent_count"] += 1
 		elif status == "Leave":
 			counts["leave_count"] += 1
+		elif status == "To be started":
+			counts["to_be_started_count"] += 1
+			continue
 		elif status == "Cancelled":
 			counts["cancelled_count"] += 1
 		else:
@@ -1493,6 +1533,8 @@ def _attendance_classification(counts):
 		return "Absent"
 	if counts.get("leave_count"):
 		return "Leave"
+	if counts.get("to_be_started_count"):
+		return "To be started"
 	if counts.get("cancelled_count"):
 		return "Cancelled only"
 	return "No attendance records"
@@ -1612,6 +1654,7 @@ def _row_fields(report_type):
 			"absent_count",
 			"leave_count",
 			"cancelled_count",
+			"to_be_started_count",
 			"attendance_total",
 			"student_details_json",
 		]

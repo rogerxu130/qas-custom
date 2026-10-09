@@ -1,4 +1,5 @@
 from datetime import datetime, time, timedelta
+import json
 from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import Mock, patch
@@ -11,6 +12,7 @@ from qas_custom.services.school_admin_reporting import (
 	_attendance_classification,
 	_attendance_counts,
 	_build_reporting_rows,
+	_enrollment_class_schedules,
 	_invoice_summary,
 	_parent_map,
 	_session_end_datetime,
@@ -31,8 +33,10 @@ class TestSchoolAdminReportingClassifications(TestCase):
 		self.assertEqual(_attendance_classification({"present_late_count": 0, "absent_count": 0, "leave_count": 1}), "Leave")
 		self.assertEqual(_attendance_classification({"cancelled_count": 1}), "Cancelled only")
 		self.assertEqual(_attendance_classification({}), "No attendance records")
+		self.assertEqual(_attendance_classification({"to_be_started_count": 1}), "To be started")
+		self.assertEqual(_attendance_classification({"present_late_count": 1, "to_be_started_count": 2}), "Attended")
 
-	def test_attendance_counts_ignore_unmarked_rows(self):
+	def test_attendance_counts_track_unmarked_separately_from_marked_total(self):
 		counts = _attendance_counts(
 			[
 				{"status": "Present"},
@@ -50,6 +54,7 @@ class TestSchoolAdminReportingClassifications(TestCase):
 				"absent_count": 1,
 				"leave_count": 1,
 				"cancelled_count": 1,
+				"to_be_started_count": 1,
 				"attendance_total": 5,
 			},
 		)
@@ -168,6 +173,7 @@ class TestSchoolAdminReportingBuild(TestCase):
 
 	@patch("qas_custom.services.school_admin_reporting._safe_fields", side_effect=lambda _doctype, fields: fields)
 	@patch("qas_custom.services.school_admin_reporting._term_invoice_map")
+	@patch("qas_custom.services.school_admin_reporting._enrollment_class_schedules", return_value={"STU-1": [{"day_of_week": "Tuesday", "course": "Creative Art"}]})
 	@patch("qas_custom.services.school_admin_reporting._session_context")
 	@patch("qas_custom.services.school_admin_reporting._attendance_rows")
 	@patch("qas_custom.services.school_admin_reporting._parent_map")
@@ -184,6 +190,7 @@ class TestSchoolAdminReportingBuild(TestCase):
 		mock_parents,
 		mock_attendance,
 		mock_sessions,
+		mock_class_schedules,
 		mock_invoices,
 		_mock_safe_fields,
 	):
@@ -198,11 +205,13 @@ class TestSchoolAdminReportingBuild(TestCase):
 		mock_attendance.return_value = [
 			frappe._dict(name="ATT-1", source_document="ENR-1", student="STU-1", status="Present", course_session="CS-1"),
 			frappe._dict(name="ATT-2", source_document="ENR-1", student="STU-1", status="To be started", course_session="CS-2"),
+			frappe._dict(name="ATT-3", source_document="ENR-1", student="STU-1", status="To be started", course_session="CS-FUTURE"),
 		]
 		mock_sessions.return_value = (
 			{
 				"CS-1": {"name": "CS-1", "weekly_timeslot": "WT-1", "session_date": "2026-07-14", "status": "Completed"},
 				"CS-2": {"name": "CS-2", "weekly_timeslot": "WT-1", "session_date": "2026-07-20", "status": "Completed"},
+				"CS-FUTURE": {"name": "CS-FUTURE", "weekly_timeslot": "WT-1", "session_date": "2026-07-23", "status": "Scheduled"},
 			},
 			{
 				"WT-1": {
@@ -221,9 +230,12 @@ class TestSchoolAdminReportingBuild(TestCase):
 
 		result = _build_reporting_rows("Term 3 2026", datetime(2026, 7, 22, 18, 0))
 
+		self.assertEqual(json.loads(result["family_rows"][0]["student_details_json"])[0]["class_schedule"], [{"day_of_week": "Tuesday", "course": "Creative Art"}])
+		mock_class_schedules.assert_called_once_with(mock_get_all.return_value)
 		self.assertEqual(len(result["family_rows"]), 1)
 		self.assertEqual(result["family_rows"][0]["attendance_classification"], "Attended")
 		self.assertEqual(result["family_rows"][0]["outstanding_amount"], 200)
+		self.assertEqual(result["family_rows"][0]["to_be_started_count"], 1)
 		self.assertIn("sam student", result["family_rows"][0]["search_text"])
 		self.assertEqual(len(result["unmarked_rows"]), 1)
 		self.assertEqual(result["unmarked_rows"][0]["attendance_entry"], "ATT-2")
@@ -236,6 +248,7 @@ class TestSchoolAdminReportingBuild(TestCase):
 
 	@patch("qas_custom.services.school_admin_reporting._safe_fields", side_effect=lambda _doctype, fields: fields)
 	@patch("qas_custom.services.school_admin_reporting._term_invoice_map", return_value={})
+	@patch("qas_custom.services.school_admin_reporting._enrollment_class_schedules", return_value={})
 	@patch("qas_custom.services.school_admin_reporting._session_context", return_value=({}, {}))
 	@patch("qas_custom.services.school_admin_reporting._attendance_rows", return_value=[])
 	@patch("qas_custom.services.school_admin_reporting._parent_map", return_value={"PAR-1": {"parent_name": "Pat"}})
@@ -254,6 +267,33 @@ class TestSchoolAdminReportingBuild(TestCase):
 		row = result["family_rows"][0]
 		self.assertEqual(row["attendance_classification"], "No attendance records")
 		self.assertEqual(row["invoice_classification"], "No Invoice")
+
+
+class TestSchoolAdminReportingClassSchedules(TestCase):
+	@patch("qas_custom.services.school_admin_reporting._safe_fields", side_effect=lambda _doctype, fields: fields)
+	@patch("qas_custom.services.school_admin_reporting.frappe.get_all")
+	def test_keeps_day_and_course_paired_for_each_student_and_deduplicates(self, mock_get_all, _mock_fields):
+		mock_get_all.return_value = [
+			{"name": "WT-1", "course": "Drawing", "day_of_week": "Wednesday"},
+			{"name": "WT-2", "course": "Painting", "day_of_week": "Saturday"},
+		]
+		enrollments = [
+			{"student": "Amy", "weekly_timeslot": "WT-2"},
+			{"student": "Amy", "weekly_timeslot": "WT-1"},
+			{"student": "Amy", "weekly_timeslot": "WT-1"},
+			{"student": "Ben", "weekly_timeslot": "WT-2"},
+		]
+		self.assertEqual(_enrollment_class_schedules(enrollments), {
+			"Amy": [{"day_of_week": "Wednesday", "course": "Drawing"}, {"day_of_week": "Saturday", "course": "Painting"}],
+			"Ben": [{"day_of_week": "Saturday", "course": "Painting"}],
+		})
+		self.assertEqual(mock_get_all.call_count, 1)
+
+	@patch("qas_custom.services.school_admin_reporting.frappe.get_all")
+	def test_unassigned_course_is_retained_without_inventing_a_weekday(self, mock_get_all):
+		self.assertEqual(_enrollment_class_schedules([{"student": "Amy", "course": "Drawing"}]), {"Amy": [{"day_of_week": "", "course": "Drawing"}]})
+		mock_get_all.assert_not_called()
+		self.assertEqual(_enrollment_class_schedules([]), {})
 
 
 class TestSchoolAdminReportingActions(TestCase):
@@ -410,6 +450,20 @@ class TestSchoolAdminTermPaidInvoiceSummary(TestCase):
 
 
 class TestSchoolAdminReportingRows(TestCase):
+	@patch("qas_custom.services.school_admin_reporting._report_filter_options", return_value={"campuses": [], "teachers": []})
+	@patch("qas_custom.services.school_admin_reporting._latest_completed_snapshot")
+	@patch("qas_custom.services.school_admin_reporting._validate_reporting_term")
+	@patch("qas_custom.services.school_admin_reporting._require_school_admin")
+	def test_unmarked_family_filter_includes_mixed_attendance(self, _require, _validate, mock_latest, _options):
+		mock_latest.return_value = frappe._dict(name="QARS-1", term="Term 3 2026", status="Completed")
+		fake_frappe = SimpleNamespace(db=SimpleNamespace(count=Mock(return_value=1)), get_all=Mock(return_value=[]))
+		with patch("qas_custom.services.school_admin_reporting.frappe", fake_frappe):
+			get_school_admin_reporting_rows_data(term="Term 3 2026", report_type=FAMILY_REPORT_TYPE, attendance="To be started")
+		filters = fake_frappe.get_all.call_args.kwargs["filters"]
+		self.assertEqual(filters["to_be_started_count"], [">", 0])
+		self.assertNotIn("attendance_classification", filters)
+
+
 	@patch("qas_custom.services.school_admin_reporting._report_filter_options", return_value={"campuses": [], "teachers": []})
 	@patch("qas_custom.services.school_admin_reporting._latest_completed_snapshot")
 	@patch("qas_custom.services.school_admin_reporting._validate_reporting_term")
