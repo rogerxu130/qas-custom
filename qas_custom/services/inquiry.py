@@ -377,7 +377,7 @@ def reschedule_inquiry_core(inquiry: str | None, payload: dict, actor=None):
 		course_session = payload.get("course_session")
 		if not course_session:
 			frappe.throw(_("Course session is required for a trial lesson."))
-		return assign_inquiry_course_session_core(inquiry_doc.name, course_session, status="Rescheduled")
+		return assign_inquiry_course_session_core(inquiry_doc.name, course_session, status="Booked")
 
 	appointment_date, appointment_time = _parse_appointment_datetime(payload)
 	if not appointment_date:
@@ -386,7 +386,7 @@ def reschedule_inquiry_core(inquiry: str | None, payload: dict, actor=None):
 		inquiry_doc.campus = payload.get("campus")
 	inquiry_doc.current_appointment_date = appointment_date
 	inquiry_doc.current_appointment_time = appointment_time
-	inquiry_doc.status = "Rescheduled"
+	inquiry_doc.status = "Booked"
 	inquiry_doc.save(ignore_permissions=True)
 	frappe.db.commit()
 	return build_inquiry_detail(inquiry_doc.name)

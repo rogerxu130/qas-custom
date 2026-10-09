@@ -271,7 +271,10 @@ class TestApplicationReview(DatabaseTestCase):
                     stack.enter_context(patch.object(obj, name, return_value=value))
                 stack.enter_context(patch.object(frappe, 'get_all', side_effect=records))
                 mapper = stack.enter_context(patch.object(subject.inquiries, '_map_trial_form_session', return_value={'course_session': 'CS'}))
-                complete = stack.enter_context(patch.object(subject, '_complete', side_effect=lambda doc, context: doc.update(status='Converted', converted_enrollment='ENR', converted_invoice='INV')))
+                def finish_application(doc, context):
+                    self.assertEqual(doc.status, 'Needs Review')
+                    doc.update(status='Converted', converted_enrollment='ENR', converted_invoice='INV')
+                complete = stack.enter_context(patch.object(subject, '_complete', side_effect=finish_application))
                 notice = stack.enter_context(patch.object(subject, 'queue_inquiry_admin_notification'))
                 result = subject.create_webhook(payload)
                 self.assertEqual(result['inquiry_status'], expected_status)

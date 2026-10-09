@@ -304,7 +304,7 @@ def _set_referrer(doc, *, parent: str, customer: str, actor=None):
 def _resume_status(doc):
 	stored = str(doc.get("referral_resume_status") or "").strip()
 	if stored in {"Booked", "Rescheduled", "New"}:
-		return stored
+		return "Booked" if stored == "Rescheduled" else stored
 	return "Booked" if doc.get("course_session") else "New"
 
 

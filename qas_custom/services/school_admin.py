@@ -17,6 +17,7 @@ from qas_custom.services.term_media import annotate_media, assert_media_availabl
 from qas_custom.services.enrollment_billing_status import attach_billing_status
 
 import frappe
+from qas_custom.services.inquiry_filters import inquiry_queue_filters, inquiry_date_filter, inquiry_status_filter
 from frappe import _
 from frappe.model.rename_doc import rename_doc
 from frappe.sessions import clear_sessions
@@ -257,6 +258,8 @@ def get_school_admin_dashboard_data():
 	return {
 		"date": str(start_date),
 		"action_counts": {
+			"inquiry_needs_review": _count("Inquiry", {"status": inquiry_status_filter("Needs Review")}),
+			"past_inquiries": _count("Inquiry", inquiry_queue_filters("post_visit")),
 			"draft_invoices": _count_sales_invoices(draft_invoice_filters),
 			"pending_payment_requests": get_pending_payment_request_count(),
 			"trial_needs_scheduling": _count(
@@ -1193,23 +1196,12 @@ def get_school_admin_inquiries_data(
 	if status:
 		if status not in INQUIRY_STATUSES:
 			frappe.throw(_("Unsupported inquiry status filter."))
-		if (queue == "needs_scheduling" and status != "Needs Review") or (queue == "parked" and status != "Parked"):
-			return {
-				"items": [],
-				"total": 0,
-				"limit_start": max(cint(limit_start), 0),
-				"limit": _limit(limit, default=80, max_value=200),
-				"has_more": False,
-			}
-		filters["status"] = status
-	elif queue == "parked":
-		filters["status"] = "Parked"
-	elif queue == "post_visit":
-		filters["status"] = ["in", INQUIRY_POST_VISIT_STATUSES]
-	elif queue == "upcoming":
-		filters["status"] = ["in", INQUIRY_OPEN_STATUSES]
-	elif queue == "needs_scheduling":
-		filters["status"] = "Needs Review"
+		filters["status"] = inquiry_status_filter(status)
+	queue_filters = inquiry_queue_filters(queue, status=status)
+	if queue_filters.get("name") == "__qas_no_matching_inquiry__":
+		return {"items": [], "total": 0, "limit_start": max(cint(limit_start), 0), "limit": _limit(limit, default=80, max_value=200), "has_more": False}
+	queue_date = queue_filters.pop("current_appointment_date", None)
+	filters.update(queue_filters)
 	if inquiry_type:
 		filters["inquiry_type"] = inquiry_type
 	confirmation_status = str(confirmation_status or "").strip()
@@ -1219,17 +1211,11 @@ def get_school_admin_inquiries_data(
 		filters["confirmation_status"] = confirmation_status
 	if campus:
 		filters["campus"] = campus
-	if queue == "upcoming":
-		from_date = from_date or nowdate()
-		to_date = to_date or add_days(nowdate(), 90)
-	elif queue == "post_visit":
-		to_date = to_date or nowdate()
-	if from_date and to_date:
-		filters["current_appointment_date"] = ["between", [getdate(from_date), getdate(to_date)]]
-	elif from_date:
-		filters["current_appointment_date"] = [">=", getdate(from_date)]
-	elif to_date:
-		filters["current_appointment_date"] = ["<=", getdate(to_date)]
+	date_filter = inquiry_date_filter(queue_date, from_date=from_date, to_date=to_date)
+	if date_filter:
+		filters["current_appointment_date"] = date_filter
+	elif date_filter is False:
+		filters["name"] = "__qas_no_matching_inquiry__"
 	search_fields = _safe_fields(
 		"Inquiry",
 		[

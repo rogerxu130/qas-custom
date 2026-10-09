@@ -311,6 +311,7 @@ def create_webhook(payload=None):
     doc.parent = inquiries._resolve_parent({"email": email, "parent_name": doc.contact_name, "phone": doc.contact_phone}, DIRECT)
     # Serialize new submissions for an existing family before matching students.
     frappe.db.sql("SELECT name FROM `tabParent` WHERE name=%s FOR UPDATE", (doc.parent,))
+    context = None
     try:
         doc.student = _student(doc.parent, payload.get("student_name"), payload.get("date_of_birth"))
         doc.submitted_student_dob = _date(payload.get("date_of_birth"))
@@ -320,7 +321,7 @@ def create_webhook(payload=None):
         doc.review_reason = str(error)
     else:
         first, slot, _remaining = context
-        doc.status = "Planned"
+        doc.status = "Needs Review"
         doc.course_session = first.name
         doc.campus = slot.campus
         doc.preferred_course = slot.course
@@ -328,7 +329,7 @@ def create_webhook(payload=None):
         doc.current_appointment_time = slot.start_time
         doc.review_reason = None
     doc.save(ignore_permissions=True)
-    if doc.status == "Planned":
+    if context is not None:
         # The family and submitted application survive a business validation error,
         # but never leave a partial enrollment, attendance or invoice behind.
         frappe.db.savepoint("direct_auto_enrollment")

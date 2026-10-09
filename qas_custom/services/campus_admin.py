@@ -3,6 +3,7 @@ from __future__ import annotations
 from qas_custom.services.term_media import annotate_media, assert_media_available
 
 import frappe
+from qas_custom.services.inquiry_filters import inquiry_queue_filters, inquiry_date_filter, inquiry_status_filter
 from frappe import _
 
 from frappe.utils import add_days, cint, escape_html, flt, getdate, now_datetime, today
@@ -417,6 +418,7 @@ def get_campus_admin_dashboard_data(from_date=None, to_date=None):
 		"from_date": str(start_date),
 		"to_date": str(end_date),
 		"campuses": campuses,
+		"needs_review_count": frappe.db.count("Inquiry", {"campus": ["in", campuses], "status": inquiry_status_filter("Needs Review")}),
 		"trial_lessons": _get_inquiry_dashboard_items(campuses, start_date, end_date, "Trial Lesson"),
 		"school_visits": _get_inquiry_dashboard_items(campuses, start_date, end_date, "School Visit"),
 		"makeup_bookings": _get_attendance_dashboard_items(campuses, start_date, end_date, "Makeup"),
@@ -441,7 +443,7 @@ def get_campus_admin_inquiries_data(
 		"campus": ["in", campuses],
 	}
 	if status:
-		filters["status"] = status
+		filters["status"] = inquiry_status_filter(status)
 	if inquiry_type:
 		filters["inquiry_type"] = inquiry_type
 	if course:
@@ -529,31 +531,7 @@ def get_campus_admin_inquiry_filter_options_data(campus=None):
 
 
 def _campus_admin_inquiry_date_filter(queue_filter=None, *, from_date=None, to_date=None):
-	start_date = getdate(from_date) if from_date else None
-	end_date = getdate(to_date) if to_date else None
-	if start_date and end_date and start_date > end_date:
-		frappe.throw(_("From date cannot be later than To date."))
-
-	if queue_filter:
-		operator, value = queue_filter
-		value = getdate(value)
-		if operator == ">=":
-			start_date = max(filter(None, [start_date, value]))
-		elif operator == "<":
-			queue_end = add_days(value, -1)
-			end_date = min(filter(None, [end_date, queue_end]))
-		else:
-			return queue_filter
-
-	if start_date and end_date and start_date > end_date:
-		return False
-	if start_date and end_date:
-		return ["between", [start_date, end_date]]
-	if start_date:
-		return [">=", start_date]
-	if end_date:
-		return ["<=", end_date]
-	return None
+	return inquiry_date_filter(queue_filter, from_date=from_date, to_date=to_date)
 
 
 def _campus_admin_inquiry_search_names(filters, queue_or_filters, query, *, order_by, limit):
@@ -648,28 +626,7 @@ def _campus_admin_link_matches(doctype, fieldnames, pattern, *, limit):
 
 
 def _campus_admin_inquiry_queue_filters(queue, status=None, reference_date=None):
-	reference_date = getdate(reference_date or today())
-	if queue == "parked":
-		return {"status": "Parked"} if not status or status == "Parked" else {"name": "__qas_no_matching_inquiry__"}, None
-	if queue in {"upcoming", "post_trial"} and status == "Parked":
-		return {"name": "__qas_no_matching_inquiry__"}, None
-	if queue == "upcoming":
-		if status in POST_VISIT_INQUIRY_STATUSES:
-			return {"name": "__qas_no_matching_inquiry__"}, None
-		filters = {"current_appointment_date": [">=", reference_date]}
-		if not status:
-			filters["status"] = ["not in", list(POST_VISIT_INQUIRY_STATUSES) + ["Parked"]]
-		return filters, None
-	if queue == "post_trial":
-		if status:
-			if status in POST_VISIT_INQUIRY_STATUSES:
-				return {}, None
-			return {"current_appointment_date": ["<", reference_date]}, None
-		return {"status": ["!=", "Parked"]}, [
-			["Inquiry", "status", "in", list(POST_VISIT_INQUIRY_STATUSES)],
-			["Inquiry", "current_appointment_date", "<", reference_date],
-		]
-	return {}, None
+	return inquiry_queue_filters(queue, status=status, reference_date=reference_date), None
 
 
 def get_campus_admin_inquiry_data(inquiry=None):

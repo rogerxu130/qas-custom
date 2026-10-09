@@ -112,22 +112,22 @@ class TestSchoolAdminInquiryList(TestCase):
 		self.assertEqual(result["total"], 3)
 		self.assertTrue(result["has_more"])
 
-	def test_post_visit_and_booked_are_combined_with_today_as_date_boundary(self):
+	def test_past_and_booked_are_combined_with_yesterday_as_date_boundary(self):
 		fake_frappe = SimpleNamespace(get_all=Mock(side_effect=[[{"total": 1}], [{"name": "INQ-2026-00003"}]]))
 		with patch("qas_custom.services.school_admin._require_school_admin"), patch(
 			"qas_custom.services.school_admin._safe_fields", side_effect=lambda _doctype, fields: fields,
 		), patch(
 			"qas_custom.services.school_admin._build_inquiry_list_item", side_effect=lambda row: row,
 		), patch(
-			"qas_custom.services.school_admin.nowdate", return_value="2026-07-22",
+			"qas_custom.services.inquiry_filters.get_datetime_in_timezone", return_value="2026-07-22",
 		), patch("qas_custom.services.school_admin.frappe", fake_frappe):
 			get_school_admin_inquiries_data(status="Booked", queue="post_visit")
 
 		count_call, page_call = fake_frappe.get_all.call_args_list
-		self.assertEqual(count_call.kwargs["filters"]["status"], "Booked")
+		self.assertEqual(count_call.kwargs["filters"]["status"], ["in", ["Booked", "Rescheduled"]])
 		self.assertEqual(
 			count_call.kwargs["filters"]["current_appointment_date"],
-			["<=", getdate("2026-07-22")],
+			["<=", getdate("2026-07-21")],
 		)
 		self.assertEqual(page_call.kwargs["filters"], count_call.kwargs["filters"])
 		self.assertTrue(page_call.kwargs["order_by"].startswith("current_appointment_date desc"))
@@ -154,5 +154,5 @@ class TestPendingEnrollmentQueue(TestCase):
 					get_school_admin_inquiries_data(queue="enrollment_pending", status=status)
 				filters = fake.get_all.call_args_list[0].kwargs["filters"]
 				self.assertEqual(filters["inquiry_type"], "Direct Enrollment")
-				self.assertEqual(filters["status"], status or ["in", ["Planned", "Needs Review"]])
+				self.assertEqual(filters["status"], ["in", ["Needs Review", "Planned"]] if status == "Needs Review" else status or ["in", ["Planned", "Needs Review"]])
 				self.assertNotIn("current_appointment_date", filters)

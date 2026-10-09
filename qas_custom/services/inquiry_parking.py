@@ -74,6 +74,8 @@ def change_parking(inquiry, action, note=None):
         if doc.status != "Parked":
             frappe.throw(_("Only parked inquiries can be resumed."))
         previous = doc.get("parked_previous_status")
+        if previous == "Rescheduled":
+            previous = "Booked"
         doc.status = previous if previous in PARKABLE_STATUSES else "Needs Review"
         doc.save(ignore_permissions=True)
         add_parking_note(doc, _("Inquiry resumed from Parked. Status: {0}.").format(doc.status))

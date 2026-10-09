@@ -188,11 +188,12 @@ class TestInquiryParking(TestCase):
                 unwrap(api.campus_admin_change_parking)('INQ-001', 'park')
             change.assert_not_called()
 
-    def test_parked_is_excluded_from_daily_campus_queues(self):
+    def test_parked_status_can_be_combined_with_time_queues(self):
+        from frappe.utils import getdate
         from qas_custom.services.campus_admin import _campus_admin_inquiry_queue_filters
         for queue in ['upcoming', 'post_trial']:
             filters, _ = _campus_admin_inquiry_queue_filters(queue, status='Parked', reference_date='2026-10-03')
-            self.assertEqual(filters, {'name': '__qas_no_matching_inquiry__'})
+            self.assertEqual(filters, {'current_appointment_date': ['>=' if queue == 'upcoming' else '<', getdate('2026-10-03')]})
         filters, _ = _campus_admin_inquiry_queue_filters('parked', reference_date='2026-10-03')
         self.assertEqual(filters, {'status': 'Parked'})
 

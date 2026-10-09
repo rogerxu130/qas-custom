@@ -13,67 +13,29 @@ from qas_custom.services.campus_admin import (
 
 
 class TestCampusAdminInquiryLifecycleQueues(TestCase):
-	def test_upcoming_excludes_outcome_statuses_even_when_future_dated(self):
-		filters, or_filters = _campus_admin_inquiry_queue_filters("upcoming", reference_date="2026-07-17")
-		self.assertEqual(filters["current_appointment_date"], [">=", getdate("2026-07-17")])
-		self.assertEqual(filters["status"], ["not in", list(POST_VISIT_INQUIRY_STATUSES) + ["Parked"]])
-		self.assertIsNone(or_filters)
+	def test_time_queues_do_not_apply_lifecycle_status_filters(self):
+		for status in [None, "Needs Review", "Cancelled", "Completed", "No-show", "Parked", "Converted", "Inactive"]:
+			for queue, operator in [("upcoming", ">="), ("post_trial", "<")]:
+				with self.subTest(status=status, queue=queue):
+					filters, or_filters = _campus_admin_inquiry_queue_filters(queue, status=status, reference_date="2026-07-17")
+					self.assertEqual(filters, {"current_appointment_date": [operator, getdate("2026-07-17")]})
+					self.assertIsNone(or_filters)
 
-		filters, _ = _campus_admin_inquiry_queue_filters(
-			"upcoming",
-			status="Completed",
-			reference_date="2026-07-17",
-		)
-		self.assertEqual(filters, {"name": "__qas_no_matching_inquiry__"})
-
-	def test_post_visit_includes_outcome_statuses_regardless_of_date(self):
-		filters, or_filters = _campus_admin_inquiry_queue_filters("post_trial", reference_date="2026-07-17")
-		self.assertEqual(filters, {"status": ["!=", "Parked"]})
-		self.assertIn(
-			["Inquiry", "status", "in", list(POST_VISIT_INQUIRY_STATUSES)],
-			or_filters,
-		)
-		self.assertIn(["Inquiry", "current_appointment_date", "<", getdate("2026-07-17")], or_filters)
-
-		filters, or_filters = _campus_admin_inquiry_queue_filters(
-			"post_trial",
-			status="Completed",
-			reference_date="2026-07-17",
-		)
+	def test_all_time_needs_review_has_no_appointment_constraint(self):
+		filters, or_filters = _campus_admin_inquiry_queue_filters("all", status="Needs Review")
 		self.assertEqual(filters, {})
 		self.assertIsNone(or_filters)
 
-	def test_past_booked_inquiry_remains_in_post_visit(self):
-		filters, or_filters = _campus_admin_inquiry_queue_filters(
-			"post_trial",
-			status="Booked",
-			reference_date="2026-07-17",
-		)
-		self.assertEqual(filters, {"current_appointment_date": ["<", getdate("2026-07-17")]})
-		self.assertIsNone(or_filters)
-
-	def test_inquiry_service_applies_post_visit_or_filters(self):
-		with patch(
-			"qas_custom.services.campus_admin._require_campus_admin_profile",
-			return_value={"campuses": ["Indooroopilly"]},
-		), patch(
-			"qas_custom.services.campus_admin._filter_requested_campus",
-			return_value=["Indooroopilly"],
-		), patch("qas_custom.services.campus_admin.today", return_value="2026-07-17"), patch(
-			"qas_custom.services.campus_admin.frappe.get_all",
-			return_value=[],
+	def test_campus_service_intersects_past_date_and_exact_status(self):
+		with patch("qas_custom.services.campus_admin._require_campus_admin_profile", return_value={"campuses": ["Indooroopilly"]}), patch(
+			"qas_custom.services.campus_admin._filter_requested_campus", return_value=["Indooroopilly"]
+		), patch("qas_custom.services.inquiry_filters.get_datetime_in_timezone", return_value="2026-07-17"), patch(
+			"qas_custom.services.campus_admin.frappe.get_all", return_value=[]
 		) as get_all:
-			self.assertEqual(
-				get_campus_admin_inquiries_data(queue="post_trial"),
-				{"items": [], "has_more": False, "limit": 200},
-			)
-
+			get_campus_admin_inquiries_data(queue="post_trial", status="Cancelled")
 		kwargs = get_all.call_args.kwargs
-		self.assertEqual(kwargs["filters"], {"campus": ["in", ["Indooroopilly"]], "status": ["!=", "Parked"]})
-		self.assertIn(
-			["Inquiry", "status", "in", list(POST_VISIT_INQUIRY_STATUSES)],
-			kwargs["or_filters"],
-		)
+		self.assertEqual(kwargs["filters"], {"campus": ["in", ["Indooroopilly"]], "status": "Cancelled", "current_appointment_date": ["<=", getdate("2026-07-16")]})
+		self.assertIsNone(kwargs["or_filters"])
 
 	def test_reopen_completed_restores_booked_and_preserves_booking(self):
 		inquiry = SimpleNamespace(

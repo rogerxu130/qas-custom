@@ -36,14 +36,14 @@ class TestCampusAdminInquiryAdvancedSearch(TestCase):
 		fake_frappe = SimpleNamespace(
 			throw=lambda message, *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError(str(message)))
 		)
-		with patch("qas_custom.services.campus_admin.frappe", fake_frappe):
+		with patch("qas_custom.services.inquiry_filters.frappe", fake_frappe):
 			with self.assertRaisesRegex(RuntimeError, "From date cannot be later"):
 				_campus_admin_inquiry_date_filter(from_date="2026-07-20", to_date="2026-07-18")
 
 	@patch("qas_custom.services.campus_admin._get_latest_note_map", return_value={})
 	@patch("qas_custom.services.campus_admin._campus_admin_inquiry_search_names", return_value=None)
 	@patch("qas_custom.services.campus_admin.frappe.get_all", return_value=[])
-	@patch("qas_custom.services.campus_admin.today", return_value="2026-07-18")
+	@patch("qas_custom.services.inquiry_filters.get_datetime_in_timezone", return_value="2026-07-18")
 	@patch("qas_custom.services.campus_admin._filter_requested_campus", return_value=["Indooroopilly"])
 	@patch(
 		"qas_custom.services.campus_admin._require_campus_admin_profile",
@@ -77,7 +77,7 @@ class TestCampusAdminInquiryAdvancedSearch(TestCase):
 		)
 		search_filters = mock_search_names.call_args.args[0]
 		self.assertEqual(search_filters["campus"], ["in", ["Indooroopilly"]])
-		self.assertEqual(search_filters["status"], "Booked")
+		self.assertEqual(search_filters["status"], ["in", ["Booked", "Rescheduled"]])
 		self.assertEqual(search_filters["inquiry_type"], "Trial Lesson")
 		self.assertEqual(search_filters["preferred_course"], "Creative Art")
 		self.assertEqual(
@@ -93,7 +93,7 @@ class TestCampusAdminInquiryAdvancedSearch(TestCase):
 	@patch("qas_custom.services.campus_admin._get_latest_note_map", return_value={"INQ-001": "Latest"})
 	@patch("qas_custom.services.campus_admin._campus_admin_inquiry_search_names", return_value=["INQ-001"])
 	@patch("qas_custom.services.campus_admin.frappe.get_all")
-	@patch("qas_custom.services.campus_admin.today", return_value="2026-07-18")
+	@patch("qas_custom.services.inquiry_filters.get_datetime_in_timezone", return_value="2026-07-18")
 	@patch("qas_custom.services.campus_admin._filter_requested_campus", return_value=["Indooroopilly"])
 	@patch(
 		"qas_custom.services.campus_admin._require_campus_admin_profile",
