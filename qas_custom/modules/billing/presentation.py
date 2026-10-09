@@ -5,6 +5,7 @@ from datetime import datetime
 import frappe
 from frappe.utils import flt, formatdate, get_time, getdate
 
+from qas_custom.modules.billing.invoice_gst import invoice_gst_context
 from qas_custom.modules.billing.invoice_amounts import resolve_invoice_print_amounts
 from qas_custom.modules.billing.invoice_settings import get_invoice_payment_context, get_invoice_settings
 from qas_custom.modules.billing.store_credit import get_invoice_total_amount
@@ -74,6 +75,7 @@ def build_parent_invoice_context(
 		"posting_date": formatdate(invoice_doc.get("posting_date")) if invoice_doc.get("posting_date") else "",
 		"due_date": formatdate(invoice_doc.get("due_date")) if invoice_doc.get("due_date") else "",
 		"total": get_invoice_total_amount(invoice_doc),
+		**invoice_gst_context(invoice_doc),
 		"store_credit_applied": store_credit,
 		"payable_amount": payable,
 		"invoice_link": portal_link,

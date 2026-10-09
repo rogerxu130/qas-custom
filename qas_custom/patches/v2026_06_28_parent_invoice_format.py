@@ -233,9 +233,14 @@ def _parent_invoice_print_html():
 	<table class="qas-header">
 		<tr>
 		<td>
-			<p class="qas-brand">Queensland Art School</p>
-			<h1 class="qas-title">Invoice</h1>
+			<p class="qas-brand">{{ (qas_amounts.school_name or "Queensland Art School") if qas_amounts.gst_included else "Queensland Art School" }}</p>
+			<h1 class="qas-title">{{ qas_amounts.invoice_title or "Invoice" }}</h1>
 			<p class="qas-muted">{{ doc.name }}</p>
+			{% if qas_amounts.gst_included %}
+			{% if qas_amounts.legal_name %}<p>{{ qas_amounts.legal_name }}</p>{% endif %}
+			{% if qas_amounts.abn %}<p>ABN: {{ qas_amounts.abn }}</p>{% endif %}
+			<p>Bill to: {{ qas_amounts.recipient_name or qas_amounts.customer }}</p>
+			{% endif %}
 		</td>
 		<td style="text-align:right;">
 			<p><strong>Due date</strong><br>{{ doc.due_date or "-" }}</p>
@@ -305,7 +310,11 @@ def _parent_invoice_print_html():
 	{% endif %}
 
 	<table class="qas-total">
-		<tr><td>Invoice total</td><td style="text-align:right;"><strong>AUD ${{ "%.2f"|format(invoice_total) }}</strong></td></tr>
+		{% if qas_amounts.gst_included %}
+		<tr><td>Subtotal (excl. GST)</td><td style="text-align:right;">AUD ${{ "%.2f"|format(qas_amounts.subtotal_excluding_gst) }}</td></tr>
+		<tr><td>Included GST (10%)</td><td style="text-align:right;">AUD ${{ "%.2f"|format(qas_amounts.gst_amount) }}</td></tr>
+		{% endif %}
+		<tr><td>Invoice total{% if qas_amounts.gst_included %} (incl. GST){% endif %}</td><td style="text-align:right;"><strong>AUD ${{ "%.2f"|format(invoice_total) }}</strong></td></tr>
 		<tr><td>Store credit applied</td><td style="text-align:right;"><strong>AUD ${{ "%.2f"|format(credit_applied) }}</strong></td></tr>
 		<tr class="final"><td>Amount payable</td><td style="text-align:right;">AUD ${{ "%.2f"|format(payable_amount) }}</td></tr>
 	</table>

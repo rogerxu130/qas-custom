@@ -86,3 +86,5 @@ qas_custom.patches.v2026_09_23_payg_indexes
 qas_custom.patches.v2026_09_23_payg_invoice_fields
 
 qas_custom.patches.v2026_10_01_add_advance_term_invoice_marker
+
+qas_custom.patches.v2026_10_09_invoice_gst_display

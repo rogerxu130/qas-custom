@@ -6,7 +6,8 @@ from qas_custom.services.term_lifecycle import open_enrollment_or_filters
 import frappe
 from frappe.utils import getdate, get_time, now_datetime, today
 
-from qas_custom.modules.billing.invoice_settings import get_invoice_payment_context
+from qas_custom.modules.billing.invoice_gst import invoice_gst_context
+from qas_custom.modules.billing.invoice_settings import get_invoice_payment_context, get_invoice_settings
 from qas_custom.modules.billing.presentation import (
     build_parent_invoice_adjustment,
     build_parent_invoice_item,
@@ -323,6 +324,7 @@ def get_parent_invoices_data():
 
     from qas_custom.services.stripe_trial_payments import payment_url
 
+    settings = get_invoice_settings()
     payload = []
     for invoice in invoices:
         doc = frappe.get_doc("Sales Invoice", invoice["name"])
@@ -337,6 +339,10 @@ def get_parent_invoices_data():
         payload.append(
             {
                 "invoice_id": doc.name,
+                **invoice_gst_context(doc),
+                "school_name": settings.get("school_name"),
+                "legal_name": settings.get("legal_name"),
+                "abn": settings.get("abn"),
                 "online_payment_url": payment_url(doc),
                 "posting_date": doc.posting_date,
                 "due_date": doc.due_date,

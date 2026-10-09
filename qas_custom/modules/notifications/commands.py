@@ -1466,6 +1466,16 @@ def _invoice_notification_amounts(invoice_doc, *, store_credit_applied=None, pay
 	)
 
 
+def _invoice_gst_html_context(context):
+	if not context.get("gst_included"):
+		return {"gst_rows": "", "total_label": "Invoice total"}
+	rows = "".join(
+		'<tr><td style="padding:7px 0;">{label}</td><td style="padding:7px 0;text-align:right;">AUD ${amount:.2f}</td></tr>'.format(label=label, amount=flt(context[key]))
+		for label, key in [("Subtotal (excl. GST)", "subtotal_excluding_gst"), ("Included GST (10%)", "gst_amount")]
+	)
+	return {"gst_rows": rows, "total_label": "Invoice total (incl. GST)"}
+
+
 def _invoice_pdf_html(context):
 	rows = "\n".join(_invoice_pdf_item_row(item) for item in _invoice_parent_lines(context))
 	if not rows:
@@ -1515,9 +1525,10 @@ def _invoice_pdf_html(context):
 		<tr>
 			<td>
 				<p class="brand">{school_name}</p>
-				<h1>Invoice</h1>
+				<h1>{invoice_title}</h1>
 				<div class="muted">{invoice}</div>
 				{school_identity}
+				{recipient_block}
 			</td>
 			<td class="right">
 				<strong>Due date</strong><br>{due_date}<br><br>
@@ -1552,7 +1563,8 @@ def _invoice_pdf_html(context):
 	{additional_description}
 
 	<table class="totals">
-		<tr><td>Invoice total</td><td class="right"><strong>AUD ${total:.2f}</strong></td></tr>
+		{gst_rows}
+		<tr><td>{total_label}</td><td class="right"><strong>AUD ${total:.2f}</strong></td></tr>
 		<tr><td>Store credit applied</td><td class="right"><strong>AUD ${credit:.2f}</strong></td></tr>
 		<tr class="final"><td>Amount payable</td><td class="right">AUD ${payable:.2f}</td></tr>
 	</table>
@@ -1562,6 +1574,9 @@ def _invoice_pdf_html(context):
 </html>
 	""".format(
 		invoice=escape_html(context["invoice"]),
+		invoice_title=escape_html(context.get("invoice_title") or "Invoice"),
+		recipient_block=('<p class="muted">Bill to: {0}</p>'.format(escape_html(context.get("recipient_name") or context.get("customer") or "")) if context.get("gst_included") else ""),
+		**_invoice_gst_html_context(context),
 		school_name=escape_html(context.get("school_name") or "Queensland Art School"),
 		school_identity=_school_identity_pdf_html(context),
 		due_date=escape_html(context["due_date"] or "-"),
@@ -1806,7 +1821,7 @@ def _invoice_email_message(invoice_doc, event, store_credit_applied, payable_amo
 				<div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;">
 					<div style="padding:22px 24px;background:#172033;color:#ffffff;">
 						<p style="margin:0 0 6px;font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:#f7b6a4;">{school_name}</p>
-						<h1 style="margin:0;font-size:24px;line-height:1.3;">Invoice {invoice}</h1>
+						<h1 style="margin:0;font-size:24px;line-height:1.3;">{invoice_title} {invoice}</h1>
 						{school_identity}
 					</div>
 					<div style="padding:24px;">
@@ -1816,12 +1831,13 @@ def _invoice_email_message(invoice_doc, event, store_credit_applied, payable_amo
 						{payment_plan_html}
 
 						<table style="width:100%;border-collapse:collapse;margin:0 0 18px;">
+							{gst_rows}
 							<tr>
 								<td style="padding:10px 0;color:#64748b;">Due date</td>
 								<td style="padding:10px 0;text-align:right;font-weight:700;">{due_date}</td>
 							</tr>
 							<tr>
-								<td style="padding:10px 0;color:#64748b;">Invoice total</td>
+								<td style="padding:10px 0;color:#64748b;">{total_label}</td>
 								<td style="padding:10px 0;text-align:right;font-weight:700;">AUD ${total:.2f}</td>
 							</tr>
 							<tr>
@@ -1857,6 +1873,8 @@ def _invoice_email_message(invoice_doc, event, store_credit_applied, payable_amo
 		</div>
 	""".format(
 		invoice=context["invoice"],
+		invoice_title=escape_html(context.get("invoice_title") or "Invoice"),
+		**_invoice_gst_html_context(context),
 		school_name=escape_html(context.get("school_name") or "Queensland Art School"),
 		school_identity=_school_identity_email_html(context),
 		greeting=greeting,

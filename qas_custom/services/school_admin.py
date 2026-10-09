@@ -7091,6 +7091,8 @@ def _apply_invoice_payment_payload(doc, payload):
 
 
 def _invoice_credit_payload(doc_or_row):
+	from qas_custom.modules.billing.invoice_gst import invoice_gst_context
+
 	invoice_name = _field_value(doc_or_row, "name")
 	store_credit_applied = get_invoice_store_credit_applied(invoice_name) if invoice_name else 0
 	payable_amount = get_invoice_payable_amount(doc_or_row) if invoice_name else 0
@@ -7098,6 +7100,7 @@ def _invoice_credit_payload(doc_or_row):
 		"store_credit_applied": store_credit_applied,
 		"payable_amount": payable_amount,
 		"invoice_total": get_invoice_total_amount(doc_or_row),
+		**invoice_gst_context(doc_or_row),
 		"invoice_link": _invoice_link(invoice_name) if invoice_name else None,
 		"payment_link": _invoice_payment_link(invoice_name) if invoice_name else None,
 	}
