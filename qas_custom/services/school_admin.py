@@ -359,7 +359,7 @@ def get_school_admin_family_data(parent=None, student=None, customer=None, email
 
 
 def get_school_admin_family_attendance_data(parent=None, student=None, customer=None, email=None, term=None):
-	"""Return past/current attendance for every student in one family, scoped to a term."""
+	"""Return marked attendance and special bookings for one family, scoped to a term."""
 	_require_school_admin()
 	context = _resolve_family_context(parent=parent, student=student, customer=customer, email=email)
 	if not context.get("parent") and not context.get("student") and not context.get("customer"):
@@ -383,7 +383,7 @@ def get_school_admin_family_attendance_data(parent=None, student=None, customer=
 		return {"term": selected_term, "terms": terms, "items": []}
 	sessions = frappe.get_all(
 		"Course Sessions",
-		filters={"name": ["in", session_ids], "session_date": ["<=", today()]},
+		filters={"name": ["in", session_ids]},
 		fields=["name", "weekly_timeslot", "session_date", "status"],
 		limit_page_length=0,
 	)
@@ -399,6 +399,8 @@ def get_school_admin_family_attendance_data(parent=None, student=None, customer=
 	student_map = {row.get("name"): row for row in students if row.get("name")}
 	items = []
 	for row in attendance_rows:
+		if (row.get("status") or "To be started") == "To be started" and row.get("enrollment_type") != "Makeup":
+			continue
 		session = session_map.get(row.get("course_session"))
 		timeslot = timeslot_map.get((session or {}).get("weekly_timeslot"))
 		if not session or not timeslot:
