@@ -84,5 +84,6 @@
  ],
  "row_format": "Dynamic",
  "rows_threshold_for_grid_search": 20,
- "states": []
+ "states": [],
+ "track_changes": 1
 }
