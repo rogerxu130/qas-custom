@@ -13,7 +13,7 @@ def inquiry_queue_filters(queue, status=None, reference_date=None):
     # Compatibility for older clients, which still send lifecycle queues.
     if queue in {"parked", "needs_scheduling"}:
         expected = "Parked" if queue == "parked" else "Needs Review"
-        return {"status": expected} if not status or status == expected else {"name": "__qas_no_matching_inquiry__"}
+        return {"status": expected} if not status or expected in [value.strip() for value in str(status).split(",")] else {"name": "__qas_no_matching_inquiry__"}
     return {}
 
 
@@ -41,8 +41,8 @@ def inquiry_date_filter(queue_filter=None, *, from_date=None, to_date=None):
 
 
 def inquiry_status_filter(status):
-    if status == "Booked":
-        return ["in", ["Booked", "Rescheduled"]]
-    if status == "Needs Review":
-        return ["in", ["Needs Review", "Planned"]]
-    return status
+    statuses = list(dict.fromkeys(value.strip() for value in str(status or "").split(",") if value.strip()))
+    for value, legacy in (("Booked", "Rescheduled"), ("Needs Review", "Planned")):
+        if value in statuses and legacy not in statuses:
+            statuses.append(legacy)
+    return ["in", statuses] if len(statuses) > 1 else statuses[0] if statuses else status

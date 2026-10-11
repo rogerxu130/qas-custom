@@ -11,6 +11,35 @@ from qas_custom.services.school_admin import (
 
 
 class TestSchoolAdminInquiryList(TestCase):
+	def test_multiple_statuses_preserve_both_legacy_aliases(self):
+		from qas_custom.services.inquiry_filters import inquiry_status_filter
+		self.assertEqual(inquiry_status_filter("Needs Review,Booked"), ["in", ["Needs Review", "Booked", "Rescheduled", "Planned"]])
+		self.assertEqual(inquiry_status_filter("Needs Review"), ["in", ["Needs Review", "Planned"]])
+
+	def test_pending_enrollment_queue_intersects_selected_statuses(self):
+		fake = SimpleNamespace(get_all=Mock(side_effect=[[{"total": 0}], []]))
+		with patch("qas_custom.services.school_admin._require_school_admin"), patch("qas_custom.services.school_admin._safe_fields", side_effect=lambda d, f: f), patch("qas_custom.services.school_admin.frappe", fake):
+			get_school_admin_inquiries_data(queue="enrollment_pending", status="Needs Review,Booked")
+		self.assertEqual(fake.get_all.call_args.kwargs["filters"]["status"], ["in", ["Needs Review", "Planned"]])
+		self.assertEqual(fake.get_all.call_args.kwargs["filters"]["inquiry_type"], "Direct Enrollment")
+
+	def test_multiple_statuses_share_count_and_page_filters(self):
+		fake = SimpleNamespace(get_all=Mock(side_effect=[[{"total": 0}], []]))
+		with patch("qas_custom.services.school_admin._require_school_admin"), patch("qas_custom.services.school_admin._safe_fields", side_effect=lambda d, f: f), patch("qas_custom.services.school_admin.frappe", fake):
+			get_school_admin_inquiries_data(status="Booked, No-show,Follow-up,Booked", query="Amy", from_date="2026-10-12", to_date="2026-10-12", limit_start=80)
+		count, page = fake.get_all.call_args_list
+		self.assertEqual(page.kwargs["filters"], count.kwargs["filters"])
+		self.assertEqual(page.kwargs["filters"]["status"], ["in", ["Booked", "No-show", "Follow-up", "Rescheduled"]])
+		self.assertEqual(page.kwargs["filters"]["current_appointment_date"], ["between", [getdate("2026-10-12"), getdate("2026-10-12")]])
+		self.assertEqual(page.kwargs["limit_start"], 80)
+		self.assertTrue(page.kwargs["or_filters"])
+
+	def test_multiple_statuses_reject_unsupported_value(self):
+		fake = SimpleNamespace(throw=Mock(side_effect=ValueError("Unsupported")))
+		with patch("qas_custom.services.school_admin._require_school_admin"), patch("qas_custom.services.school_admin.frappe", fake), patch("qas_custom.services.school_admin._", side_effect=lambda value: value):
+			with self.assertRaises(ValueError):
+				get_school_admin_inquiries_data(status="Booked,Unknown")
+
 	def test_exact_status_query_and_type_share_the_same_backend_filter(self):
 		fake_frappe = SimpleNamespace(
 			get_all=Mock(

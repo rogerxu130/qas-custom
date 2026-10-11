@@ -1191,13 +1191,16 @@ def get_school_admin_inquiries_data(
 	order_queue = queue
 	if queue == "enrollment_pending":
 		inquiry_type = "Direct Enrollment"
-		if status and status not in {"Planned", "Needs Review"}:
+		if status and not {value.strip() for value in status.split(",")}.intersection({"Planned", "Needs Review"}):
 			return {"items": [], "total": 0, "limit_start": max(cint(limit_start), 0),
 				"limit": _limit(limit, default=80, max_value=200), "has_more": False}
 		filters["status"] = ["in", ["Planned", "Needs Review"]]
 	if status:
-		if status not in INQUIRY_STATUSES:
+		statuses = [value.strip() for value in status.split(",") if value.strip()]
+		if not statuses or any(value not in INQUIRY_STATUSES for value in statuses):
 			frappe.throw(_("Unsupported inquiry status filter."))
+		if queue == "enrollment_pending":
+			status = ",".join(value for value in statuses if value in {"Planned", "Needs Review"})
 		filters["status"] = inquiry_status_filter(status)
 	queue_filters = inquiry_queue_filters(queue, status=status)
 	if queue_filters.get("name") == "__qas_no_matching_inquiry__":
