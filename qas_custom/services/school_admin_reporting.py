@@ -408,6 +408,8 @@ def get_school_admin_term_paid_invoice_summary_data(term=None):
 	linked to the selected Term.  Draft, Partly Paid, Unpaid, and Cancelled
 	invoices are excluded.
 	"""
+	from qas_custom.services.paid_invoice_payments import paid_invoice_payment_breakdown
+
 	_require_school_admin()
 	_validate_term(term)
 	if not _doctype_available("Sales Invoice"):
@@ -419,11 +421,13 @@ def get_school_admin_term_paid_invoice_summary_data(term=None):
 			"term": term,
 			"paid_invoice_count": 0,
 			"paid_invoice_total": 0.0,
+			"payment_breakdown": paid_invoice_payment_breakdown([]),
 		}
 
 	fields = _safe_fields(
 		"Sales Invoice",
-		["name", "docstatus", "status", "grand_total", "rounded_total", "posting_date"],
+		["name", "docstatus", "status", "grand_total", "rounded_total", "posting_date",
+		 "currency", "is_return", "is_pos", "paid_amount", "change_amount", "disable_rounded_total"],
 	)
 	rows = frappe.get_all(
 		"Sales Invoice",
@@ -435,18 +439,22 @@ def get_school_admin_term_paid_invoice_summary_data(term=None):
 
 	paid_total = 0.0
 	paid_count = 0
+	paid_invoices = []
 	for row in rows:
 		# Keep this defensive guard even though the query filters the rows. It
 		# protects the summary from stale/mock rows and future query changes.
 		if cint(row.get("docstatus")) != 1 or row.get("status") != "Paid":
 			continue
 		paid_count += 1
-		paid_total += flt(get_invoice_total_amount(frappe._dict(row)))
+		invoice_total = flt(get_invoice_total_amount(frappe._dict(row)))
+		paid_total += invoice_total
+		paid_invoices.append({**row, "payment_report_total": invoice_total})
 
 	return {
 		"term": term,
 		"paid_invoice_count": paid_count,
 		"paid_invoice_total": round(paid_total, 2),
+		"payment_breakdown": paid_invoice_payment_breakdown(paid_invoices),
 	}
 
 

@@ -426,13 +426,16 @@ class TestSchoolAdminTermPaidInvoiceSummary(TestCase):
 		]
 		mock_total.side_effect = lambda row: row.get("rounded_total")
 
-		result = get_school_admin_term_paid_invoice_summary_data("Term 3 2026")
+		with patch("qas_custom.services.paid_invoice_payments._linked", return_value=[]):
+			result = get_school_admin_term_paid_invoice_summary_data("Term 3 2026")
 
-		self.assertEqual(result, {
+		self.assertEqual({key: result[key] for key in ("term", "paid_invoice_count", "paid_invoice_total")}, {
 			"term": "Term 3 2026",
 			"paid_invoice_count": 2,
 			"paid_invoice_total": 608.0,
 		})
+		self.assertEqual(result["payment_breakdown"]["review_count"], 2)
+		self.assertEqual(result["payment_breakdown"]["cash_amount"], 0)
 		filters = mock_get_all.call_args.kwargs["filters"]
 		self.assertEqual(filters["name"], ["in", ["SINV-001", "SINV-002", "SINV-003"]])
 		self.assertEqual(filters["docstatus"], 1)
