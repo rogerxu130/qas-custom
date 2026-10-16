@@ -22,7 +22,7 @@ def run_payment_plan_reminders(today=None):
 		return {"skipped": True, "reason": email_block_reason()}
 	today = _brisbane_date(today)
 	result = {"eligible": 0, "queued": 0, "skipped": 0, "failed": 0}
-	for row in frappe.get_all("Sales Invoice", filters={"docstatus": 1, "qas_has_payment_plan": 1, "outstanding_amount": [">", 0.005]}, pluck="name", limit_page_length=0):
+	for row in frappe.get_all("Sales Invoice", filters={"qas_invoice_type": ["not in", ["Store Order", "Material Order"]], "source_doctype": ["!=", "Store Order"], "docstatus": 1, "qas_has_payment_plan": 1, "outstanding_amount": [">", 0.005]}, pluck="name", limit_page_length=0):
 		try:
 			doc = frappe.get_doc("Sales Invoice", row)
 			if not has_active_payment_plan(doc):

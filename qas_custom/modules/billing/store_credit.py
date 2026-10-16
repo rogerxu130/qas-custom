@@ -840,6 +840,9 @@ def _doctype_available(doctype: str) -> bool:
 
 
 def _is_course_invoice(invoice_doc) -> bool:
+	from qas_custom.services.order_invoices import is_order_invoice
+	if is_order_invoice(invoice_doc):
+		return False
 	invoice_type = invoice_doc.get("qas_invoice_type") if hasattr(invoice_doc, "get") else None
 	if invoice_type in {"Material Order", "Other"}:
 		return False
@@ -853,6 +856,9 @@ def _is_course_invoice(invoice_doc) -> bool:
 
 
 def _store_credit_application_eligibility(invoice_doc) -> tuple[bool, str | None]:
+	from qas_custom.services.order_invoices import is_order_invoice
+	if is_order_invoice(invoice_doc):
+		return False, "Store Credit is never accepted for Order Invoices."
 	source_type = invoice_doc.get("source_type") if hasattr(invoice_doc, "get") else None
 	is_manual_invoice = invoice_doc.get("qas_is_manual_invoice") if hasattr(invoice_doc, "get") else None
 	if cint(is_manual_invoice) or (source_type or "").strip().lower() == "manual":

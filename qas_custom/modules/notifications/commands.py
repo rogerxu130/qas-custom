@@ -1540,7 +1540,7 @@ def _invoice_pdf_html(context):
 	<table class="summary">
 		<tr>
 			<td><span>Invoice total</span><strong>AUD ${total:.2f}</strong></td>
-			<td><span>Store credit applied</span><strong>AUD ${credit:.2f}</strong></td>
+			{credit_summary}
 			<td><span>Amount payable</span><strong class="payable">AUD ${payable:.2f}</strong></td>
 		</tr>
 	</table>
@@ -1552,7 +1552,7 @@ def _invoice_pdf_html(context):
 	<table class="items">
 		<thead>
 			<tr>
-				<th>Student</th>
+				<th>{party_column}</th>
 				<th>Description</th>
 				<th class="right">Amount</th>
 			</tr>
@@ -1565,7 +1565,7 @@ def _invoice_pdf_html(context):
 	<table class="totals">
 		{gst_rows}
 		<tr><td>{total_label}</td><td class="right"><strong>AUD ${total:.2f}</strong></td></tr>
-		<tr><td>Store credit applied</td><td class="right"><strong>AUD ${credit:.2f}</strong></td></tr>
+		{credit_total_row}
 		<tr class="final"><td>Amount payable</td><td class="right">AUD ${payable:.2f}</td></tr>
 	</table>
 
@@ -1583,6 +1583,9 @@ def _invoice_pdf_html(context):
 		posting_date=escape_html(context["posting_date"] or "-"),
 		total=flt(context["total"]),
 		credit=flt(context["store_credit_applied"]),
+		party_column="Item" if context.get("is_order_invoice") else "Student",
+		credit_summary="" if context.get("is_order_invoice") else '<td><span>Store credit applied</span><strong>AUD ${0:.2f}</strong></td>'.format(flt(context["store_credit_applied"])),
+		credit_total_row="" if context.get("is_order_invoice") else '<tr><td>Store credit applied</td><td class="right"><strong>AUD ${0:.2f}</strong></td></tr>'.format(flt(context["store_credit_applied"])),
 		payable=flt(context["payable_amount"]),
 		payment_plan_block=payment_plan_block,
 		invoice_message=invoice_message,

@@ -1826,6 +1826,9 @@ def set_school_admin_invoice_payment_plan_data(invoice=None, payload=None):
 		frappe.throw(_("Invoice is required."))
 	payload = _get_payload(payload)
 	doc = frappe.get_doc("Sales Invoice", invoice)
+	from qas_custom.services.order_invoices import is_order_invoice
+	if is_order_invoice(doc):
+		frappe.throw(_("Open this Order Invoice in Shop to edit, approve or record payment."))
 	doc = apply_payment_plan(doc, payload.get("installments") or [], actor=frappe.session.user)
 	_add_comment("Sales Invoice", doc.name, _("Payment plan created by School Admin with {0} installment(s).").format(len(doc.get("qas_payment_plan_installments") or [])))
 	frappe.db.commit()
@@ -1839,6 +1842,8 @@ def set_school_admin_invoice_payment_plan_data(invoice=None, payload=None):
 def create_school_admin_manual_invoice_data(payload=None):
 	_require_school_admin()
 	payload = _get_payload(payload)
+	if (payload.get("qas_invoice_type") or payload.get("invoice_type")) in {"Store Order", "Material Order"}:
+		frappe.throw(_("Create an Order Invoice from Shop so it is linked to its order."))
 	invoice = _create_school_admin_manual_invoice_doc(payload)
 	_add_comment("Sales Invoice", invoice.name, "Manual invoice created by School Admin.")
 	frappe.db.commit()
@@ -1940,6 +1945,9 @@ def _lock_school_admin_draft_invoice(invoice):
 		(invoice,),
 	)
 	doc = frappe.get_doc("Sales Invoice", invoice, for_update=True)
+	from qas_custom.services.order_invoices import is_order_invoice
+	if is_order_invoice(doc):
+		frappe.throw(_("Open this Order Invoice in Shop to edit or approve it."))
 	if cint(doc.docstatus) != 0:
 		frappe.throw(_("Only draft invoices can be edited or submitted."))
 	return doc
@@ -2159,6 +2167,9 @@ def mark_school_admin_invoice_paid_data(invoice=None, payload=None):
 		frappe.throw(_("Invoice is required."))
 	payload = _get_payload(payload)
 	doc = frappe.get_doc("Sales Invoice", invoice)
+	from qas_custom.services.order_invoices import is_order_invoice
+	if is_order_invoice(doc):
+		frappe.throw(_("Open this Order Invoice in Shop to edit, approve or record payment."))
 	if cint(doc.docstatus) != 1:
 		frappe.throw(_("Only submitted invoices can be paid."))
 
@@ -2214,6 +2225,9 @@ def cancel_school_admin_invoice_data(
 		frappe.throw(_("Cancellation reason is required."))
 
 	doc = frappe.get_doc("Sales Invoice", invoice)
+	from qas_custom.services.order_invoices import is_order_invoice
+	if is_order_invoice(doc):
+		frappe.throw(_("Open this Order Invoice in Shop to edit, approve or record payment."))
 	if cint(doc.docstatus) == 2:
 		_clear_deleted_invoice_enrollment_snapshot(doc, action="cancelled")
 		if commit:
@@ -2294,6 +2308,9 @@ def reopen_school_admin_unpaid_invoice_data(invoice=None, reason=None):
 	try:
 		frappe.db.sql("select name from `tabSales Invoice` where name=%s for update", (invoice,))
 		doc = frappe.get_doc("Sales Invoice", invoice)
+		from qas_custom.services.order_invoices import is_order_invoice
+		if is_order_invoice(doc):
+			frappe.throw(_("Open this Order Invoice in Shop to edit or approve it."))
 		if cint(doc.docstatus) == 0:
 			payload = _build_invoice_payload(doc)
 			payload["already_reopened"] = True
@@ -2367,7 +2384,7 @@ def _unique_invoice_names(invoices):
 
 
 def _draft_invoice_submit_filters():
-	filters = {"docstatus": 0}
+	filters = {"docstatus": 0, "qas_invoice_type": ["not in", ["Store Order", "Material Order"]], "source_doctype": ["!=", "Store Order"]}
 	if _has_field("Sales Invoice", "status"):
 		filters["status"] = ["!=", "Cancelled"]
 	return filters
@@ -6234,6 +6251,8 @@ def _apply_active_timeslot_filter(filters, include_inactive_timeslots=0):
 def _count_sales_invoices(filters):
 	if not _doctype_available("Sales Invoice"):
 		return 0
+	filters = dict(filters or {})
+	filters.update({"qas_invoice_type": ["not in", ["Store Order", "Material Order"]], "source_doctype": ["!=", "Store Order"]})
 	return _count("Sales Invoice", filters)
 
 
@@ -6241,7 +6260,7 @@ def _get_outstanding_invoice_summary():
 	if not _doctype_available("Sales Invoice"):
 		return {"count": 0, "amount": 0}
 
-	filters = {"docstatus": 1}
+	filters = {"docstatus": 1, "qas_invoice_type": ["not in", ["Store Order", "Material Order"]], "source_doctype": ["!=", "Store Order"]}
 	if _has_field("Sales Invoice", "outstanding_amount"):
 		filters["outstanding_amount"] = [">", 0]
 	fields = _safe_fields("Sales Invoice", ["name", "grand_total", "outstanding_amount"])
@@ -6869,7 +6888,7 @@ def _get_invoice_rows(
 ):
 	if not _doctype_available("Sales Invoice"):
 		return []
-	filters = {}
+	filters = {"qas_invoice_type": ["not in", ["Store Order", "Material Order"]], "source_doctype": ["!=", "Store Order"]}
 	if names is not None:
 		names = sorted({name for name in names if name})
 		if not names:

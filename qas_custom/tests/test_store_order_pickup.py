@@ -5,33 +5,36 @@ from unittest.mock import Mock, patch
 
 import frappe
 from qas_custom.services import material_orders as orders
+from qas_custom.services import order_invoices as billing
 from qas_custom.modules.notifications import store_order_notifications as mail
 
 
 class StoreOrderPickupTests(TestCase):
  def setUp(self):
+  frappe.local.flags=frappe._dict(in_test=False)
   self.stack = ExitStack(); self.addCleanup(self.stack.close)
   self.db = SimpleNamespace(sql=Mock(), get_value=Mock(return_value='Family'), savepoint=Mock(), rollback=Mock(), exists=Mock(return_value=True))
   self.stack.enter_context(patch.object(frappe,'db',self.db))
   self.stack.enter_context(patch.object(frappe,'session',SimpleNamespace(user='staff')))
   self.stack.enter_context(patch.object(orders,'_',lambda x:x))
   self.stack.enter_context(patch.object(frappe,'throw',side_effect=ValueError))
+  self.stack.enter_context(patch.object(billing,'now_datetime',return_value='2026-09-12 09:00:00'))
   self.stack.enter_context(patch.object(orders,'now_datetime',return_value='2026-09-12 09:00:00'))
   self.stack.enter_context(patch.object(mail,'now_datetime',return_value='2026-09-12 09:00:00'))
 
  def doc(self, **values):
-  doc=frappe._dict(name='STORE-ORD-2026-00001',parent='P1',status='Ordered',pickup_campus='North',items=[frappe._dict(amount=25)],invoice='LEGACY-INVOICE',**values)
-  doc.insert=Mock();doc.save=Mock();doc.add_comment=Mock()
+  doc=frappe._dict(name='STORE-ORD-2026-00001',parent='P1',status='Ordered',pickup_campus='North',items=[frappe._dict(amount=25,unit_price=25,qty=1,store_product='KIT',item_code='ITEM')],discount_type='',discount_value=0,discount_reason='',invoice='LEGACY-INVOICE',**values)
+  doc.insert=Mock();doc.save=Mock();doc.add_comment=Mock();doc.set=lambda key,value:doc.update({key:value})
   doc.db_set=lambda updates,**kw:doc.update(updates)
   return doc
 
- def test_creation_without_customer_or_session_never_creates_invoice(self):
+ def test_creation_without_session_creates_separate_order_invoice(self):
   doc=self.doc(); parent=frappe._dict(name='P1')
-  with patch.object(orders,'_store_order_options',return_value={'pickup_campuses':[{'name':'North'}]}), patch.object(orders,'_store_order_items',return_value=[{'amount':25}]), patch.object(frappe,'get_doc',return_value=doc) as get, patch.object(orders,'_order_payload',return_value={'name':doc.name}):
+  with patch.object(orders,'_store_order_options',return_value={'pickup_campuses':[{'name':'North'}]}), patch.object(orders,'_store_order_items',return_value=[{'amount':25}]), patch.object(frappe,'get_doc',return_value=doc) as get, patch.object(billing,'order_payload',return_value={'name':doc.name}),patch.object(billing,'create_invoice') as create:
    orders._create_store_order(parent,{'pickup_campus':'North','items':[{}]})
   data=get.call_args.args[0]
   self.assertEqual(data['doctype'],'Store Order');self.assertNotIn('invoice',data);self.assertNotIn('customer',data);self.assertNotIn('pickup_course_session',data)
-  self.assertEqual(get.call_count,1);doc.insert.assert_called_once()
+  self.assertEqual(get.call_count,1);doc.insert.assert_called_once();create.assert_called_once_with(doc,issue=True)
 
  def test_invalid_campus_rejected_before_inserting(self):
   with patch.object(orders,'_store_order_options',return_value={'pickup_campuses':[{'name':'North'}]}),patch.object(frappe,'get_doc') as get:
@@ -64,7 +67,7 @@ class StoreOrderPickupTests(TestCase):
   with patch.object(orders,'_get_product',return_value=product),self.assertRaises(ValueError):orders._store_order_items([{'store_product':'KIT','qty':1}])
 
  def transition(self,doc,status,notification):
-  with patch.object(orders,'_require_school_admin'),patch.object(orders,'_locked_order',return_value=doc),patch.object(orders,'_order_payload',return_value={}),patch.object(mail,'queue_ready_notification',notification):
+  with patch.object(billing,'_scope',return_value=None),patch.object(billing,'_lock',return_value=doc),patch.object(billing,'order_payload',return_value={}),patch.object(billing,'_',lambda value:value),patch.object(billing,'financials',return_value={'invoice_status':'Issued'}),patch.object(mail,'queue_ready_notification',notification):
    orders.update_school_admin_store_order_status_data(doc.name,status)
 
  def test_ready_queues_notification_after_save(self):
@@ -72,8 +75,8 @@ class StoreOrderPickupTests(TestCase):
   self.transition(doc,'Ready for collection',notify)
   self.assertEqual(doc.ready_by,'staff');notify.assert_called_once_with(doc)
 
- def test_walkin_collected_and_cancellation_never_send_or_touch_invoice(self):
-  for status in ['Collected','Cancelled']:
+ def test_walkin_dispatch_does_not_require_payment(self):
+  for status in ['Collected']:
    doc=self.doc();notify=Mock()
    with patch.object(frappe,'get_doc') as get:
     self.transition(doc,status,notify);get.assert_not_called()
@@ -96,7 +99,7 @@ class StoreOrderPickupTests(TestCase):
   with patch.object(orders,'_require_parent_shop',return_value=frappe._dict(name='OTHER')),patch.object(orders,'_get_order',return_value=doc),self.assertRaises(ValueError):orders.get_parent_store_order_data(doc.name)
 
  def test_parent_status_mutation_requires_admin(self):
-  with patch.object(orders,'_require_school_admin',side_effect=PermissionError),patch.object(orders,'_locked_order') as lock,self.assertRaises(PermissionError):orders.update_school_admin_store_order_status_data('ORD','Collected')
+  with patch.object(billing,'_scope',side_effect=PermissionError),patch.object(billing,'_lock') as lock,self.assertRaises(PermissionError):orders.update_school_admin_store_order_status_data('ORD','Collected')
   lock.assert_not_called()
 
  def test_ready_email_contains_escaped_number_campus_and_deep_link(self):
@@ -191,7 +194,7 @@ class StoreOrderPickupTests(TestCase):
 
  def test_campus_cannot_read_mutate_or_notify_foreign_order(self):
   doc = self.doc()
-  with patch.object(orders, '_order_admin_campuses', return_value=['South']), patch.object(orders, '_get_order', return_value=doc), patch.object(orders, '_locked_order', return_value=doc), patch.object(mail, 'queue_ready_notification') as notify:
+  with patch.object(billing, '_scope', return_value=['South']), patch.object(billing, '_lock', side_effect=lambda name,scope: (billing._access(doc,scope),doc)[1]), patch.object(orders, '_order_admin_campuses', return_value=['South']), patch.object(orders, '_get_order', return_value=doc), patch.object(orders, '_locked_order', return_value=doc), patch.object(mail, 'queue_ready_notification') as notify:
    for call in [lambda: orders.get_school_admin_store_order_data(doc.name, campus_admin=True), lambda: orders.update_school_admin_store_order_status_data(doc.name, 'Collected', campus_admin=True), lambda: orders.retry_school_admin_store_order_notification_data(doc.name, campus_admin=True)]:
     with self.assertRaises(ValueError): call()
    doc.save.assert_not_called()
@@ -200,7 +203,7 @@ class StoreOrderPickupTests(TestCase):
  def test_campus_can_collect_order_in_either_assigned_campus(self):
   for campus in ['North', 'South']:
    doc = self.doc(); doc.pickup_campus = campus
-   with patch.object(orders, '_order_admin_campuses', return_value=['North', 'South']), patch.object(orders, '_locked_order', return_value=doc), patch.object(orders, '_order_payload', return_value={}):
+   with patch.object(billing, '_scope', return_value=['North', 'South']), patch.object(billing, '_lock', side_effect=lambda name,scope: (billing._access(doc,scope),doc)[1]), patch.object(billing, 'financials', return_value={'invoice_status':'Issued'}), patch.object(billing, 'order_payload', return_value={}):
     orders.update_school_admin_store_order_status_data(doc.name, 'Collected', campus_admin=True)
    self.assertEqual(doc.status, 'Collected'); doc.save.assert_called_once()
 

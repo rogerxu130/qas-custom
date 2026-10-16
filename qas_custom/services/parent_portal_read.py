@@ -310,7 +310,7 @@ def get_parent_invoices_data():
 
     invoices = frappe.get_all(
         "Sales Invoice",
-        filters={"customer": customer, "docstatus": 1},
+        filters={"customer": customer, "docstatus": 1, "qas_invoice_type": ["not in", ["Store Order", "Material Order"]], "source_doctype": ["!=", "Store Order"]},
         fields=[
             "name",
             "posting_date",

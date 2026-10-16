@@ -416,6 +416,7 @@ class TestSchoolAdminDraftInvoiceAdjustments(TestCase):
 	)
 	@patch("qas_custom.modules.billing.presentation._invoice_recipient_name", return_value="Taylor")
 	@patch("qas_custom.modules.billing.payment_plans.payment_plan_payload", return_value={})
+	@patch("qas_custom.services.stripe_trial_payments.payment_url", new=lambda doc: "")
 	def test_parent_context_exposes_adjustment_as_independent_line(
 		self,
 		_payment_plan,

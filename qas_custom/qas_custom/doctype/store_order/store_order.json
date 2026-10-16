@@ -28,7 +28,15 @@
   "ready_email_queue",
   "ready_notification_error",
   "ready_notification_skipped",
-  "ready_email_queued_at"
+  "ready_email_queued_at",
+  "discount_type",
+  "discount_value",
+  "discount_reason",
+  "pending_revision",
+  "created_by",
+  "invoice_notification_error",
+  "invoice_email_queue",
+  "creation_key"
  ],
  "fields": [
   {
@@ -187,6 +195,56 @@
    "fieldtype": "Datetime",
    "label": "Ready email queued at",
    "read_only": 1
+  },
+  {
+   "fieldname": "discount_type",
+   "fieldtype": "Select",
+   "label": "Discount type",
+   "options": "\nAmount\nPercent"
+  },
+  {
+   "fieldname": "discount_value",
+   "fieldtype": "Float",
+   "label": "Discount value",
+   "precision": "2"
+  },
+  {
+   "fieldname": "discount_reason",
+   "fieldtype": "Small Text",
+   "label": "Discount reason"
+  },
+  {
+   "fieldname": "pending_revision",
+   "fieldtype": "Long Text",
+   "label": "Pending School Admin revision",
+   "read_only": 1
+  },
+  {
+   "fieldname": "created_by",
+   "fieldtype": "Link",
+   "options": "User",
+   "label": "Created by",
+   "read_only": 1
+  },
+  {
+   "fieldname": "invoice_notification_error",
+   "fieldtype": "Small Text",
+   "label": "Invoice email error",
+   "read_only": 1
+  },
+  {
+   "fieldname": "invoice_email_queue",
+   "fieldtype": "Data",
+   "label": "Invoice email queue",
+   "read_only": 1
+  },
+  {
+   "fieldname": "creation_key",
+   "fieldtype": "Data",
+   "label": "Creation request key",
+   "read_only": 1,
+   "hidden": 1,
+   "unique": 1
   }
  ],
  "index_web_pages_for_search": 1,

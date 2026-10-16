@@ -1549,7 +1549,7 @@ def _term_invoice_names(term):
 		invoice_names.update(
 			frappe.get_all(
 				"Sales Invoice",
-				filters={"term": term},
+				filters={"term": term, "qas_invoice_type": ["not in", ["Store Order", "Material Order"]], "source_doctype": ["!=", "Store Order"]},
 				pluck="name",
 				limit_page_length=0,
 			)
@@ -1561,7 +1561,9 @@ def _term_invoice_names(term):
 		invoice_names.update(
 			frappe.get_all("Sales Invoice Item", filters=filters, pluck="parent", limit_page_length=0)
 		)
-	return sorted(name for name in invoice_names if name)
+	if invoice_names:
+		return sorted(frappe.get_all("Sales Invoice", filters={"name": ["in", list(invoice_names)], "qas_invoice_type": ["not in", ["Store Order", "Material Order"]], "source_doctype": ["!=", "Store Order"]}, pluck="name", limit_page_length=0))
+	return []
 
 
 def _invoice_summary(rows):

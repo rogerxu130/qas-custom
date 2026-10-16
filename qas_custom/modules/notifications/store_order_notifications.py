@@ -88,7 +88,8 @@ def new_order_email_content(doc, *, campus_admin=False):
 		f"<tr><td>{escape_html(row.product_name)}</td><td>{flt(row.qty):g}</td><td>A${flt(row.amount):.2f}</td></tr>"
 		for row in doc.get("items") or []
 	)
-	total = sum(flt(row.amount) for row in doc.get("items") or [])
+	from qas_custom.services.order_invoices import totals
+	total = totals(doc.get("items") or [], doc.get("discount_type") or "", doc.get("discount_value"), doc.get("discount_reason"))["order_total"]
 	path = "/campus-admin?tab=orders&order=" if campus_admin else "/school-admin?tab=materials&order="
 	url = _parent_portal_url(path + quote(doc.name, safe=""))
 	return f"""<h2>New Shop order</h2>
@@ -156,3 +157,37 @@ def _queue_new_order_admin_notification(doc, *, campus_admin=False):
 def send_new_order_email_queue(queue_name):
 	if outbound_email_enabled():
 		frappe.get_doc("Email Queue", queue_name).send()
+
+
+def queue_order_invoice_notification(doc, invoice=None):
+    """Queue atomically; email preparation failure must not erase a saved financial change."""
+    from qas_custom.services.order_invoices import financials, totals
+    from qas_custom.modules.notifications.makeup_parent_notifications import _parent_recipient, _parent_portal_url
+    frappe.db.savepoint("order_invoice_mail")
+    try:
+        recipient = _parent_recipient(doc.parent)
+        if not recipient.get("email"):
+            raise ValueError("No parent email found.")
+        state = financials(doc)
+        amounts = totals(doc.get("items") or [], doc.get("discount_type") or "", doc.get("discount_value"), doc.get("discount_reason"))
+        if doc.status == "Cancelled":
+            amounts["order_total"] = 0
+        url = _parent_portal_url("/order-invoices?order=" + quote(doc.name, safe=""))
+        rows = "".join(f"<tr><td>{escape_html(r.product_name)}</td><td>{r.qty}</td><td>A${flt(r.amount):.2f}</td></tr>" for r in doc.get("items") or [])
+        message = f"""<h2>Order Invoice: {escape_html(doc.name)}</h2>
+<p>Order status: {escape_html(doc.status)}. Invoice status: {escape_html(state['invoice_status'])}.</p>
+<table cellpadding="8"><tr><th>Product</th><th>Quantity</th><th>Amount</th></tr>{rows}</table>
+<p>Subtotal: A${amounts['subtotal']:.2f}<br>Discount: A${amounts['discount_amount']:.2f}<br>
+Order total: A${amounts['order_total']:.2f}<br>Received: A${state['paid_amount']:.2f}<br>
+Remaining to pay: A${state['remaining_amount']:.2f}</p>
+<p>This is separate from tuition. Store Credit cannot be used.</p>
+<p>For a revised invoice, use the current version shown on your order; a cancelled version is no longer payable.</p>
+<p><a href="{escape_html(url)}">View Order Invoice and history</a></p>"""
+        queue = sendmail_or_skip(action="order_invoice", recipients=[recipient['email']],
+            subject=f"Order Invoice: {doc.name}", message=message,
+            reference_doctype="Store Order", reference_name=doc.name, now=False, delayed=True)
+        doc.db_set({"invoice_notification_error": "", "invoice_email_queue": getattr(queue, "name", None)}, update_modified=False)
+    except Exception:
+        frappe.db.rollback(save_point="order_invoice_mail")
+        frappe.log_error(title="Order invoice notification failed", message=frappe.get_traceback())
+        doc.db_set("invoice_notification_error", "Invoice email could not be queued. Check the family email and retry.", update_modified=False)

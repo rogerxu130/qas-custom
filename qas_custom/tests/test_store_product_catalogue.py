@@ -57,7 +57,7 @@ class TestStoreProductCatalogue(TestCase):
 		doc.set = lambda key, value: doc.update({key: value})
 		return doc
 
-	@patch("qas_custom.services.material_orders.frappe.db", new=SimpleNamespace(exists=Mock(return_value=True)))
+	@patch("qas_custom.services.material_orders.frappe.db", new=SimpleNamespace(exists=Mock(return_value=True),get_value=Mock(return_value=True)))
 	def test_multiple_categories_are_validated_and_deduplicated(self):
 		doc = self.category_doc()
 		_apply_product_categories(doc, {"category_ids": ["art", "sketching", "art"]})
@@ -70,7 +70,7 @@ class TestStoreProductCatalogue(TestCase):
 		self.assertEqual(_product_category_names(doc), [])
 		self.assertIsNone(doc.primary_category)
 
-	@patch("qas_custom.services.material_orders.frappe.db", new=SimpleNamespace(exists=Mock(return_value=True)))
+	@patch("qas_custom.services.material_orders.frappe.db", new=SimpleNamespace(exists=Mock(return_value=True),get_value=Mock(return_value=True)))
 	def test_legacy_saves_preserve_other_memberships(self):
 		doc = self.category_doc(["art", "sketching"], "art")
 		_apply_product_categories(doc, {"primary_category": "supplies"})
@@ -95,7 +95,7 @@ class TestStoreProductCatalogue(TestCase):
 				_apply_product_categories(self.category_doc(), {"category_ids": value})
 
 	@patch("qas_custom.services.material_orders.frappe.throw", side_effect=ValueError)
-	@patch("qas_custom.services.material_orders.frappe.db", new=SimpleNamespace(exists=Mock(return_value=False)))
+	@patch("qas_custom.services.material_orders.frappe.db", new=SimpleNamespace(exists=Mock(return_value=False),get_value=Mock(return_value=False)))
 	def test_unknown_category_is_rejected_before_changing_memberships(self, throw):
 		doc = self.category_doc(["art"], "art")
 		with self.assertRaises(ValueError):

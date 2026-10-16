@@ -382,6 +382,7 @@ def _queue_overdue_invoice_reminder(invoice, sequence, today):
 
 def _get_overdue_invoice_candidates(today):
 	filters = {
+		"qas_invoice_type": ["not in", ["Store Order", "Material Order"]], "source_doctype": ["!=", "Store Order"],
 		"docstatus": 1,
 		"due_date": ["<", today],
 		"outstanding_amount": [">", 0.005],

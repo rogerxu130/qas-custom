@@ -8,7 +8,9 @@ def name_invoice(doc, method=None):
 	# get a new numeric identifier while keeping the amended_from audit link.
 	if frappe.flags.in_import or doc.flags.name_set:
 		return
-	name = make_autoname("YY.#####", doc=doc)
+	from qas_custom.services.order_invoices import is_order_invoice
+	series = "OI-.YY.-.#####" if is_order_invoice(doc) else "YY.#####"
+	name = make_autoname(series, doc=doc)
 	while frappe.db.exists("Sales Invoice", name):
-		name = make_autoname("YY.#####", doc=doc)
+		name = make_autoname(series, doc=doc)
 	doc.set_new_name(set_name=name)

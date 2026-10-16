@@ -19,6 +19,12 @@ def resolve_invoice_print_amounts(
 ):
 	doc = frappe.get_doc("Sales Invoice", invoice_doc) if isinstance(invoice_doc, str) else invoice_doc
 	total = get_invoice_total_amount(doc)
+	from qas_custom.services.order_invoices import is_order_invoice
+	if is_order_invoice(doc):
+		# A price adjustment / Credit Note is not a Store Credit application.
+		status = cint(doc.get("docstatus"))
+		payable = total if status == 0 else (max(0, flt(doc.get("outstanding_amount"))) if status == 1 else 0)
+		return {"total": total, "store_credit_applied": 0.0, "payable_amount": payable}
 	outstanding = _invoice_outstanding_amount(doc, total)
 	ledger_credit = flt(get_invoice_store_credit_applied(doc.name))
 	snapshot_credit = flt(doc.get("qas_store_credit_applied") or 0)

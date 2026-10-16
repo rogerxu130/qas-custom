@@ -49,7 +49,7 @@ class TestStoreOrderAdminNotification(TestCase):
         queue.assert_called_once_with(order)
 
     def test_email_has_order_details_and_escapes_user_content(self):
-        doc=frappe._dict(name='O1', parent='P1', pickup_campus='Campus <One>', items=[frappe._dict(product_name='<script>Kit</script>',qty=2,amount=158)])
+        doc=frappe._dict(name='O1', parent='P1', pickup_campus='Campus <One>', items=[frappe._dict(product_name='<script>Kit</script>',qty=2,unit_price=79,amount=158)])
         with patch.object(frappe, 'db', SimpleNamespace(get_value=Mock(return_value='Parent & Child'))), patch.object(service, '_parent_portal_url', side_effect=lambda path:'https://system.example'+path):
             html=service.new_order_email_content(doc)
         for expected in ['O1','Parent &amp; Child','Campus &lt;One&gt;','A$158.00','/school-admin?tab=materials&amp;order=O1','&lt;script&gt;']:

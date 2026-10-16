@@ -63,6 +63,23 @@ def build_parent_invoice_context(
 		for row in invoice_doc.get("taxes", [])
 		if is_parent_invoice_adjustment(row)
 	]
+	from qas_custom.services.order_invoices import is_order_invoice
+	order_context = {}
+	if is_order_invoice(invoice_doc):
+		from urllib.parse import urlencode
+		base = str(frappe.conf.get("qas_parent_portal_url") or frappe.conf.get("parent_portal_url") or DEFAULT_PARENT_PORTAL_URL).rstrip("/")
+		portal_link = f"{base}/order-invoices?{urlencode({'order': invoice_doc.get('source_document')})}" if include_portal_link else ""
+		for item, row in zip(items, invoice_doc.get("items") or []):
+			item["student"] = row.get("item_name") or row.get("item_code")
+			item["description"] = f"{flt(row.get('qty')):g} × AUD ${flt(row.get('rate')):.2f}"
+		if flt(invoice_doc.get("discount_amount")):
+			adjustments.append({"student": "Discount", "description": "Order discount", "amount": -flt(invoice_doc.get("discount_amount"))})
+		label = "Order Credit Note" if invoice_doc.get("is_return") else "Order Invoice"
+		if int(invoice_doc.get("docstatus") or 0) == 0:
+			label = "Draft " + label
+		elif int(invoice_doc.get("docstatus") or 0) == 2:
+			label = "Cancelled " + label
+		order_context = {"is_order_invoice": True, "invoice_title": label}
 	return {
 		"invoice": invoice_doc.name,
 		"online_payment_url": payment_url(invoice_doc) if payable > 0 else "",
@@ -76,6 +93,7 @@ def build_parent_invoice_context(
 		"due_date": formatdate(invoice_doc.get("due_date")) if invoice_doc.get("due_date") else "",
 		"total": get_invoice_total_amount(invoice_doc),
 		**invoice_gst_context(invoice_doc),
+		**order_context,
 		"store_credit_applied": store_credit,
 		"payable_amount": payable,
 		"invoice_link": portal_link,

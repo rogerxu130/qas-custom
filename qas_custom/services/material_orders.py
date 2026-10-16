@@ -285,10 +285,8 @@ def get_school_admin_store_order_options_data(parent=None):
 
 
 def create_school_admin_store_order_data(payload=None):
-	_require_school_admin()
-	data = _payload(payload)
-	parent_doc = _get_parent(data.get("parent"))
-	return _create_store_order(parent_doc, data, admin=True)
+	from qas_custom.services.order_invoices import manage
+	return manage(action="create", payload=payload)
 
 
 def get_parent_store_products_data(limit=80):
@@ -328,7 +326,8 @@ def get_parent_store_orders_data(limit=80):
 		order_by="modified desc",
 		limit_page_length=_limit(limit, 80, 160),
 	)
-	return {"items": [_order_payload(frappe.get_doc(ORDER_DOCTYPE, row.name), include_items=True) for row in rows]}
+	from qas_custom.services.order_invoices import order_payload
+	return {"items": [order_payload(frappe.get_doc(ORDER_DOCTYPE, row.name), parent=True) for row in rows]}
 
 
 def get_parent_store_order_data(order=None):
@@ -336,7 +335,8 @@ def get_parent_store_order_data(order=None):
 	doc = _get_order(order)
 	if doc.parent != parent_doc.name:
 		frappe.throw(_("This order does not belong to your family."), frappe.PermissionError)
-	return _order_payload(doc, include_items=True)
+	from qas_custom.services.order_invoices import order_payload
+	return order_payload(doc, parent=True)
 
 
 def create_parent_store_order_data(payload=None):
@@ -346,6 +346,21 @@ def create_parent_store_order_data(payload=None):
 
 
 def _create_store_order(parent_doc, data, *, admin=False):
+	from qas_custom.services.support_view import reject_support_view_write
+	reject_support_view_write()
+	creation_key = str(data.get("creation_key") or "").strip()
+	if creation_key:
+		from uuid import UUID
+		try:
+			creation_key = str(UUID(creation_key))
+		except (ValueError, TypeError, AttributeError):
+			frappe.throw(_("Invalid order request key."))
+		existing = frappe.db.get_value(ORDER_DOCTYPE, {"creation_key": creation_key}, ["name", "parent", "created_by"], as_dict=True, for_update=True)
+		if existing:
+			if existing.parent != parent_doc.name or existing.created_by != frappe.session.user:
+				frappe.throw(_("This request belongs to another order."), frappe.PermissionError)
+			from qas_custom.services.order_invoices import order_payload
+			return order_payload(_get_order(existing.name), parent=not admin)
 	options = _store_order_options(parent_doc, admin=admin)
 	campus = str(data.get("pickup_campus") or "").strip()
 	if not campus or campus not in {row["name"] for row in options["pickup_campuses"]}:
@@ -356,10 +371,21 @@ def _create_store_order(parent_doc, data, *, admin=False):
 		"status": "Ordered",
 		"pickup_campus": campus,
 		"items": _store_order_items(data.get("items")),
+        "created_by": frappe.session.user,
+        "creation_key": creation_key or None,
+        "discount_type": data.get("discount_type") or "" if admin else "",
+        "discount_value": data.get("discount_value") or 0 if admin else 0,
+        "discount_reason": data.get("discount_reason") or "" if admin else "",
 	})
+	from qas_custom.services.order_invoices import totals, create_invoice, order_payload as invoice_payload
+	totals(order.get("items"), order.discount_type, order.discount_value, order.discount_reason)
+	for row in order.get("items"):
+		if not row.get("item_code"):
+			row.item_code = _ensure_material_item(_get_product(row.store_product))
 	order.insert(ignore_permissions=True)
+	create_invoice(order, issue=not admin)
 	order.add_comment("Comment", _("Store order created by {0}.").format(frappe.session.user))
-	return _order_payload(order, include_items=True)
+	return invoice_payload(order, parent=not admin)
 
 
 def _locked_order(order):
@@ -371,28 +397,10 @@ def _locked_order(order):
 
 
 def update_school_admin_store_order_status_data(order=None, status=None, reason=None, *, campus_admin=False):
-	allowed = _order_admin_campuses(campus_admin)
-	doc = _locked_order(order)
-	_check_order_campus(doc, allowed)
-	status = str(status or "").strip()
-	allowed = {
-		"Ordered": {"Ready for collection", "Collected", "Cancelled"},
-		"Ready for collection": {"Collected", "Cancelled"},
-	}
-	if status not in allowed.get(doc.status, set()):
-		frappe.throw(_("This order cannot be changed from {0} to {1}.").format(doc.status, status))
-	doc.status = status
-	prefix = {"Ready for collection": "ready", "Collected": "collected", "Cancelled": "cancelled"}[status]
-	setattr(doc, prefix + "_at", now_datetime())
-	setattr(doc, prefix + "_by", frappe.session.user)
+	from qas_custom.services.order_invoices import manage
 	if status == "Cancelled":
-		doc.cancellation_reason = str(reason or "").strip()
-	doc.save(ignore_permissions=True)
-	doc.add_comment("Comment", _("Store order marked {0} by {1}.").format(status, frappe.session.user))
-	if status == "Ready for collection":
-		from qas_custom.modules.notifications.store_order_notifications import queue_ready_notification
-		queue_ready_notification(doc)
-	return _order_payload(doc, include_items=True)
+		frappe.throw(_("Use the order cancellation preview to review its invoice and payments."))
+	return manage(action="status", payload={"order": order, "status": "Dispatched" if status == "Collected" else status})
 
 
 def retry_school_admin_store_order_notification_data(order=None, *, campus_admin=False):
@@ -416,7 +424,7 @@ def _store_order_options(parent_doc, admin=False):
 	return {"parent": _parent_payload(parent_doc), "pickup_campuses": choices, "default_campus": default}
 
 
-def _store_order_items(rows):
+def _store_order_items(rows, existing_rows=None):
 	if not isinstance(rows, list) or not rows:
 		frappe.throw(_("Add at least one material product."))
 	# Match the deletion lock; deterministic order prevents multi-product deadlocks.
@@ -425,6 +433,7 @@ def _store_order_items(rows):
 		if name and not frappe.db.get_value(PRODUCT_DOCTYPE, name, "name", for_update=True):
 			frappe.throw(_("A product in this order is no longer available. Refresh the shop."))
 	items, seen = [], set()
+	existing = {row.get("store_product"): row for row in (existing_rows or [])}
 	for raw in rows:
 		if not isinstance(raw, dict):
 			continue
@@ -438,7 +447,8 @@ def _store_order_items(rows):
 		if product_name in seen:
 			frappe.throw(_("Add each material product once, then set its quantity."))
 		product = _get_product(product_name)
-		if not cint(product.active):
+		previous = existing.get(product_name)
+		if not cint(product.active) and not (previous and qty <= cint(previous.get("qty"))):
 			frappe.throw(_("Inactive product cannot be ordered: {0}.").format(product.product_name))
 		item_code = product.get("item_code")
 		seen.add(product_name)
