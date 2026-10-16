@@ -2061,6 +2061,7 @@ def delete_school_admin_draft_invoice_data(invoice=None, allow_campus_admin=Fals
 				operation.add_comment("Comment", _("Draft invoice {0} was deleted by School Admin. Card and purchase status were retained.").format(doc.name))
 		_detach_invoice_operation_report_links(doc.name)
 		_clear_deleted_invoice_enrollment_snapshot(doc)
+		_detach_draft_invoice_makeup_voucher_links(doc.name)
 		deleted = doc.name
 		frappe.delete_doc("Sales Invoice", deleted, ignore_permissions=True)
 		frappe.db.commit()
@@ -5294,10 +5295,29 @@ def _validate_makeup_cancellation_settlement(settlement, invoice):
         )
 
 
+def _detach_draft_invoice_makeup_voucher_links(invoice):
+    if not frappe.db.has_column("Makeup Voucher", "price_difference_invoice"):
+        return
+    vouchers = frappe.get_all(
+        "Makeup Voucher",
+        filters={"price_difference_invoice": invoice},
+        pluck="name",
+        limit_page_length=0,
+    )
+    for voucher in vouchers:
+        frappe.db.set_value("Makeup Voucher", voucher, "price_difference_invoice", None)
+        _add_comment(
+            "Makeup Voucher",
+            voucher,
+            _("Draft difference invoice {0} was deleted and its invoice link cleared.").format(invoice),
+        )
+
+
 def _delete_makeup_difference_draft(invoice):
     if not invoice or cint(invoice.get("docstatus")) != 0:
         return
     invoice_name = invoice.get("name")
+    _detach_draft_invoice_makeup_voucher_links(invoice_name)
     _run_school_admin_invoice_mutation(
         lambda: frappe.delete_doc("Sales Invoice", invoice_name, ignore_permissions=True)
     )

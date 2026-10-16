@@ -120,7 +120,9 @@ class TestSchoolAdminInvoiceCancellation(TestCase):
 			"qas_custom.services.school_admin._", side_effect=lambda message, *args, **kwargs: message,
 		), patch(
 			"qas_custom.services.school_admin._clear_deleted_invoice_enrollment_snapshot",
-		) as clear_enrollment, patch("qas_custom.services.school_admin.frappe", fake_frappe):
+		) as clear_enrollment, patch(
+			"qas_custom.services.school_admin._detach_draft_invoice_makeup_voucher_links",
+		) as detach_vouchers, patch("qas_custom.services.school_admin.frappe", fake_frappe):
 			result = delete_school_admin_draft_invoice_data(invoice=doc.name)
 
 		fake_db.set_value.assert_called_once()
@@ -129,6 +131,7 @@ class TestSchoolAdminInvoiceCancellation(TestCase):
 		self.assertIsNone(set_value_args[2]["invoice"])
 		self.assertIn(doc.name, set_value_args[2]["message"])
 		clear_enrollment.assert_called_once_with(doc)
+		detach_vouchers.assert_called_once_with(doc.name)
 		fake_frappe.delete_doc.assert_called_once_with("Sales Invoice", doc.name, ignore_permissions=True)
 		fake_db.commit.assert_called_once()
 		self.assertEqual(result, {"deleted": doc.name})
