@@ -8,7 +8,6 @@ from qas_custom.modules.payg.money import stored_currency
 from qas_custom.modules.payg.pricing import card_price, discounted_card_price, settings as pricing_settings
 from qas_custom.modules.billing.commands import get_trial_class_fee
 from qas_custom.modules.payg.rules import add_six_months
-from qas_custom.modules.notifications.payg_parent_notifications import queue_welcome_notification
 
 
 def _admin():
@@ -129,6 +128,4 @@ def _issue_card(operation_id, issue_request_key):
                     "kind": "Issue", "available_delta": 10, "reserved_delta": 0,
                     "consumed_delta": 0, "operation_key": f"issue:{operation.name}",
                     "actor": frappe.session.user, "occurred_at": now}).insert(ignore_permissions=True)
-    card = frappe.get_doc("QAS PAYG Card", card.name)
-    queue_welcome_notification(card)
-    return card
+    return frappe.get_doc("QAS PAYG Card", card.name)
