@@ -55,6 +55,7 @@ class TestIssue(TestCase):
             UniqueValidationError=frappe.UniqueValidationError,
         )
         self.patches = [patch.object(issue, "frappe", self.fake),
+                        patch.object(issue, "queue_welcome_notification"),
                         patch.object(issue, "_now", return_value=datetime(2026, 9, 24, 9))]
         for item in self.patches:
             item.start(); self.addCleanup(item.stop)
@@ -118,6 +119,7 @@ class TestIssue(TestCase):
         entries = [doc for (dt, _), doc in self.state["docs"].items() if dt == "QAS PAYG Entry"]
         self.assertEqual(len(entries), 1)
         self.assertEqual((entries[0].available_delta, entries[0].operation_key), (10, "issue:OP-1"))
+        issue.queue_welcome_notification.assert_called_once_with(first)
         with self.assertRaisesRegex(ValueError, "already issued"):
             issue.issue_card("OP-1", "issue-2")
 
@@ -178,6 +180,7 @@ class TestIssue(TestCase):
             issue.issue_card("OP-1", "issue-1")
         self.fake.db.rollback.assert_called_once()
         self.assertEqual(self.fake.db.rollback.call_args.kwargs.keys(), {"save_point"})
+        issue.queue_welcome_notification.assert_not_called()
 
     def test_existing_purchase_operation_reuses_its_key(self):
         self.fake.db.get_value.side_effect = lambda dt, key, field: "OP-1" if dt == "QAS PAYG Operation" else self.value(dt, key, field)
