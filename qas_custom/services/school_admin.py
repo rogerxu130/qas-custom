@@ -359,7 +359,7 @@ def get_school_admin_family_data(parent=None, student=None, customer=None, email
 
 
 def get_school_admin_family_attendance_data(parent=None, student=None, customer=None, email=None, term=None):
-	"""Return marked attendance and special bookings for one family, scoped to a term."""
+	"""Return family attendance history, today or next class day, and special bookings."""
 	_require_school_admin()
 	context = _resolve_family_context(parent=parent, student=student, customer=customer, email=email)
 	if not context.get("parent") and not context.get("student") and not context.get("customer"):
@@ -397,10 +397,9 @@ def get_school_admin_family_attendance_data(parent=None, student=None, customer=
 	) if timeslot_ids else []
 	timeslot_map = {row.get("name"): row for row in timeslots if row.get("name")}
 	student_map = {row.get("name"): row for row in students if row.get("name")}
+	current_date = today()
 	items = []
 	for row in attendance_rows:
-		if (row.get("status") or "To be started") == "To be started" and row.get("enrollment_type") != "Makeup":
-			continue
 		session = session_map.get(row.get("course_session"))
 		timeslot = timeslot_map.get((session or {}).get("weekly_timeslot"))
 		if not session or not timeslot:
@@ -420,8 +419,19 @@ def get_school_admin_family_attendance_data(parent=None, student=None, customer=
 			"status": row.get("status") or "To be started",
 			"attendance_type": row.get("enrollment_type") or "",
 			"comments": row.get("comments") or "",
-			"needs_attendance": str(session.get("session_date")) < today() and (row.get("status") or "To be started") == "To be started",
+			"needs_attendance": str(session.get("session_date")) < current_date and (row.get("status") or "To be started") == "To be started",
 		})
+	next_class_date = min(
+		(str(item["session_date"]) for item in items if item["status"] != "Cancelled" and str(item.get("session_date") or "") >= current_date),
+		default=None,
+	)
+	items = [
+		item for item in items
+		if item["status"] != "To be started"
+		or item["attendance_type"] == "Makeup"
+		or str(item.get("session_date") or "") <= current_date
+		or str(item.get("session_date") or "") == next_class_date
+	]
 	_attach_inquiry_teacher_labels(items)
 	items.sort(key=lambda item: (str(item.get("session_date") or ""), str(item.get("start_time") or "")), reverse=True)
 	return {"term": selected_term, "terms": terms, "items": items}

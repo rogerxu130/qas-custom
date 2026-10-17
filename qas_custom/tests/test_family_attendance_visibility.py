@@ -9,7 +9,34 @@ MODULE = 'qas_custom.services.school_admin.'
 
 
 class TestFamilyAttendanceVisibility(TestCase):
-    def test_term_history_keeps_marked_and_future_special_records(self):
+    def test_today_keeps_unmarked_history_and_hides_later_ordinary_classes(self):
+        self.check_visibility('2026-10-10', [
+            'future-makeup', 'future-cancelled', 'future-leave', 'today-present',
+            'today-unmarked', 'past-late', 'past-absent', 'past-present', 'past-unmarked',
+        ], ['past-unmarked'])
+
+    def test_no_class_today_shows_only_next_class_day(self):
+        self.check_visibility('2026-10-20', [
+            'future-unmarked', 'empty-status', 'future-makeup', 'future-cancelled',
+            'future-leave', 'today-present', 'today-unmarked', 'past-late',
+            'past-absent', 'past-present', 'past-unmarked',
+        ], ['future-makeup', 'today-unmarked', 'past-unmarked'])
+
+    def test_cancelled_today_does_not_hide_next_class_day(self):
+        self.check_visibility('2026-10-18', [
+            'future-makeup', 'future-cancelled', 'future-leave', 'today-present',
+            'today-unmarked', 'past-late', 'past-absent', 'past-present', 'past-unmarked',
+        ], ['today-unmarked', 'past-unmarked'])
+
+    def test_no_remaining_classes_keeps_all_unmarked_history(self):
+        self.check_visibility('2026-11-01', [
+            'later-unmarked', 'future-unmarked', 'empty-status', 'future-makeup',
+            'future-cancelled', 'future-leave', 'today-present', 'today-unmarked',
+            'past-late', 'past-absent', 'past-present', 'past-unmarked',
+        ], ['later-unmarked', 'future-unmarked', 'empty-status', 'future-makeup',
+            'today-unmarked', 'past-unmarked'])
+
+    def check_visibility(self, current_date, expected_names, needs_attendance):
         cases = [
             ('past-present', '2026-10-03', 'Present', 'Full-Term', 'TERM-1'),
             ('today-present', '2026-10-10', 'Present', 'Full-Term', 'TERM-1'),
@@ -21,6 +48,7 @@ class TestFamilyAttendanceVisibility(TestCase):
             ('past-unmarked', '2026-10-01', 'To be started', 'Full-Term', 'TERM-1'),
             ('today-unmarked', '2026-10-10', 'To be started', 'Full-Term', 'TERM-1'),
             ('future-unmarked', '2026-10-24', 'To be started', 'Full-Term', 'TERM-1'),
+            ('later-unmarked', '2026-10-31', 'To be started', 'Full-Term', 'TERM-1'),
             ('empty-status', '2026-10-24', '', 'Full-Term', 'TERM-1'),
             ('other-term-leave', '2027-01-01', 'Leave', 'Full-Term', 'TERM-2'),
         ]
@@ -47,7 +75,7 @@ class TestFamilyAttendanceVisibility(TestCase):
                 '_get_family_attendance_terms': [{'name': 'TERM-1'}, {'name': 'TERM-2'}],
                 '_resolve_family_attendance_term': {'name': 'TERM-1'},
                 '_doctype_available': True,
-                'today': '2026-10-10',
+                'today': current_date,
             }.items():
                 stack.enter_context(patch(MODULE + name, return_value=value))
             stack.enter_context(patch(MODULE + '_require_school_admin'))
@@ -55,13 +83,10 @@ class TestFamilyAttendanceVisibility(TestCase):
             stack.enter_context(patch(MODULE + 'frappe', SimpleNamespace(get_all=Mock(side_effect=get_all))))
             result = get_school_admin_family_attendance_data(parent='PARENT-1', term='TERM-1')
 
-        self.assertEqual([row['name'] for row in result['items']], [
-            'future-makeup', 'future-cancelled', 'future-leave', 'today-present',
-            'past-late', 'past-absent', 'past-present',
-        ])
+        self.assertEqual([row['name'] for row in result['items']], expected_names)
         self.assertEqual(result['term']['name'], 'TERM-1')
         self.assertTrue(all(row['student_display'] == 'Student One' for row in result['items']))
-        self.assertTrue(all(not row['needs_attendance'] for row in result['items']))
+        self.assertEqual([row['name'] for row in result['items'] if row['needs_attendance']], needs_attendance)
 
 
 if __name__ == '__main__':
