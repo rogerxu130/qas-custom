@@ -189,16 +189,24 @@ def _create_payg_draft(operation_id, invoice_request_key):
     disable_sales_invoice_auto_notifications()
     invoice = new_invoice_draft(customer=customer, parent=operation.family_parent,
                                 invoice_type="PAYG Card")
-    if operation.operation_type == "Purchase" and operation.get("discount_percent_snapshot") is not None:
-        # ERPNext shows this native discount below the item table. A negative
-        # item would require changing Selling Settings for every invoice.
-        invoice.apply_discount_on = "Grand Total"
-        invoice.additional_discount_percentage = operation.discount_percent_snapshot
     invoice.append("items", {"item_code": item_code, "item_name": course, "qty": 1, "rate": rate,
                                     "description": description, "course": course,
                                     "qas_line_type": line_type,
                                     "qas_source_doctype": "QAS PAYG Operation",
                                     "qas_source_document": operation.name})
+    if operation.operation_type == "Purchase" and operation.get("discount_percent_snapshot") is not None:
+        from qas_custom.services.school_admin import _apply_invoice_adjustments
+        invoice.apply_discount_on = ""
+        invoice.additional_discount_percentage = 0
+        invoice.discount_amount = 0
+        discount = (rate - stored_currency(operation.new_price or 0) * 10).quantize(Decimal("0.01"))
+        if discount < 0:
+            frappe.throw("PAYG discount cannot increase the purchase price")
+        if discount:
+            _apply_invoice_adjustments(invoice, [{
+                "description": f"PAYG 10-class pass discount ({percent}%)",
+                "amount": -discount,
+            }])
     apply_invoice_payment_snapshot(invoice)
     run_invoice_mutation_as_administrator(lambda: invoice.insert(ignore_permissions=True))
     if operation.operation_type == "Purchase" and operation.get("discount_percent_snapshot") is not None:

@@ -64,6 +64,12 @@ def build_parent_invoice_context(
 		if is_parent_invoice_adjustment(row)
 	]
 	from qas_custom.services.order_invoices import is_order_invoice
+	if flt(invoice_doc.get("discount_amount")) and any(
+		row.get("qas_source_doctype") == "QAS PAYG Operation" for row in invoice_doc.get("items") or []
+	):
+		percent = flt(invoice_doc.get("additional_discount_percentage"))
+		adjustments.append({"student": "Discount", "description": f"PAYG 10-class pass discount ({percent:g}%)" if percent else "PAYG class pass discount",
+			"amount": -flt(invoice_doc.get("discount_amount"))})
 	order_context = {}
 	if is_order_invoice(invoice_doc):
 		from urllib.parse import urlencode

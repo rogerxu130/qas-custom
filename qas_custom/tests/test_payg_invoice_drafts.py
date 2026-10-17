@@ -7,6 +7,7 @@ from unittest.mock import Mock, patch
 import frappe
 
 from qas_custom.modules.billing import payg_drafts
+from qas_custom.services import school_admin
 
 
 class Doc(frappe._dict):
@@ -17,9 +18,9 @@ class Doc(frappe._dict):
         self.name = "SINV-NEW"
         return self
 
-    def append(self, _table, values):
+    def append(self, table, values):
         row = Doc(values)
-        self.setdefault("items", []).append(row)
+        self.setdefault(table, []).append(row)
         return row
 
 
@@ -47,6 +48,9 @@ class TestPaygDrafts(TestCase):
             throw=lambda message, *_args: (_ for _ in ()).throw(ValueError(message)),
             PermissionError=PermissionError)
         self.patches = [patch.object(payg_drafts, "frappe", self.fake),
+                        patch.object(school_admin, "_apply_invoice_adjustments", side_effect=lambda doc, rows: [
+                            doc.append("taxes", {"description": row["description"], "tax_amount": row["amount"],
+                                                 "qas_is_invoice_adjustment": 1}) for row in rows]),
                         patch.object(payg_drafts, "get_support_view_token", return_value=None),
                         patch.object(payg_drafts, "disable_sales_invoice_auto_notifications"),
                         patch.object(payg_drafts, "new_invoice_draft", return_value=self.invoice),
@@ -85,11 +89,23 @@ class TestPaygDrafts(TestCase):
         self.product.standard_card_price = Decimal("999")
         invoice = payg_drafts.create_payg_draft("OP-1", "discounted-1")
         self.assertEqual(invoice.get("items")[0].rate, Decimal("680.000000000"))
-        self.assertEqual((invoice.apply_discount_on, invoice.additional_discount_percentage),
-                         ("Grand Total", Decimal("4")))
+        self.assertEqual((invoice.additional_discount_percentage, invoice.discount_amount), (0, 0))
+        self.assertEqual(invoice.apply_discount_on, "")
         self.assertIn("$68.00 single-class price x 10", invoice.get("items")[0].description)
-        self.assertEqual(invoice.get("items")[0].rate * (100 - invoice.additional_discount_percentage) / 100,
-                         Decimal("652.800000000"))
+        discount = invoice.get("taxes")[0]
+        self.assertEqual(discount.tax_amount, Decimal("-27.20"))
+        self.assertEqual(discount.description, "PAYG 10-class pass discount (4%)")
+        self.assertEqual(invoice.get("items")[0].rate + discount.tax_amount, Decimal("652.800000000"))
+        self.assertIs(payg_drafts.create_payg_draft("OP-1", "discounted-1"), invoice)
+        self.assertEqual(len(invoice.get("taxes")), 1)
+
+    def test_zero_discount_does_not_create_an_empty_adjustment(self):
+        self.operation.new_price = Decimal("68")
+        self.operation.discount_percent_snapshot = Decimal("0")
+        self.operation.trial_price_snapshot = Decimal("68")
+        invoice = payg_drafts.create_payg_draft("OP-1", "no-discount")
+        self.assertFalse(invoice.get("taxes"))
+        school_admin._apply_invoice_adjustments.assert_not_called()
 
     def test_discounted_purchase_rejects_a_mismatched_invoice_total(self):
         self.operation.new_price = Decimal("65.28")

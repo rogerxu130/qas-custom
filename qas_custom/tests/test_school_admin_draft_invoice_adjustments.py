@@ -60,7 +60,7 @@ class TestSchoolAdminDraftInvoiceAdjustments(TestCase):
 			invoice["items"].append(_Child(name="ROW-2", qas_source_doctype="QAS PAYG Operation", qas_source_document="OP-2"))
 			operations["OP-2"] = frappe._dict(name="OP-2", invoice=invoice.name, family_parent="PAR-1", customer="CUS-1",
 				invoice_request_key="second-key", card="CARD-2", status="Completed", save=Mock(), add_comment=Mock())
-		fake_db = SimpleNamespace(savepoint=Mock(), rollback=Mock(), commit=Mock())
+		fake_db = SimpleNamespace(savepoint=Mock(), rollback=Mock(), commit=Mock(), has_column=Mock(return_value=False))
 		fake_frappe = SimpleNamespace(db=fake_db, delete_doc=Mock(side_effect=RuntimeError("delete failed") if fail else None),
 			throw=lambda message, *_args: (_ for _ in ()).throw(ValueError(message)))
 		order = []
@@ -459,6 +459,19 @@ class TestSchoolAdminDraftInvoiceAdjustments(TestCase):
 			context["additional_description"],
 			"Capacity-building support delivered through a small-group visual arts session.",
 		)
+		invoice["items"][0].update(qty=1, rate=680, amount=680,
+			qas_source_doctype="QAS PAYG Operation")
+		invoice.additional_discount_percentage = 4
+		for legacy in (True, False):
+			with self.subTest(legacy_native_discount=legacy):
+				invoice.discount_amount = 27.2 if legacy else 0
+				invoice.taxes = [] if legacy else [_Child(description="PAYG 10-class pass discount (4%)",
+					tax_amount=-27.2, qas_is_invoice_adjustment=1)]
+				context = build_parent_invoice_context(invoice, include_portal_link=False)
+				self.assertEqual(len(context["lines"]), 2)
+				self.assertEqual(context["lines"][1]["description"], "PAYG 10-class pass discount (4%)")
+				self.assertEqual(context["lines"][1]["amount"], -27.2)
+				self.assertEqual(sum(row["amount"] for row in context["lines"]), 652.8)
 
 	@patch("qas_custom.modules.notifications.commands._school_identity_pdf_html", return_value="")
 	def test_parent_pdf_hides_unit_and_unit_price_and_shows_adjustment(self, _identity):
