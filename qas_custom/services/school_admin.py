@@ -6273,7 +6273,12 @@ def _count_sales_invoices(filters):
 		return 0
 	filters = dict(filters or {})
 	filters.update({"qas_invoice_type": ["not in", ["Store Order", "Material Order"]], "source_doctype": ["!=", "Store Order"]})
-	return _count("Sales Invoice", filters)
+	try:
+		# Use the list query's NULL handling so invoices without a source are counted.
+		rows = frappe.get_all("Sales Invoice", filters=filters, fields=["count(name) as total"])
+		return rows[0].total
+	except Exception:
+		return 0
 
 
 def _get_outstanding_invoice_summary():
