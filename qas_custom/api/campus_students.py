@@ -8,9 +8,11 @@ def _student_context(student):
     if not isinstance(student, str) or not student.strip():
         frappe.throw(_("Choose a student."), frappe.PermissionError)
     result = get_campus_admin_current_term_enrollments_data(query=student, student=student)
+    if result.get("state", "ready") != "ready":
+        frappe.throw(result.get("message") or _("Student search is unavailable."))
     rows = result["items"]
     if not rows:
-        frappe.throw(_("This student has no current-term enrollment in your assigned campuses."), frappe.PermissionError)
+        frappe.throw(_("This student has no enrollment in an active term in your assigned campuses."), frappe.PermissionError)
     guardian = frappe.db.get_value("Student", student, "guardian")
     if not guardian:
         frappe.throw(_("This student has no linked parent."))
@@ -30,7 +32,7 @@ def manage(action=None, payload=None):
     if action == "detail":
         from qas_custom.modules.notifications.makeup_parent_notifications import _parent_recipient
         recipient = _parent_recipient(guardian)
-        return {"student": student, "student_name": rows[0]["student_name"], "term": rows[0]["term"],
+        return {"student": student, "student_name": rows[0]["student_name"], "term": ", ".join(dict.fromkeys(row["term"] for row in rows)),
                 "enrollments": rows, "parent": {"name": guardian, "parent_name": recipient["parent_name"],
                 "phone": frappe.db.get_value("Parent", guardian, "mobile_number") or "", "email": recipient["email"]}}
     campuses = {row["campus"] for row in rows}

@@ -116,3 +116,17 @@ class CampusStudentOrdersTests(TestCase):
         self.assertIn("staff@example.com", content)
         self.assertIn("A$50.00", content)
         self.assertNotIn("Amy <Chen>", content)
+
+    def test_missing_active_terms_is_an_explicit_family_search_error(self):
+        with patch.object(campus_admin, "get_campus_admin_current_term_enrollments_data", return_value={"items": [], "state": "no_active_term", "message": "No active term is configured."}), patch.object(order_invoices, "_", lambda value: value), patch.object(frappe, "get_all") as get:
+            with self.assertRaises(ValueError):
+                order_invoices._families(["North"], "Isabella")
+            frappe.throw.assert_called_once_with("No active term is configured.")
+            get.assert_not_called()
+
+    def test_student_detail_reports_all_permitted_active_terms(self):
+        extra = {**self.row, "term": "Makeup Term", "name": "MAKEUP-ENR"}
+        with patch.object(api, "_student_context", return_value=([self.row, extra], "PARENT")), patch.object(frappe, "db", SimpleNamespace(get_value=Mock(return_value="0412345678"))), patch("qas_custom.modules.notifications.makeup_parent_notifications._parent_recipient", return_value={"parent_name": "Parent", "email": "parent@example.com"}):
+            result = self.manage("detail", {"student": "STUDENT"})
+        self.assertEqual(result["term"], "Term 4, Makeup Term")
+        self.assertEqual(result["enrollments"], [self.row, extra])

@@ -92,20 +92,32 @@ class TestCampusAdminCurrentTermEnrollmentSearch(TestCase):
 		self.assertFalse(result["searched"])
 		self.assertEqual(result["items"], [])
 
-	@patch(
-		"qas_custom.services.campus_admin.frappe.get_all",
-		return_value=[{"name": "Term 3 2026"}, {"name": "Term 4 2026"}],
-	)
-	@patch(
-		"qas_custom.services.campus_admin._require_campus_admin_profile",
-		return_value={"campuses": ["Indooroopilly"]},
-	)
-	def test_multiple_active_terms_is_an_explicit_configuration_state(self, _profile, _get_all):
-		result = get_campus_admin_current_term_enrollments_data(query="Amy")
-
-		self.assertEqual(result["state"], "multiple_active_terms")
-		self.assertIn("Multiple active terms", result["message"])
-		self.assertEqual(result["items"], [])
+	@patch("qas_custom.services.campus_admin._require_campus_admin_profile", return_value={"campuses": ["Indooroopilly"]})
+	@patch("qas_custom.services.campus_admin.frappe.get_all")
+	def test_multiple_active_terms_return_permitted_enrollments_with_their_actual_terms(self, get_all, _profile):
+		terms = ["Term 4 2026", "Term 3 Makeup", "Holiday Term"]
+		def rows(doctype, **kwargs):
+			if doctype == "Term":
+				self.assertEqual(kwargs["filters"], {"status": "Active"})
+				self.assertEqual(kwargs["limit_page_length"], 0)
+				return [{"name": name} for name in terms]
+			if doctype == "Student":
+				return [{"name": "STUDENT", "student_name": "Isabella"}]
+			if doctype == "Weekly Timeslot":
+				self.assertEqual(kwargs["filters"], {"term": ["in", terms], "campus": ["in", ["Indooroopilly"]]})
+				return [{"name": "TS", "campus": "Indooroopilly"}]
+			if doctype == "Enrollment":
+				self.assertEqual(kwargs["filters"]["term"], ["in", terms])
+				self.assertEqual(kwargs["filters"]["weekly_timeslot"], ["in", ["TS"]])
+				return [{"name": "ENR-" + str(i), "term": term, "student": "STUDENT", "weekly_timeslot": "TS", "status": "Active"} for i, term in enumerate(terms)]
+			self.fail(doctype)
+		get_all.side_effect = rows
+		result = get_campus_admin_current_term_enrollments_data(query="Isabella")
+		self.assertEqual(result["state"], "ready")
+		self.assertTrue(result["searched"])
+		self.assertEqual(result["term"], ", ".join(terms))
+		self.assertEqual({row["term"] for row in result["items"]}, set(terms))
+		self.assertEqual({row["campus"] for row in result["items"]}, {"Indooroopilly"})
 
 	@patch("qas_custom.api.campus_admin.get_campus_admin_current_term_enrollments_data")
 	def test_api_forwards_search_arguments(self, search_enrollments):

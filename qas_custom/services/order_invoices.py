@@ -342,7 +342,10 @@ def _families(scope, query="", exact_parent=None):
         if len(query) < 2 or any(char in query for char in "%_*?\\"):
             return []
         from qas_custom.services.campus_admin import get_campus_admin_current_term_enrollments_data
-        matches = get_campus_admin_current_term_enrollments_data(query=query)["items"]
+        result = get_campus_admin_current_term_enrollments_data(query=query)
+        if result.get("state", "ready") != "ready":
+            frappe.throw(result.get("message") or _("Student search is unavailable. Please try again."))
+        matches = result["items"]
         students = list({row["student"] for row in matches})
         if not students:
             return []

@@ -332,6 +332,8 @@ def get_campus_admin_current_term_enrollments_data(query=None, limit=50, *, stud
 		}
 
 	term = term_result["term"]
+	terms = term_result.get("terms") or [term]
+	term_filter = terms[0] if len(terms) == 1 else ["in", terms]
 	query = str(query or "").strip()
 	if not query:
 		return {
@@ -353,7 +355,7 @@ def get_campus_admin_current_term_enrollments_data(query=None, limit=50, *, stud
 
 	timeslot_rows = frappe.get_all(
 		"Weekly Timeslot",
-		filters={"term": term, "campus": ["in", profile["campuses"]]},
+		filters={"term": term_filter, "campus": ["in", profile["campuses"]]},
 		fields=["name", "course", "campus", "day_of_week", "start_time", "end_time"],
 		limit_page_length=0,
 	)
@@ -369,7 +371,7 @@ def get_campus_admin_current_term_enrollments_data(query=None, limit=50, *, stud
 	enrollments = frappe.get_all(
 		"Enrollment",
 		filters={
-			"term": term,
+			"term": term_filter,
 			"student": ["in", [row["name"] for row in student_rows]],
 			"weekly_timeslot": ["in", list(timeslot_map)],
 		},
@@ -389,7 +391,7 @@ def get_campus_admin_current_term_enrollments_data(query=None, limit=50, *, stud
 				"name": enrollment.get("name"),
 				"student": enrollment.get("student"),
 				"student_name": student.get("student_name") or student.get("name"),
-				"term": term,
+				"term": enrollment.get("term") or term,
 				"course": enrollment.get("course") or timeslot.get("course"),
 				"campus": timeslot.get("campus"),
 				"day_of_week": timeslot.get("day_of_week"),
@@ -1181,24 +1183,19 @@ def link_campus_admin_inquiry_enrollment_data(inquiry=None, enrollment=None):
 
 
 def _get_campus_admin_current_active_term():
+	# Concurrent active terms are valid, including holiday and makeup terms.
 	rows = frappe.get_all(
 		"Term",
 		filters={"status": "Active"},
 		fields=["name"],
 		order_by="start_date desc, name desc",
-		limit_page_length=2,
+		limit_page_length=0,
 	)
 	if not rows:
-		return {
-			"state": "no_active_term",
-			"message": _("No active term is configured."),
-		}
-	if len(rows) > 1:
-		return {
-			"state": "multiple_active_terms",
-			"message": _("Multiple active terms are configured. Ask School Admin to keep only one active term."),
-		}
-	return {"state": "ready", "term": rows[0].get("name")}
+		return {"state": "no_active_term", "message": _("No active term is configured.")}
+	terms = [row["name"] for row in rows]
+	return {"state": "ready", "term": ", ".join(terms), "terms": terms}
+
 
 
 def _get_campus_admin_enrollment_search_students(query):
