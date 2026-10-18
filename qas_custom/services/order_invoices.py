@@ -302,7 +302,18 @@ def _cancel(doc, reason):
 
 
 def _families(scope, query="", exact_parent=None):
-    conditions, values = [], {"query": "%" + str(query).strip() + "%"}
+    query = str(query or "").strip()
+    if scope is not None and not exact_parent:
+        if len(query) < 2 or any(char in query for char in "%_*?\\"):
+            return []
+        from qas_custom.services.campus_admin import get_campus_admin_current_term_enrollments_data
+        matches = get_campus_admin_current_term_enrollments_data(query=query)["items"]
+        students = list({row["student"] for row in matches})
+        if not students:
+            return []
+        parents = frappe.get_all("Student", filters={"name": ["in", students]}, pluck="guardian", limit_page_length=0)
+        return frappe.get_all("Parent", filters={"name": ["in", parents]}, fields=["name", "parent_name"], order_by="parent_name,name", limit_page_length=50)
+    conditions, values = [], {"query": "%" + query + "%"}
     if scope is not None:
         # Include enrolled families and linked enquiries at an assigned campus.
         conditions.append("""(EXISTS(SELECT 1 FROM `tabEnrollment` e JOIN `tabWeekly Timeslot` w ON w.name=e.weekly_timeslot WHERE e.parent=p.name AND w.campus IN %(campuses)s)

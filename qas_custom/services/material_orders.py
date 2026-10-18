@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 
 import frappe
 from frappe import _
-from frappe.utils import cint, flt, now_datetime
+from frappe.utils import cint, escape_html, flt, now_datetime
 from frappe.utils.file_manager import save_file
 from qas_custom.services.support_view import get_support_view_parent, reject_support_view_write
 
@@ -345,7 +345,7 @@ def create_parent_store_order_data(payload=None):
 	return _create_store_order(parent_doc, _payload(payload))
 
 
-def _create_store_order(parent_doc, data, *, admin=False):
+def _create_store_order(parent_doc, data, *, admin=False, student=None):
 	from qas_custom.services.support_view import reject_support_view_write
 	reject_support_view_write()
 	creation_key = str(data.get("creation_key") or "").strip()
@@ -382,9 +382,11 @@ def _create_store_order(parent_doc, data, *, admin=False):
 	for row in order.get("items"):
 		if not row.get("item_code"):
 			row.item_code = _ensure_material_item(_get_product(row.store_product))
+	if student:
+		order.flags.campus_order_student = student
 	order.insert(ignore_permissions=True)
 	create_invoice(order, issue=not admin)
-	order.add_comment("Comment", _("Store order created by {0}.").format(frappe.session.user))
+	order.add_comment("Comment", _("Store order created by {0}.").format(frappe.session.user) + (" Student: " + escape_html(student) if student else ""))
 	return invoice_payload(order, parent=not admin)
 
 

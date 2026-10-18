@@ -320,7 +320,7 @@ def get_campus_admin_teacher_directory_data(query=None, limit=300):
 	return get_active_teacher_directory_data(query=query, limit=limit)
 
 
-def get_campus_admin_current_term_enrollments_data(query=None, limit=50):
+def get_campus_admin_current_term_enrollments_data(query=None, limit=50, *, student=None):
 	profile = _require_campus_admin_profile()
 	term_result = _get_campus_admin_current_active_term()
 	if term_result["state"] != "ready":
@@ -342,7 +342,7 @@ def get_campus_admin_current_term_enrollments_data(query=None, limit=50):
 		}
 
 	page_limit = min(max(cint(limit or CAMPUS_ADMIN_CURRENT_TERM_ENROLLMENT_RESULT_LIMIT), 1), CAMPUS_ADMIN_CURRENT_TERM_ENROLLMENT_RESULT_LIMIT)
-	student_rows = _get_campus_admin_enrollment_search_students(query)
+	student_rows = frappe.get_all("Student", filters={"name": student}, fields=["name", "student_name"], limit_page_length=1) if student else _get_campus_admin_enrollment_search_students(query)
 	if not student_rows:
 		return {
 			"items": [],
@@ -1202,11 +1202,13 @@ def _get_campus_admin_current_active_term():
 
 
 def _get_campus_admin_enrollment_search_students(query):
+	query = str(query or "").strip()
+	if len(query) < 2 or any(char in query for char in "%_*?\\"):
+		return []
 	pattern = f"%{query}%"
 	rows = frappe.get_all(
 		"Student",
 		or_filters=[
-			["Student", "name", "like", pattern],
 			["Student", "student_name", "like", pattern],
 		],
 		fields=["name", "student_name"],

@@ -90,11 +90,14 @@ def new_order_email_content(doc, *, campus_admin=False):
 	)
 	from qas_custom.services.order_invoices import totals
 	total = totals(doc.get("items") or [], doc.get("discount_type") or "", doc.get("discount_value"), doc.get("discount_reason"))["order_total"]
+	student = (getattr(doc, "flags", None) or {}).get("campus_order_student") or ""
 	path = "/campus-admin?tab=orders&order=" if campus_admin else "/school-admin?tab=materials&order="
 	url = _parent_portal_url(path + quote(doc.name, safe=""))
 	return f"""<h2>New Shop order</h2>
 <p><strong>Order:</strong> {escape_html(doc.name)}<br>
 <strong>Parent:</strong> {escape_html(parent_name)}<br>
+<strong>Student:</strong> {escape_html(student)}<br>
+<strong>Created by:</strong> {escape_html(doc.get("created_by") or "")}<br>
 <strong>Pickup campus:</strong> {escape_html(doc.pickup_campus)}</p>
 <table cellpadding="8"><tr><th>Product</th><th>Quantity</th><th>Amount</th></tr>{rows}</table>
 <p><strong>Total: A${total:.2f}</strong></p>
