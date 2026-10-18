@@ -216,6 +216,41 @@ def _notify(doc, invoice=None):
     queue_order_invoice_notification(doc, invoice)
 
 
+def _issue_draft(doc, *, invoice_name=None, send_notifications=True):
+    if doc.status == "Cancelled" or doc.get("pending_revision"):
+        frappe.throw(_("Review this order's cancellation or pending revision before issuing."))
+    if not doc.invoice or invoice_name and doc.invoice != invoice_name:
+        frappe.throw(_("The order invoice changed. Refresh and open its current invoice."))
+    invoice = frappe.get_doc("Sales Invoice", doc.invoice)
+    if (invoice.get("source_doctype"), invoice.get("source_document")) != (ORDER_TYPE, doc.name):
+        frappe.throw(_("This invoice is not linked to its order."))
+    if cint(invoice.docstatus) != 0:
+        frappe.throw(_("This invoice has already been issued."))
+    _mutation(invoice.submit)
+    doc.add_comment("Comment", f"Invoice issued by {frappe.session.user}")
+    if send_notifications:
+        _notify(doc, invoice)
+    return invoice
+
+
+def submit_order_invoice(invoice_name, *, send_notifications=True):
+    """Use the order lock and billing rules for the unified invoice queue."""
+    if _scope(write=True) is not None:
+        frappe.throw(_("School Admin approval is required."), frappe.PermissionError)
+    invoice = frappe.get_doc("Sales Invoice", invoice_name)
+    if invoice.get("source_doctype") != ORDER_TYPE or not invoice.get("source_document"):
+        frappe.throw(_("This Order Invoice has no linked order to issue."))
+    doc = _lock(invoice.source_document, None)
+    _issue_draft(doc, invoice_name=invoice_name, send_notifications=send_notifications)
+    if not send_notifications:
+        return {"skipped": True, "reason": "Parent notifications were skipped for this submission."}
+    # Read the result of db_set without assuming that queued mail has been delivered.
+    doc.reload()
+    from qas_custom.modules.notifications.store_order_notifications import notification_status
+    status = notification_status(frappe._dict(ready_email_queue=doc.get("invoice_email_queue"), ready_notification_error=doc.get("invoice_notification_error")))
+    return {"sent": status["status"] == "Sent", "queued": status["status"] in {"Queued", "Sending"}, "reason": status.get("error") or status["status"]}
+
+
 def create_invoice(doc, issue=False):
     from qas_custom.services.parent_customer import ensure_parent_customer
     parent = frappe.get_doc("Parent", doc.parent)
@@ -425,14 +460,7 @@ def manage(action=None, payload=None):
                         _mutation(approved.submit)
                         _notify(doc, approved)
         elif action == "approve":
-            if not doc.invoice:
-                frappe.throw(_("This historical order has no invoice to issue."))
-            invoice = frappe.get_doc("Sales Invoice", doc.invoice)
-            if cint(invoice.docstatus) != 0:
-                frappe.throw(_("This invoice has already been issued."))
-            _mutation(invoice.submit)
-            doc.add_comment("Comment", f"Invoice issued by {frappe.session.user}")
-            _notify(doc, invoice)
+            _issue_draft(doc)
     elif action == "reject_revision":
         if scope is not None:
             frappe.throw(_("School Admin approval is required."), frappe.PermissionError)

@@ -737,6 +737,9 @@ def _invoice_has_workshop_enrollment_item(invoice, workshop_enrollment):
 
 
 def _validate_invoice_consolidation(invoices):
+	from qas_custom.services.order_invoices import is_order_invoice
+	if any(is_order_invoice(invoice) for invoice in invoices):
+		frappe.throw(_("Order Invoices must remain linked to their individual orders and cannot be consolidated."))
 	if len(invoices) < 2:
 		frappe.throw(_("Select at least two draft invoices to consolidate."))
 	if any(cint(invoice.docstatus) != 0 or invoice.get("status") == "Cancelled" for invoice in invoices):

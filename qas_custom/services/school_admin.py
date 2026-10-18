@@ -2092,6 +2092,13 @@ def submit_school_admin_invoice_data(invoice=None, enqueue_notification=False, s
 	try:
 		payg_operations = lock_payg_operations_for_invoices([invoice])
 		reject_payg_support_view_write(payg_operations)
+		from qas_custom.services.order_invoices import is_order_invoice, submit_order_invoice
+		if is_order_invoice(frappe.get_doc("Sales Invoice", invoice)):
+			if payload is not None:
+				frappe.throw(_("Edit this Order Invoice using its order details before issuing."))
+			result = submit_order_invoice(invoice, send_notifications=send_notifications)
+			frappe.db.commit()
+			return {**_build_invoice_payload(frappe.get_doc("Sales Invoice", invoice)), "notification": result}
 		doc = _lock_school_admin_draft_invoice(invoice)
 		validate_payg_bindings(doc, payg_operations)
 		change = _apply_school_admin_draft_invoice_payload(doc, draft_payload) if draft_payload is not None else None
@@ -2395,9 +2402,15 @@ def _unique_invoice_names(invoices):
 
 
 def _draft_invoice_submit_filters():
-	filters = {"docstatus": 0, "qas_invoice_type": ["not in", ["Store Order", "Material Order"]], "source_doctype": ["!=", "Store Order"]}
+	filters = {"docstatus": 0}
 	if _has_field("Sales Invoice", "status"):
 		filters["status"] = ["!=", "Cancelled"]
+	if _doctype_available("Store Order"):
+		cancelled = frappe.db.sql("""SELECT s.name FROM `tabSales Invoice` s
+			JOIN `tabStore Order` o ON s.source_doctype='Store Order' AND s.source_document=o.name
+			WHERE s.docstatus=0 AND o.status='Cancelled'""", pluck=True)
+		if cancelled:
+			filters["name"] = ["not in", cancelled]
 	return filters
 
 
@@ -2495,7 +2508,9 @@ def _run_one_bulk_invoice_submit(invoice_name):
 
 	result = submit_school_admin_invoice_data(invoice=invoice_name, enqueue_notification=False)
 	notification = result.get("notification") or {}
-	mail_message = _("Invoice email sent") if notification.get("sent") else _("Invoice submitted; email was not sent: {0}").format(notification.get("reason") or _("Check the notification log."))
+	mail_message = (_("Invoice email sent") if notification.get("sent") else
+		_("Invoice submitted; email queued") if notification.get("queued") else
+		_("Invoice submitted; email was not sent: {0}").format(notification.get("reason") or _("Check the notification log.")))
 	return {
 		"invoice": invoice_name,
 		"ok": True,
@@ -6282,7 +6297,6 @@ def _count_sales_invoices(filters):
 	if not _doctype_available("Sales Invoice"):
 		return 0
 	filters = dict(filters or {})
-	filters.update({"qas_invoice_type": ["not in", ["Store Order", "Material Order"]], "source_doctype": ["!=", "Store Order"]})
 	try:
 		# Use the list query's NULL handling so invoices without a source are counted.
 		rows = frappe.get_all("Sales Invoice", filters=filters, fields=["count(name) as total"])
@@ -6295,7 +6309,7 @@ def _get_outstanding_invoice_summary():
 	if not _doctype_available("Sales Invoice"):
 		return {"count": 0, "amount": 0}
 
-	filters = {"docstatus": 1, "qas_invoice_type": ["not in", ["Store Order", "Material Order"]], "source_doctype": ["!=", "Store Order"]}
+	filters = {"docstatus": 1}
 	if _has_field("Sales Invoice", "outstanding_amount"):
 		filters["outstanding_amount"] = [">", 0]
 	fields = _safe_fields("Sales Invoice", ["name", "grand_total", "outstanding_amount"])
@@ -6463,7 +6477,7 @@ def _search_invoice_direct_names(query, limit):
 		"Sales Invoice",
 		query,
 		fields,
-		["name", "customer", "parent", "student", "primary_student", "status"],
+		["name", "customer", "parent", "student", "primary_student", "status", "source_document"],
 		limit,
 	)
 	return {row.get("name") for row in rows if row.get("name")}
@@ -6923,7 +6937,7 @@ def _get_invoice_rows(
 ):
 	if not _doctype_available("Sales Invoice"):
 		return []
-	filters = {"qas_invoice_type": ["not in", ["Store Order", "Material Order"]], "source_doctype": ["!=", "Store Order"]}
+	filters = {}
 	if names is not None:
 		names = sorted({name for name in names if name})
 		if not names:
@@ -6950,6 +6964,10 @@ def _get_invoice_rows(
 		outstanding_min=outstanding_min,
 		outstanding_max=outstanding_max,
 	)
+	if status == "Draft":
+		for fieldname, value in _draft_invoice_submit_filters().items():
+			if fieldname != "docstatus":
+				outstanding_filters.append([fieldname, *value])
 	query_filters = filters
 	if outstanding_filters:
 		query_filters = [
@@ -6986,6 +7004,7 @@ def _get_invoice_rows(
 	rows = frappe.get_all(
 		"Sales Invoice",
 		filters=query_filters,
+		or_filters=[["qas_invoice_type", "in", ["Store Order", "Material Order"]], ["source_doctype", "=", "Store Order"]] if source == "Store Order" else None,
 		fields=fields,
 		order_by="modified desc",
 		limit=limit,
@@ -7048,6 +7067,11 @@ def _apply_invoice_status_filter(filters, status):
 
 
 def _apply_invoice_source_filter(filters, source):
+	if source == "Store Order":
+		return
+	if source == "PAYG Card":
+		filters["qas_invoice_type"] = source
+		return
 	if source == "Inquiry" and _has_field("Sales Invoice", "source_inquiry"):
 		filters["source_inquiry"] = ["is", "set"]
 	elif source == "Enrollment" and _has_field("Sales Invoice", "enrollment"):
