@@ -7,6 +7,9 @@ from qas_custom.services import admin_action_items as subject
 
 class TestActionItems(TestCase):
     def setUp(self):
+        p = patch("qas_custom.services.payg_payment_followups.unpaid_booking_warnings", return_value=[])
+        p.start(); self.addCleanup(p.stop)
+
         for target, value in (("require_admin", Mock()), ("brisbane_now", Mock(return_value=datetime(2026, 9, 27)))):
             p = patch.object(subject, target, value)
             p.start()

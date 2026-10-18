@@ -78,6 +78,12 @@ class QASPAYGBooking(Document):
                     student=self.student, source_doctype="QAS PAYG Booking", source_document=self.name)
             except Exception:
                 frappe.log_error(frappe.get_traceback(), f"PAYG staff notification queue failed: {self.name}")
+            if event == "payg_booked":
+                from qas_custom.modules.notifications.payg_unpaid_booking import queue_warning
+                try:
+                    queue_warning(self.name)
+                except Exception:
+                    frappe.log_error(frappe.get_traceback(), f"PAYG unpaid booking warning queue failed: {self.name}")
 
     def _validate_service_creation(self):
         flags = getattr(self, "flags", None)

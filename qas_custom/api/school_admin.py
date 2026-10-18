@@ -694,6 +694,7 @@ def school_admin_get_reporting_rows(
 	page=1,
 	page_length=50,
 	day_of_week=None,
+	debt_type=None,
 ):
 	return get_school_admin_reporting_rows_data(
 		term=term,
@@ -706,12 +707,13 @@ def school_admin_get_reporting_rows(
 		page=page,
 		page_length=page_length,
 		day_of_week=day_of_week,
+		debt_type=debt_type,
 	)
 
 
 @frappe.whitelist()
-def school_admin_export_reporting_families(term=None, attendance=None, invoice=None, query=None, day_of_week=None):
-	payload = export_school_admin_reporting_families_data(term=term, attendance=attendance, invoice=invoice, query=query, day_of_week=day_of_week)
+def school_admin_export_reporting_families(term=None, attendance=None, invoice=None, query=None, day_of_week=None, debt_type=None):
+	payload = export_school_admin_reporting_families_data(term=term, attendance=attendance, invoice=invoice, query=query, day_of_week=day_of_week, debt_type=debt_type)
 	frappe.local.response.filename = payload["filename"]
 	frappe.local.response.filecontent = payload["content"]
 	frappe.local.response.content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"

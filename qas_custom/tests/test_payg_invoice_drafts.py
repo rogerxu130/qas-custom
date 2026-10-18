@@ -44,10 +44,11 @@ class TestPaygDrafts(TestCase):
             get_roles=lambda _user: ["School Admin"], get_doc=Mock(side_effect=get_doc),
             get_all=Mock(return_value=[]),
             db=SimpleNamespace(savepoint=Mock(), rollback=Mock(), commit=Mock(), sql=Mock(),
-                               get_value=Mock(return_value="C-1"), exists=Mock(return_value=True)),
+                               get_value=Mock(side_effect=lambda dt, *args, **kw: "2026-10-18" if dt == "QAS PAYG Card" else "C-1"), exists=Mock(return_value=True)),
             throw=lambda message, *_args: (_ for _ in ()).throw(ValueError(message)),
             PermissionError=PermissionError)
-        self.patches = [patch.object(payg_drafts, "frappe", self.fake),
+        self.patches = [patch.object(payg_drafts, "get_invoice_settings", return_value={"payg_due_days":7}),
+                        patch.object(payg_drafts, "frappe", self.fake),
                         patch.object(school_admin, "_apply_invoice_adjustments", side_effect=lambda doc, rows: [
                             doc.append("taxes", {"description": row["description"], "tax_amount": row["amount"],
                                                  "qas_is_invoice_adjustment": 1}) for row in rows]),
@@ -71,6 +72,20 @@ class TestPaygDrafts(TestCase):
         with self.assertRaisesRegex(ValueError, "another key"):
             payg_drafts.create_payg_draft("OP-1", "invoice-2")
         self.fake.db.commit.assert_not_called()
+
+    def test_purchase_deadline_uses_card_issue_and_configurable_days(self):
+        payg_drafts.get_invoice_settings.return_value={"payg_due_days":10}
+        self.invoice.posting_date="2026-10-18"
+        self.invoice.payment_schedule=[Doc(due_date="2026-10-20")]
+        invoice=payg_drafts.create_payg_draft("OP-1", "invoice-1")
+        self.assertEqual(invoice.due_date,"2026-10-28")
+        self.assertEqual(invoice.payment_schedule[0].due_date,"2026-10-28")
+        payg_drafts.get_invoice_settings.return_value={"payg_due_days":20}
+        self.assertEqual(payg_drafts.create_payg_draft("OP-1", "invoice-1").due_date,"2026-10-28")
+
+    def test_delayed_draft_due_date_cannot_precede_posting_date(self):
+        self.invoice.posting_date="2026-11-01"
+        self.assertEqual(payg_drafts.create_payg_draft("OP-1", "invoice-1").due_date,"2026-11-01")
 
     def test_deleted_draft_can_be_recreated_with_original_key_and_same_card(self):
         self.operation.status = "Completed"
@@ -300,8 +315,11 @@ class TestPaygCrossModuleOrders(TestCase):
             case.product.invoice_item = "ITEM-1"
             case.fake.db.exists = Mock(return_value=True)
             case.fake.db.commit = Mock()
+            previous_value = case.fake.db.get_value
+            case.fake.db.get_value = Mock(side_effect=lambda dt, key, field: case.state["docs"][(dt, key)].issued_on if dt == "QAS PAYG Card" and field == "issued_on" else previous_value(dt, key, field))
             invoice = Doc(name=None, items=[], customer="C-1", parent="P-1", qas_invoice_type="PAYG Card")
-            with patch.object(payg_drafts, "frappe", case.fake), \
+            with patch.object(payg_drafts, "get_invoice_settings", return_value={"payg_due_days":7}), \
+                    patch.object(payg_drafts, "frappe", case.fake), \
                     patch.object(payg_drafts, "get_support_view_token", return_value=None), \
                     patch.object(payg_drafts, "disable_sales_invoice_auto_notifications"), \
                     patch.object(payg_drafts, "new_invoice_draft", return_value=invoice), \

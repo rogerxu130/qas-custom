@@ -26,11 +26,20 @@ def queue_definitions():
 def get_action_items(kind="enrollment", start=0, limit=30):
     require_admin()
     definitions = queue_definitions()
-    if kind not in definitions:
+    if kind not in definitions and kind != "payg_unpaid_invoice":
         frappe.throw("Unknown action item category.")
+    from qas_custom.services.payg_payment_followups import unpaid_booking_warnings
+    warnings = unpaid_booking_warnings()
+    if kind == "payg_unpaid_invoice":
+        start, limit = max(0, cint(start)), min(100, max(1, cint(limit or 30)))
+        counts = {key: frappe.db.count(doctype, filters=filters) for key, (doctype, filters, _) in definitions.items()}
+        counts["payg_unpaid_invoice"] = len(warnings)
+        return {"kind": kind, "counts": counts, "items": warnings[start:start + limit], "total": len(warnings),
+                "start": start, "has_more": start + limit < len(warnings)}
     start, limit = max(0, cint(start)), min(100, max(1, cint(limit or 30)))
     counts = {key: frappe.db.count(doctype, filters=filters)
               for key, (doctype, filters, _) in definitions.items()}
+    counts["payg_unpaid_invoice"] = len(warnings)
     doctype, filters, fields = definitions[kind]
     rows = frappe.get_all(doctype, filters=filters, fields=fields,
                           order_by="creation asc, name asc", limit_start=start, limit_page_length=limit)

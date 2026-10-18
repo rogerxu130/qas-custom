@@ -159,6 +159,7 @@ def get_school_admin_reporting_rows_data(
 	page=1,
 	page_length=50,
 	day_of_week=None,
+	debt_type=None,
 ):
 	_require_school_admin()
 	_validate_reporting_term(term)
@@ -168,6 +169,12 @@ def get_school_admin_reporting_rows_data(
 	if not snapshot:
 		return {"snapshot": None, "items": [], "total": 0, "page": 1, "page_length": _page_length(page_length)}
 
+	if report_type == FAMILY_REPORT_TYPE:
+		rows = _unified_family_rows(snapshot, term, attendance, invoice, query, day_of_week, debt_type)
+		page, page_length = max(1, cint(page) or 1), _page_length(page_length)
+		return {"snapshot": _snapshot_payload(snapshot), "items": rows[(page - 1) * page_length:page * page_length],
+			"total": len(rows), "page": page, "page_length": page_length, "has_more": page * page_length < len(rows),
+			"options": {"campuses": [], "teachers": []}, "financial_as_of": str(now_datetime())}
 	filters = {"snapshot": snapshot.name, "report_type": report_type}
 	if report_type == FAMILY_REPORT_TYPE and attendance:
 		if attendance == "To be started":
@@ -214,7 +221,17 @@ def get_school_admin_reporting_rows_data(
 	}
 
 
-def export_school_admin_reporting_families_data(term=None, attendance=None, invoice=None, query=None, day_of_week=None):
+def _unified_family_rows(snapshot, term, attendance=None, invoice=None, query=None, day_of_week=None, debt_type=None):
+	from qas_custom.services.unified_outstanding_report import collect_family_followups, filter_family_followups
+	if day_of_week and day_of_week not in ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"):
+		frappe.throw(_("Choose a valid class weekday for the family report."))
+	stored = frappe.get_all(ROW_DOCTYPE, filters={"snapshot": snapshot.name, "report_type": FAMILY_REPORT_TYPE},
+		fields=_row_fields(FAMILY_REPORT_TYPE), limit_page_length=0)
+	rows = collect_family_followups([_report_row_payload(row) for row in stored], term)
+	return filter_family_followups(rows, attendance=attendance, invoice=invoice, query=query, day_of_week=day_of_week, debt_type=debt_type)
+
+
+def export_school_admin_reporting_families_data(term=None, attendance=None, invoice=None, query=None, day_of_week=None, debt_type=None):
 	from frappe.utils.xlsxutils import handle_html, make_xlsx
 	from io import BytesIO
 	from openpyxl import load_workbook
@@ -224,26 +241,16 @@ def export_school_admin_reporting_families_data(term=None, attendance=None, invo
 		value = handle_html(str(value or ""))
 		return "'" + value if value.startswith("=") else value
 
-	rows = []
-	page = 1
-	snapshot = None
-	while True:
-		result = get_school_admin_reporting_rows_data(
-			term=term, report_type=FAMILY_REPORT_TYPE, attendance=attendance,
-			invoice=invoice, query=query, day_of_week=day_of_week, page=page, page_length=200,
-		)
-		current = result.get("snapshot") or {}
-		if not current:
-			frappe.throw(_("Generate this Term report before exporting."))
-		if snapshot and snapshot.get("name") != current.get("name"):
-			frappe.throw(_("The report changed during export. Please download it again."))
-		snapshot = current
-		rows.extend(result.get("items") or [])
-		if not result.get("has_more"):
-			break
-		page += 1
+	_require_school_admin()
+	_validate_reporting_term(term)
+	current = _latest_completed_snapshot(term)
+	if not current:
+		frappe.throw(_("Generate this Term report before exporting."))
+	snapshot = _snapshot_payload(current)
+	# Build the live balance overlay once so payment changes cannot move rows between export pages.
+	rows = _unified_family_rows(current, term, attendance, invoice, query, day_of_week, debt_type)
 
-	data = [["Family", "Parent Email", "Parent Phone", "Students", "Class Schedule", "Attendance", "Present / Late", "Absent", "Leave", "Cancelled", "To be started (past)", "Invoice", "Outstanding (AUD)"]]
+	data = [["Family", "Parent Email", "Parent Phone", "Students", "Class Schedule", "Attendance", "Present / Late", "Absent", "Leave", "Cancelled", "To be started (past)", "Invoice", "Outstanding (AUD)", "Debt types", "Follow-up reasons", "Invoices", "Ten-class cards"]]
 	for row in rows:
 		students = row.get("students") or []
 		schedule = "\n".join(
@@ -255,13 +262,16 @@ def export_school_admin_reporting_families_data(term=None, attendance=None, invo
 			text(", ".join(student.get("student_name") or student.get("student") or "" for student in students)), text(schedule), text(row.get("attendance_classification")),
 			cint(row.get("present_late_count")), cint(row.get("absent_count")), cint(row.get("leave_count")), cint(row.get("cancelled_count")),
 			cint(row.get("to_be_started_count")), text(row.get("invoice_classification")), flt(row.get("outstanding_amount")),
+			text(", ".join(row.get("debt_types", []))), text(", ".join(row.get("debt_reasons", []))),
+			text(", ".join(item["name"] for item in row.get("invoices", []))),
+			text("; ".join(f"{card['name']}: issued {card.get('issued_on')}, {card.get('days_since_issue')} days" for item in row.get("invoices", []) for card in item.get("cards", []))),
 		])
 	data.extend([[], ["Term", text(term)], ["Class weekday filter", text(day_of_week or "All")], ["Attendance filter", text(attendance or "All")],
-		["Invoice filter", text(invoice or "All")], ["Search filter", text(query)], ["Report generated at", text(snapshot.get("completed_at"))], ["Families", len(rows)]])
-	book = load_workbook(make_xlsx(data, "Term Attendance", column_widths=[30, 34, 22, 35, 65, 24, 16, 12, 12, 12, 24, 22, 22]))
+		["Invoice filter", text(invoice or "All")], ["Search filter", text(query)], ["Attendance generated at", text(snapshot.get("completed_at"))], ["Balances checked at", text(now_datetime())], ["Debt type filter", text(debt_type or "All")], ["Families", len(rows)]])
+	book = load_workbook(make_xlsx(data, "Term Attendance", column_widths=[30, 34, 22, 35, 65, 24, 16, 12, 12, 12, 24, 22, 22, 28, 38, 30, 48]))
 	sheet = book.active
 	sheet.freeze_panes = "A2"
-	sheet.auto_filter.ref = f"A1:M{len(rows) + 1}"
+	sheet.auto_filter.ref = f"A1:Q{len(rows) + 1}"
 	for cell in sheet[1]:
 		cell.font = Font(bold=True)
 	for index in range(2, len(rows) + 2):

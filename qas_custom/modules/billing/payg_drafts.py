@@ -6,7 +6,7 @@ import frappe
 
 from qas_custom.modules.billing.commands import get_invoice_item, run_invoice_mutation_as_administrator
 from qas_custom.modules.billing.drafts import new_invoice_draft
-from qas_custom.modules.billing.invoice_settings import apply_invoice_payment_snapshot
+from qas_custom.modules.billing.invoice_settings import apply_invoice_payment_snapshot, get_invoice_settings
 from qas_custom.modules.notifications.guard import disable_sales_invoice_auto_notifications
 from qas_custom.modules.payg.invoice_links import allow_invoice_relink
 from qas_custom.modules.payg.money import stored_currency
@@ -189,6 +189,16 @@ def _create_payg_draft(operation_id, invoice_request_key):
     disable_sales_invoice_auto_notifications()
     invoice = new_invoice_draft(customer=customer, parent=operation.family_parent,
                                 invoice_type="PAYG Card")
+    if operation.operation_type == "Purchase":
+        from frappe.utils import add_days, getdate
+        issued_on = frappe.db.get_value("QAS PAYG Card", operation.card, "issued_on")
+        if not issued_on:
+            frappe.throw("PAYG card issue date is missing")
+        # ERPNext forbids a due date before the invoice posting date on delayed draft creation.
+        deadline = add_days(issued_on, get_invoice_settings()["payg_due_days"])
+        invoice.due_date = str(max(getdate(deadline), getdate(invoice.get("posting_date") or issued_on)))
+        for row in invoice.get("payment_schedule") or []:
+            row.due_date = invoice.due_date
     invoice.append("items", {"item_code": item_code, "item_name": course, "qty": 1, "rate": rate,
                                     "description": description, "course": course,
                                     "qas_line_type": line_type,

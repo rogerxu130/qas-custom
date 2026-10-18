@@ -20,6 +20,7 @@ DEFAULT_INVOICE_SETTINGS = {
 	"school_address": "",
 	"enrollment_terms": "",
 	"payment_due_days": 7,
+	"payg_due_days": 7,
 	"course_due_lead_days": 7,
 	"course_due_grace_days": 3,
 	"overdue_reminder_interval_days": 4,
@@ -74,7 +75,7 @@ def get_invoice_settings():
 		value = doc.get(fieldname)
 		if fieldname == "payment_due_days":
 			settings[fieldname] = _normalize_due_days(value)
-		elif fieldname in {"course_due_lead_days", "course_due_grace_days"}:
+		elif fieldname in {"course_due_lead_days", "course_due_grace_days", "payg_due_days"}:
 			settings[fieldname] = validate_course_due_days(value, fieldname)
 		elif fieldname == "overdue_reminder_interval_days":
 			settings[fieldname] = max(1, cint(value)) if value else 4
@@ -98,7 +99,7 @@ def update_invoice_settings(payload):
 		if fieldname in payload:
 			if fieldname == "payment_due_days":
 				doc.set(fieldname, _normalize_due_days(payload.get(fieldname)))
-			elif fieldname in {"course_due_lead_days", "course_due_grace_days"}:
+			elif fieldname in {"course_due_lead_days", "course_due_grace_days", "payg_due_days"}:
 				doc.set(fieldname, validate_course_due_days(payload.get(fieldname), fieldname))
 			elif fieldname == "overdue_reminder_interval_days":
 				doc.set(fieldname, validate_reminder_interval(payload.get(fieldname)))
@@ -275,5 +276,5 @@ def validate_course_due_days(value, fieldname):
 			return int(number)
 	except (TypeError, ValueError, OverflowError):
 		pass
-	label = "Days Before First Class" if minimum == 0 else "Late Booking / Mid-term Grace Days"
+	label = "Ten-class Pass Due Days" if fieldname == "payg_due_days" else "Days Before First Class" if minimum == 0 else "Late Booking / Mid-term Grace Days"
 	frappe.throw(f"{label} must be a whole number of at least {minimum}.")

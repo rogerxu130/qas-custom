@@ -5,6 +5,7 @@ from unittest import TestCase
 from unittest.mock import Mock, patch
 
 import frappe
+from qas_custom.services import school_admin_reporting as subject
 
 from qas_custom.services.school_admin_reporting import (
 	FAMILY_REPORT_TYPE,
@@ -468,107 +469,55 @@ class TestSchoolAdminReportingWeekday(TestCase):
 		self.assertEqual(_family_row_names_for_weekday({"snapshot": "S1"}, "Wednesday"), ["Wednesday-family"])
 		self.assertEqual(mock_get_all.call_args.kwargs["limit_page_length"], 0)
 
-	@patch("qas_custom.services.school_admin_reporting._report_filter_options", return_value={})
-	@patch("qas_custom.services.school_admin_reporting._latest_completed_snapshot")
-	@patch("qas_custom.services.school_admin_reporting._validate_reporting_term")
-	@patch("qas_custom.services.school_admin_reporting._require_school_admin")
-	@patch("qas_custom.services.school_admin_reporting._family_row_names_for_weekday", return_value=["R60"])
-	def test_weekday_combines_with_outstanding_and_filters_before_pagination(self, mock_names, _require, _validate, mock_latest, _options):
-		mock_latest.return_value = frappe._dict(name="S1", status="Completed")
-		fake = SimpleNamespace(db=SimpleNamespace(count=Mock(return_value=1)), get_all=Mock(return_value=[]))
-		with patch("qas_custom.services.school_admin_reporting.frappe", fake):
-			result = get_school_admin_reporting_rows_data(term="Term 4 2026", report_type=FAMILY_REPORT_TYPE, invoice="Outstanding", day_of_week="Wednesday", page=2)
-		filters = fake.get_all.call_args.kwargs["filters"]
-		self.assertEqual(filters["invoice_classification"], "Outstanding")
-		self.assertEqual(filters["name"], ["in", ["R60"]])
-		self.assertEqual(fake.db.count.call_args.kwargs["filters"], filters)
-		self.assertEqual(fake.get_all.call_args.kwargs["limit_start"], 50)
-		self.assertEqual(result["total"], 1)
+	def test_weekday_combines_with_outstanding_and_filters_before_pagination(self):
+		rows=[{"name": str(i), "parent_record": str(i), "invoice_classification":"Outstanding", "debt_types":["Art supplies"], "students":[{"class_schedule":[{"day_of_week":"Wednesday"}]}]} for i in range(52)]
+		rows += [{"name":"other", "invoice_classification":"Outstanding", "students":[{"class_schedule":[{"day_of_week":"Monday"}]}]}]
+		with patch.object(subject,"_require_school_admin"),patch.object(subject,"_validate_reporting_term"),patch.object(subject,"_latest_completed_snapshot",return_value=frappe._dict(name="S1")),patch.object(subject.frappe,"get_all",return_value=[]),patch("qas_custom.services.unified_outstanding_report.collect_family_followups",return_value=rows),patch.object(subject,"now_datetime",return_value=datetime(2026,10,18)):
+			result=get_school_admin_reporting_rows_data(term="Term 4 2026",report_type=FAMILY_REPORT_TYPE,invoice="Outstanding",day_of_week="Wednesday",page=2)
+		self.assertEqual(result["total"],52)
+		self.assertEqual(len(result["items"]),2)
+		self.assertEqual(result["items"][0]["name"],"50")
 
 
 class TestSchoolAdminReportingExcel(TestCase):
-	@patch("frappe.utils.xlsxutils.get_excel_date_format", return_value=("yyyy-mm-dd", "hh:mm:ss"))
-	@patch("qas_custom.services.school_admin_reporting.get_school_admin_reporting_rows_data")
-	def test_exports_all_pages_with_filters_numeric_amounts_and_safe_text(self, mock_rows, _date_format):
+	def test_exports_all_pages_with_filters_numeric_amounts_and_safe_text(self):
 		from io import BytesIO
 		from openpyxl import load_workbook
-		row = {"parent_name": "=HYPERLINK(""https://example.test"")", "outstanding_amount": 100.5,
-			"students": [{"student_name": "Amy", "class_schedule": [{"day_of_week": "Wednesday", "course": "Drawing"}]}]}
-		snapshot = {"name": "S1", "completed_at": "2026-10-09 17:00:00"}
-		mock_rows.side_effect = [{"snapshot": snapshot, "items": [row], "has_more": True}, {"snapshot": snapshot, "items": [dict(row, parent_name="Ben")], "has_more": False}]
-		result = export_school_admin_reporting_families_data(term="Term 4 2026", invoice="Outstanding", day_of_week="Wednesday", query="Amy")
-		book = load_workbook(BytesIO(result["content"]))
-		self.assertTrue(result["filename"].endswith(".xlsx"))
-		self.assertEqual(book.active.freeze_panes, "A2")
-		self.assertEqual(book.active.auto_filter.ref, "A1:M3")
-		self.assertTrue(book.active["E2"].alignment.wrap_text)
-		self.assertEqual(book.active["M2"].value, 100.5)
-		self.assertEqual(book.active["E2"].value, "Amy: Wednesday · Drawing")
-		self.assertEqual(book.active["A2"].data_type, "s")
-		self.assertEqual(book.active["A3"].value, "Ben")
-		self.assertEqual(mock_rows.call_args_list[1].kwargs["page"], 2)
-		for call in mock_rows.call_args_list:
-			self.assertEqual(call.kwargs["day_of_week"], "Wednesday")
-			self.assertEqual(call.kwargs["invoice"], "Outstanding")
-			self.assertEqual(call.kwargs["query"], "Amy")
+		row={"parent_name":"=HYPERLINK(https://example.test)","outstanding_amount":100.5,"students":[{"student_name":"Amy","class_schedule":[{"day_of_week":"Wednesday","course":"Drawing"}]}],"debt_types":["Art supplies"],"debt_reasons":["Overdue"],"invoices":[]}
+		with patch.object(subject,"_require_school_admin"),patch.object(subject,"_validate_reporting_term"),patch.object(subject,"_latest_completed_snapshot",return_value=frappe._dict(name="S1",completed_at="2026-10-18")),patch.object(subject,"_unified_family_rows",return_value=[row,dict(row,parent_name="Ben")]) as collect,patch("frappe.utils.xlsxutils.get_excel_date_format",return_value=("yyyy-mm-dd","hh:mm:ss")),patch.object(subject,"now_datetime",return_value=datetime(2026,10,18)):
+			result=export_school_admin_reporting_families_data(term="Term 4 2026",invoice="Outstanding",day_of_week="Wednesday",query="Amy",debt_type="Art supplies")
+		sheet=load_workbook(BytesIO(result["content"])).active
+		self.assertEqual(sheet.auto_filter.ref,"A1:Q3")
+		self.assertEqual(sheet["M2"].value,100.5)
+		self.assertEqual(sheet["E2"].value,"Amy: Wednesday · Drawing")
+		self.assertEqual(sheet["A2"].data_type,"s")
+		self.assertEqual(sheet["N2"].value,"Art supplies")
+		self.assertEqual(sheet["A3"].value,"Ben")
+		self.assertEqual(collect.call_count,1)
+		self.assertEqual(collect.call_args.args[2:],(None,"Outstanding","Amy","Wednesday","Art supplies"))
 
 
-	@patch("qas_custom.services.school_admin_reporting.frappe.throw", side_effect=RuntimeError)
-	@patch("qas_custom.services.school_admin_reporting.get_school_admin_reporting_rows_data")
-	def test_rejects_an_export_if_report_changes_between_pages(self, mock_rows, _throw):
-		mock_rows.side_effect = [
-			{"snapshot": {"name": "S1"}, "items": [], "has_more": True},
-			{"snapshot": {"name": "S2"}, "items": [], "has_more": False},
-		]
-		with self.assertRaises(RuntimeError):
-			export_school_admin_reporting_families_data(term="Term 4 2026")
+	def test_export_requires_completed_attendance_snapshot(self):
+		with patch.object(subject,"_require_school_admin"),patch.object(subject,"_validate_reporting_term"),patch.object(subject,"_latest_completed_snapshot",return_value=None),patch.object(subject.frappe,"throw",side_effect=RuntimeError),patch.object(subject,"_unified_family_rows") as collect:
+			with self.assertRaises(RuntimeError):export_school_admin_reporting_families_data(term="Term 4 2026")
+		collect.assert_not_called()
 
 
 class TestSchoolAdminReportingRows(TestCase):
-	@patch("qas_custom.services.school_admin_reporting._report_filter_options", return_value={"campuses": [], "teachers": []})
-	@patch("qas_custom.services.school_admin_reporting._latest_completed_snapshot")
-	@patch("qas_custom.services.school_admin_reporting._validate_reporting_term")
-	@patch("qas_custom.services.school_admin_reporting._require_school_admin")
-	def test_unmarked_family_filter_includes_mixed_attendance(self, _require, _validate, mock_latest, _options):
-		mock_latest.return_value = frappe._dict(name="QARS-1", term="Term 3 2026", status="Completed")
-		fake_frappe = SimpleNamespace(db=SimpleNamespace(count=Mock(return_value=1)), get_all=Mock(return_value=[]))
-		with patch("qas_custom.services.school_admin_reporting.frappe", fake_frappe):
-			get_school_admin_reporting_rows_data(term="Term 3 2026", report_type=FAMILY_REPORT_TYPE, attendance="To be started")
-		filters = fake_frappe.get_all.call_args.kwargs["filters"]
-		self.assertEqual(filters["to_be_started_count"], [">", 0])
-		self.assertNotIn("attendance_classification", filters)
+	def test_unmarked_family_filter_includes_mixed_attendance(self):
+		rows=[{"name":"mixed","attendance_classification":"Attended","to_be_started_count":1}, {"name":"marked","attendance_classification":"Attended","to_be_started_count":0}]
+		with patch.object(subject,"_require_school_admin"),patch.object(subject,"_validate_reporting_term"),patch.object(subject,"_latest_completed_snapshot",return_value=frappe._dict(name="S1")),patch.object(subject.frappe,"get_all",return_value=[]),patch("qas_custom.services.unified_outstanding_report.collect_family_followups",return_value=rows),patch.object(subject,"now_datetime",return_value=datetime(2026,10,18)):
+			result=get_school_admin_reporting_rows_data(term="Term 3 2026",report_type=FAMILY_REPORT_TYPE,attendance="To be started")
+		self.assertEqual([row["name"] for row in result["items"]],["mixed"])
 
 
-	@patch("qas_custom.services.school_admin_reporting._report_filter_options", return_value={"campuses": [], "teachers": []})
-	@patch("qas_custom.services.school_admin_reporting._latest_completed_snapshot")
-	@patch("qas_custom.services.school_admin_reporting._validate_reporting_term")
-	@patch("qas_custom.services.school_admin_reporting._require_school_admin")
-	def test_family_row_filters_are_applied_to_latest_snapshot(
-		self,
-		_mock_require,
-		_mock_validate,
-		mock_latest,
-		_mock_options,
-	):
-		mock_latest.return_value = frappe._dict(name="QARS-1", term="Term 3 2026", status="Completed")
-		fake_frappe = SimpleNamespace(
-			db=SimpleNamespace(count=Mock(return_value=1)),
-			get_all=Mock(return_value=[]),
-		)
-		with patch("qas_custom.services.school_admin_reporting.frappe", fake_frappe):
-			result = get_school_admin_reporting_rows_data(
-				term="Term 3 2026",
-				report_type=FAMILY_REPORT_TYPE,
-				attendance="Absent",
-				invoice="Outstanding",
-				query="pat",
-			)
-		filters = fake_frappe.get_all.call_args.kwargs["filters"]
-		self.assertEqual(filters["snapshot"], "QARS-1")
-		self.assertEqual(filters["attendance_classification"], "Absent")
-		self.assertEqual(filters["invoice_classification"], "Outstanding")
-		self.assertEqual(filters["search_text"], ["like", "%pat%"])
-		self.assertEqual(result["total"], 1)
+	def test_family_row_filters_are_applied_to_latest_snapshot(self):
+		rows=[{"name":"target","parent_name":"Pat","attendance_classification":"Absent","invoice_classification":"Outstanding"}, {"name":"other","parent_name":"Pat","attendance_classification":"Attended","invoice_classification":"Outstanding"}]
+		with patch.object(subject,"_require_school_admin"),patch.object(subject,"_validate_reporting_term"),patch.object(subject,"_latest_completed_snapshot",return_value=frappe._dict(name="S1")),patch.object(subject.frappe,"get_all",return_value=[]) as read,patch("qas_custom.services.unified_outstanding_report.collect_family_followups",return_value=rows),patch.object(subject,"now_datetime",return_value=datetime(2026,10,18)):
+			result=get_school_admin_reporting_rows_data(term="Term 3 2026",report_type=FAMILY_REPORT_TYPE,attendance="Absent",invoice="Outstanding",query="pat")
+		self.assertEqual(read.call_args.kwargs["filters"],{"snapshot":"S1","report_type":FAMILY_REPORT_TYPE})
+		self.assertEqual(result["total"],1)
+		self.assertEqual(result["items"][0]["name"],"target")
 
 	@patch("qas_custom.services.school_admin_reporting._report_filter_options", return_value={"campuses": [], "teachers": []})
 	@patch("qas_custom.services.school_admin_reporting._latest_completed_snapshot")

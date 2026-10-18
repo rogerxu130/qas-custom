@@ -9,6 +9,11 @@ from qas_custom.services import school_admin
 
 
 class TestPaygStaffNotifications(TestCase):
+    def setUp(self):
+        p=patch("qas_custom.modules.notifications.payg_unpaid_booking.queue_warning")
+        self.warning=p.start()
+        self.addCleanup(p.stop)
+
     def test_finalized_booking_queues_once_and_cancellation_notifies(self):
         doc = SimpleNamespace(name="B", student="S", course_session="CS", status="Reserved",
             attendance_entry=None, get_doc_before_save=lambda: None)

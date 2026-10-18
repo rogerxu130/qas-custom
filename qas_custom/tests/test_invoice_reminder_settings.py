@@ -35,6 +35,7 @@ class TestInvoiceReminderSettings(TestCase):
 
     def test_native_frappe_form_uses_same_validation(self):
         doc=frappe._dict(overdue_reminder_interval_days=0)
+        doc.set=lambda field,value:doc.update({field:value})
         with patch(MODULE+'.frappe.throw', side_effect=frappe.ValidationError):
             with self.assertRaises(frappe.ValidationError):
                 QASInvoiceSettings.validate(doc)
