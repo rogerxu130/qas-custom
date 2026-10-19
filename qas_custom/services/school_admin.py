@@ -353,7 +353,7 @@ def get_school_admin_family_data(parent=None, student=None, customer=None, email
 			limit=80,
 		),
 		"inquiries": _get_family_inquiry_rows(parent=parent_id, students=student_ids, email=email, limit=80),
-		"invoices": _get_invoice_rows(customer=customer_id, parent=parent_id, students=student_ids, limit=80),
+		"invoices": _get_invoice_rows(customer=customer_id, parent=parent_id, students=student_ids, limit=0, family_scope=True),
 		"vouchers": _get_family_voucher_rows(students=student_ids, limit=80),
 	}
 
@@ -6934,6 +6934,7 @@ def _get_invoice_rows(
 	outstanding_min=None,
 	outstanding_max=None,
 	limit=80,
+	family_scope=False,
 ):
 	if not _doctype_available("Sales Invoice"):
 		return []
@@ -6945,11 +6946,24 @@ def _get_invoice_rows(
 		filters["name"] = ["in", names]
 	if status:
 		_apply_invoice_status_filter(filters, status)
-	if customer:
+	or_filters = []
+	if family_scope:
+		# Family history includes customer-level purchases without a student link.
+		if customer:
+			or_filters.append(["customer", "=", customer])
+		if parent and _has_field("Sales Invoice", "parent"):
+			or_filters.append(["parent", "=", parent])
+		if students:
+			invoice_names = _invoice_names_for_students(students)
+			if invoice_names:
+				or_filters.append(["name", "in", sorted(invoice_names)])
+		if not or_filters:
+			return []
+	if customer and not family_scope:
 		filters["customer"] = customer
-	if parent and _has_field("Sales Invoice", "parent"):
+	if parent and not family_scope and _has_field("Sales Invoice", "parent"):
 		filters["parent"] = parent
-	if students:
+	if students and not family_scope:
 		invoice_names = _invoice_names_for_students(students)
 		if not invoice_names:
 			return []
@@ -7001,10 +7015,12 @@ def _get_invoice_rows(
 			"source_inquiry",
 		],
 	)
+	if not family_scope and source == "Store Order":
+		or_filters = [["qas_invoice_type", "in", ["Store Order", "Material Order"]], ["source_doctype", "=", "Store Order"]]
 	rows = frappe.get_all(
 		"Sales Invoice",
 		filters=query_filters,
-		or_filters=[["qas_invoice_type", "in", ["Store Order", "Material Order"]], ["source_doctype", "=", "Store Order"]] if source == "Store Order" else None,
+		or_filters=or_filters or None,
 		fields=fields,
 		order_by="modified desc",
 		limit=limit,
