@@ -13,7 +13,7 @@ from qas_custom.services.session_schedule import (
 
 
 def slot(**updates):
-    result = frappe._dict(name="CLASS-1", day_of_week="Saturday", start_time="14:00:00",
+    result = frappe._dict(name="CLASS-1", status="Active", day_of_week="Saturday", start_time="14:00:00",
                           end_time="15:30:00", term="TERM", classroom="ROOM", teacher="TEACHER")
     result.update(updates)
     return result
@@ -187,6 +187,32 @@ class TestSessionSchedule(TestCase):
                 for text in ("2026-10-24", "本次调整：Storytelling", "16:00–17:30", "已有课程：Realistic Art", "16:30–18:00", "课次 OTHER", "班级 CLASS-2", "尚未保存"):
                     self.assertIn(text, message)
                 self.assertNotIn("08:00–09:00", message)
+
+    def test_disabled_classes_with_scheduled_sessions_do_not_block_schedule_change(self):
+        for status in ("Inactive", "Archived"):
+            with self.subTest(status=status):
+                plan = self.plan()
+                other = session("OTHER", "2026-10-24", weekly_timeslot="CLASS-2", start_time="16:00", end_time="17:30")
+                other_slot = slot(name="CLASS-2", status=status)
+                with patch("qas_custom.services.session_schedule.frappe.get_all", side_effect=[[other], [other_slot]]) as get_all:
+                    _check_resource_conflicts(self.new, self.rows, plan)
+                self.assertIn("status", get_all.call_args.kwargs["fields"])
+                self.assertEqual(plan["blocking_errors"], [])
+                self.assertEqual(other.status, "Scheduled")
+                self.assertEqual(other_slot.status, status)
+
+    def test_active_class_still_blocks_after_an_inactive_conflict_is_ignored(self):
+        plan = self.plan()
+        disabled = session("DISABLED", "2026-10-24", weekly_timeslot="CLASS-2", start_time="16:00", end_time="17:30")
+        active = session("ACTIVE", "2026-10-24", weekly_timeslot="CLASS-3", start_time="16:00", end_time="17:30")
+        slots = [slot(name="CLASS-2", status="Inactive"), slot(name="CLASS-3", status="Active")]
+        with patch("qas_custom.services.session_schedule.frappe.get_all", side_effect=[[disabled, active], slots]), patch(
+            "qas_custom.services.session_schedule.frappe.db", Mock(get_value=lambda dt, name, field: name)
+        ):
+            _check_resource_conflicts(self.new, self.rows, plan)
+        self.assertEqual(len(plan["blocking_errors"]), 1)
+        self.assertIn("课次 ACTIVE", plan["blocking_errors"][0])
+        self.assertNotIn("课次 DISABLED", plan["blocking_errors"][0])
 
     def test_adjacent_sessions_do_not_report_conflict(self):
         plan = self.plan()

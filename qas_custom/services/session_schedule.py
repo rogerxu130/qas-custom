@@ -186,8 +186,9 @@ def _check_resource_conflicts(new, sessions, plan):
         filters={"session_date": ["in", dates], "status": ["!=", "Cancelled"], "weekly_timeslot": ["!=", new.name]},
         fields=["name", "weekly_timeslot", "session_date", "start_time", "end_time", "teacher_override"], limit_page_length=0)
     slots = frappe.get_all("Weekly Timeslot", filters={"name": ["in", sorted({r.weekly_timeslot for r in other})]},
-        fields=["name", "course", "class_language", "campus", "classroom", "teacher", "start_time", "end_time"], limit_page_length=0) if other else []
-    slot_map = {r.name: r for r in slots}
+        fields=["name", "status", "course", "class_language", "campus", "classroom", "teacher", "start_time", "end_time"], limit_page_length=0) if other else []
+    # Disabled classes retain their sessions for history, but no longer reserve resources.
+    slot_map = {r.name: r for r in slots if r.get("status") == "Active"}
     source = {r.name: r for r in sessions}
     labels = {}
 
