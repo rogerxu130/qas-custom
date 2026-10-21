@@ -8,14 +8,15 @@ from frappe import _
 from frappe.utils import getdate, get_datetime, now_datetime, today
 
 from qas_custom.services.class_record_labels import refresh_linked_course_session_labels
+from qas_custom.services.session_schedule import (
+	plan_schedule_change, preserve_session_times, apply_session_changes,
+	_check_resource_conflicts, _check_pass_booking_dates,
+)
 from qas_custom.services.school_admin import (
 	_add_comment,
 	_apply_weekly_timeslot_payload,
 	_assert_active_teacher,
-	_course_session_date_exists,
-	_course_session_has_locked_attendance,
 	_format_time_for_message,
-	_future_weekday_dates,
 	_get_payload,
 	_require_school_admin,
 	_time_to_minutes,
@@ -40,7 +41,7 @@ def _session_has_started(session, start_time, current_time):
 	if session.get("status") == "Completed":
 		return True
 	# Use the saved start time, never the proposed time, to protect today's history.
-	start = _format_time_for_message(start_time) or "00:00"
+	start = _format_time_for_message(session.get("start_time") if session.get("start_time") not in (None, "") else start_time) or "00:00"
 	return get_datetime(f"{getdate(session.get('session_date'))} {start}") <= current_time
 
 
@@ -73,6 +74,7 @@ def _state_token(report):
 		"trial_inquiries": report["trial_inquiries"],
 		"effective_date": report["effective_date"],
 		"session_date_mapping": report["session_date_mapping"],
+		"schedule_plan": report.get("schedule_plan"),
 	}
 	return hashlib.sha256(json.dumps(state, sort_keys=True, default=str, separators=(",", ":")).encode()).hexdigest()
 
@@ -115,7 +117,7 @@ def _preview(weekly_timeslot, new_course, payload=None, effective_date=None):
 
 	sessions = frappe.get_all(
 		"Course Sessions", filters={"weekly_timeslot": doc.name},
-		fields=["name", "session_date", "status", "teacher_override"],
+		fields=["name", "session_date", "status", "teacher_override", "start_time", "end_time"],
 		order_by="session_date asc", limit_page_length=0,
 	)
 	enrollments = frappe.get_all(
@@ -146,7 +148,7 @@ def _preview(weekly_timeslot, new_course, payload=None, effective_date=None):
 	teacher_changed = "teacher" in changes
 	effective = getdate(effective_date) if effective_date else None
 	# All sessions must inherit this change, including sessions before a supplied term start.
-	if teacher_changed:
+	if teacher_changed and not schedule_changed:
 		effective = getdate(today())
 	if sessions and (schedule_changed or teacher_changed) and not effective:
 		blocking_errors.append(_("An effective date is required for combined schedule or teacher changes."))
@@ -162,20 +164,17 @@ def _preview(weekly_timeslot, new_course, payload=None, effective_date=None):
 		if conflict := _teacher_conflict(doc, intended):
 			blocking_errors.append(conflict)
 
+	schedule_plan = None
 	date_mapping = []
-	if "day_of_week" in changes and sessions and effective:
-		affected = [row for row in sessions if getdate(row.session_date) >= effective]
-		target_dates = _future_weekday_dates(effective, intended["day_of_week"], len(affected))
-		if term.get("end_date") and any(date > getdate(term.end_date) for date in target_dates):
-			blocking_errors.append(_("The weekday change would move a session beyond the term end date."))
-		for session, target_date in zip(affected, target_dates):
-			if getdate(session.session_date) == target_date:
-				continue
-			if _course_session_date_exists(doc.name, target_date, exclude=session.name):
-				blocking_errors.append(_("A target session date already exists: {0}").format(target_date))
-			if _course_session_has_locked_attendance(session.name):
-				blocking_errors.append(_("Attendance locks session {0}; its date cannot be changed.").format(session.name))
-			date_mapping.append({"session": session.name, "before": str(session.session_date), "after": str(target_date)})
+	if schedule_changed and effective and not blocking_errors:
+		original = frappe._dict(name=doc.name, term=doc.term, **before)
+		target = frappe._dict(name=doc.name, term=doc.term, **intended)
+		schedule_plan = plan_schedule_change(original, target, sessions, set(), effective, term, now=current_time)
+		_check_resource_conflicts(target, sessions, schedule_plan)
+		schedule_plan["pass_bookings"] = _check_pass_booking_dates(schedule_plan)
+		blocking_errors.extend(schedule_plan["blocking_errors"])
+		date_mapping = [{"session": row["session"], "before": row["old_date"], "after": row["session_date"]}
+			for row in schedule_plan["changes"] if row["old_date"] != row["session_date"]]
 
 	old_duration = frappe.db.get_value("Course", before["course"], "duration_mins") or 0
 	new_duration = frappe.db.get_value("Course", new_course, "duration_mins") or 0
@@ -185,7 +184,7 @@ def _preview(weekly_timeslot, new_course, payload=None, effective_date=None):
 		"old_course": before["course"], "new_course": new_course,
 		"intended_payload": intended, "changes": changes,
 		"effective_date": str(effective) if effective else "",
-		"session_date_mapping": date_mapping,
+		"session_date_mapping": date_mapping, "schedule_plan": schedule_plan,
 		"enrollments": [dict(row) for row in enrollments],
 		"planned_enrollment_count": sum(row.status == "Planned" for row in enrollments),
 		"active_enrollment_count": sum(row.status == "Active" for row in enrollments),
@@ -226,10 +225,14 @@ def execute(weekly_timeslot=None, new_course=None, confirmation_token=None, payl
 			for session in report["sessions"]:
 				if session.get("teacher_override"):
 					frappe.db.set_value("Course Sessions", session["name"], "teacher_override", "", update_modified=True)
+		if report.get("schedule_plan") is not None:
+			preserve_session_times(doc)
+			doc.flags.reviewed_schedule_change = True
+			doc.schedule_effective_date = report["effective_date"]
 		_apply_weekly_timeslot_payload(doc, intended)
 		doc.save(ignore_permissions=True)
-		for mapping in report["session_date_mapping"]:
-			frappe.db.set_value("Course Sessions", mapping["session"], "session_date", mapping["after"], update_modified=True)
+		if report.get("schedule_plan") is not None:
+			apply_session_changes(report["schedule_plan"])
 		changed_enrollments = report["enrollments"] if "course" in report["changes"] else []
 		for row in changed_enrollments:
 			frappe.db.set_value("Enrollment", row["name"], "course", new_course, update_modified=True)

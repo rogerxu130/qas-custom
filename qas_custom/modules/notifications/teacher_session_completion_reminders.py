@@ -5,6 +5,7 @@ from datetime import datetime, time, timedelta
 from hashlib import sha256
 
 import frappe
+from qas_custom.services.session_schedule import session_timeslot
 from frappe import _
 from frappe.utils import cint, escape_html, formatdate, get_datetime_in_timezone, now_datetime
 
@@ -145,7 +146,7 @@ def _get_due_session_completion_states(now):
 	sessions = frappe.get_all(
 		"Course Sessions",
 		filters={"session_date": today, "status": ["!=", "Cancelled"]},
-		fields=["name", "weekly_timeslot", "session_date", "status", "teacher_override"],
+		fields=["name", "weekly_timeslot", "session_date", "status", "teacher_override", "start_time", "end_time"],
 		order_by="name asc",
 		limit_page_length=0,
 	)
@@ -172,7 +173,7 @@ def _get_session_completion_state(course_session, now):
 	session = frappe.db.get_value(
 		"Course Sessions",
 		course_session,
-		["name", "weekly_timeslot", "session_date", "status", "teacher_override"],
+		["name", "weekly_timeslot", "session_date", "status", "teacher_override", "start_time", "end_time"],
 		as_dict=True,
 	)
 	if not session or session.get("status") == "Cancelled":
@@ -197,7 +198,7 @@ def _get_session_completion_state(course_session, now):
 def _select_sessions_in_send_window(sessions, timeslots, now):
 	due = []
 	for session in sessions:
-		timeslot = timeslots.get(session.get("weekly_timeslot"))
+		timeslot = session_timeslot(session, timeslots.get(session.get("weekly_timeslot")))
 		if not timeslot or not _is_in_send_window(now, session.get("session_date"), timeslot.get("end_time")):
 			continue
 		item = dict(session)
@@ -213,7 +214,7 @@ def _build_completion_states(sessions, timeslots, attendance_rows, published_ses
 
 	states = []
 	for session in sessions:
-		timeslot = timeslots.get(session.get("weekly_timeslot"))
+		timeslot = session_timeslot(session, timeslots.get(session.get("weekly_timeslot")))
 		if not timeslot:
 			continue
 		teacher = session.get("teacher_override") or timeslot.get("teacher")

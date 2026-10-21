@@ -477,7 +477,7 @@ def _validated_selected_sessions(doc):
 	rows = frappe.get_all(
 		"Course Sessions",
 		filters={"name": ["in", names]},
-		fields=["name", "session_date", "status"],
+		fields=["name", "session_date", "status", "start_time", "end_time"],
 		limit=0,
 	)
 	valid = {
@@ -607,7 +607,7 @@ def _sessions_on_date(session_date):
 		filters={"session_date": session_date, "status": ["!=", "Cancelled"]},
 		fields=_safe_fields(
 			"Course Sessions",
-			["name", "weekly_timeslot", "session_date", "status", "teacher", "teacher_override", "course", "campus", "start_time"],
+			["name", "weekly_timeslot", "session_date", "status", "teacher", "teacher_override", "course", "campus", "start_time", "end_time"],
 		),
 		order_by="name asc",
 		limit=0,

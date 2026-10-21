@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 
 import frappe
+from qas_custom.services.session_schedule import session_timeslot
 from frappe.utils import add_days, cint, get_time, getdate, now_datetime, today
 
 from qas_custom.modules.makeup.eligibility import sessions_with_regular_or_trial_students, validate_parent_session_roster
@@ -666,7 +667,7 @@ def _get_redeemable_makeup_sessions(
 				[getdate(today()), getdate(add_days(today(), MAKEUP_REDEEMABLE_SESSION_WINDOW_DAYS))],
 			],
 		},
-		fields=["name", "weekly_timeslot", "session_date", "status"],
+		fields=["name", "weekly_timeslot", "session_date", "status", "start_time", "end_time"],
 		order_by="session_date asc, modified asc",
 		limit=0,
 	)
@@ -697,7 +698,7 @@ def _get_redeemable_makeup_sessions(
 			continue
 		if session.get("name") in excluded_session_ids:
 			continue
-		timeslot = timeslot_map.get(session.get("weekly_timeslot"))
+		timeslot = session_timeslot(session, timeslot_map.get(session.get("weekly_timeslot")))
 		if not timeslot or not _course_accepts_makeup_voucher(
 			timeslot.get("course"),
 			voucher.get("course"),
@@ -945,7 +946,7 @@ def _set_voucher_used_by_student(voucher, student: str | None):
 
 def _build_redeem_session_payload(session_id: str):
 	session = frappe.get_doc("Course Sessions", session_id)
-	timeslot = frappe.get_cached_doc("Weekly Timeslot", session.weekly_timeslot) if session.weekly_timeslot else None
+	timeslot = session_timeslot(session, frappe.get_cached_doc("Weekly Timeslot", session.weekly_timeslot) if session.weekly_timeslot else None)
 	return {
 		"session_id": session.name,
 		"course": timeslot.course if timeslot else None,
@@ -958,6 +959,7 @@ def _build_redeem_session_payload(session_id: str):
 
 
 def _build_leave_session_payload(session_doc, timeslot, student: str, attendance_status: str):
+	timeslot = session_timeslot(session_doc, timeslot)
 	return {
 		"session_id": session_doc.name,
 		"student": student,
@@ -1011,6 +1013,7 @@ def _get_leave_session(
 
 
 def _get_session_start(session_doc, timeslot):
+	timeslot = session_timeslot(session_doc, timeslot)
 	if not session_doc.session_date or not timeslot.start_time:
 		frappe.throw("The selected class session is missing date or time.")
 

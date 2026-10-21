@@ -5,6 +5,7 @@ from hashlib import sha256
 from urllib.parse import quote
 
 import frappe
+from qas_custom.services.session_schedule import session_timeslot
 from frappe import _
 from frappe.utils import escape_html, formatdate, get_time, getdate
 
@@ -415,7 +416,7 @@ def _session_context(course_session):
 	session = frappe.db.get_value(
 		"Course Sessions",
 		course_session,
-		["name", "weekly_timeslot", "session_date", "teacher_override"],
+		["name", "weekly_timeslot", "session_date", "teacher_override", "start_time", "end_time"],
 		as_dict=True,
 	)
 	if not session:
@@ -428,6 +429,7 @@ def _session_context(course_session):
 			["course", "campus", "classroom", "teacher", "start_time", "end_time"],
 			as_dict=True,
 		) or {}
+	timeslot = session_timeslot(session, timeslot)
 	teacher = session.get("teacher_override") or timeslot.get("teacher")
 	teacher_name = teacher
 	if teacher:

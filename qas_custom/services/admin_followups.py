@@ -89,7 +89,9 @@ def collect_followups(start_date, end_date):
     rows = frappe.db.sql("""
         SELECT a.name AS attendance, a.student, a.enrollment_type, a.status,
             a.source_doctype, a.source_document, a.makeup_voucher,
-            s.name AS session_id, s.session_date, w.start_time, w.end_time,
+            s.name AS session_id, s.session_date,
+            COALESCE(s.start_time, w.start_time) AS start_time,
+            COALESCE(s.end_time, w.end_time) AS end_time,
             w.campus, w.course, c.course_name, campus.address AS campus_address,
             student.student_name, p.parent_name AS contact_name, p.mobile_number AS contact_phone,
             i.name AS inquiry, i.inquiry_type, i.status AS inquiry_status,
@@ -105,7 +107,7 @@ def collect_followups(start_date, end_date):
         LEFT JOIN `tabInquiry` i ON a.source_doctype='Inquiry' AND i.name=a.source_document
         WHERE s.session_date BETWEEN %s AND %s AND s.status='Scheduled'
             AND a.status NOT IN ('Cancelled', 'Leave')
-        ORDER BY s.session_date, w.start_time, a.idx, a.creation
+        ORDER BY s.session_date, COALESCE(s.start_time, w.start_time), a.idx, a.creation
     """, (str(start_date), str(end_date)), as_dict=True)
     visits = build_visit_followups(frappe.db.sql("""
         SELECT i.name AS reference, i.status AS inquiry_status, i.student,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import frappe
+from qas_custom.services.session_schedule import session_timeslot
 from frappe import _
 from frappe.utils import flt, now_datetime
 
@@ -72,6 +73,7 @@ def add_system_note(inquiry_doc, note, source_doctype=None, source_document=None
 
 
 def build_conversion_note(enrollment, invoice, session, timeslot, remaining_session_count: int, inquiry_type=None):
+	timeslot = session_timeslot(session, timeslot)
 	start_date = session.session_date if session and session.get("session_date") else None
 	start_time = timeslot.start_time if timeslot and timeslot.get("start_time") else None
 	conversion_label = (

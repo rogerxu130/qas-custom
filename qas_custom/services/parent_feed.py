@@ -8,6 +8,7 @@ from urllib.parse import urlsplit
 from qas_custom.services.term_media import annotate_media, assert_media_available
 
 import frappe
+from qas_custom.services.session_schedule import session_timeslot
 from frappe import _
 from frappe.utils import get_datetime, getdate, get_time, get_datetime_in_timezone
 
@@ -59,7 +60,7 @@ def get_parent_feed_data(student=None, page=1, page_length=10):
     sessions = frappe.get_all(
         "Course Sessions",
         filters={"name": ["in", session_ids]},
-        fields=["name", "weekly_timeslot", "session_date"],
+        fields=["name", "weekly_timeslot", "session_date", "start_time", "end_time"],
         order_by="session_date desc",
     )
     session_map = {row.name: row for row in sessions}
@@ -197,7 +198,7 @@ def get_parent_feed_data(student=None, page=1, page_length=10):
 
 def _build_homework_item(row, session_map, weekly_timeslot_map, student_map, session_student_map, teacher_map):
     session = session_map.get(row.course_session)
-    timeslot = weekly_timeslot_map.get(session.weekly_timeslot) if session else None
+    timeslot = session_timeslot(session, weekly_timeslot_map.get(session.weekly_timeslot) if session else None)
     return {
         "type": "homework",
         "id": row.name,
@@ -217,7 +218,7 @@ def _build_homework_item(row, session_map, weekly_timeslot_map, student_map, ses
 
 def _build_photo_item(row, session_map, weekly_timeslot_map, student_map, session_student_map, teacher_map, photo_media_map):
     session = session_map.get(row.course_session)
-    timeslot = weekly_timeslot_map.get(session.weekly_timeslot) if session else None
+    timeslot = session_timeslot(session, weekly_timeslot_map.get(session.weekly_timeslot) if session else None)
     media = photo_media_map.get(row.name, [])
     photos = [_build_photo_asset(row.name, photo) for photo in media if photo.get("image")]
     return {
@@ -241,7 +242,7 @@ def _build_photo_item(row, session_map, weekly_timeslot_map, student_map, sessio
 
 def _build_video_item(row, session_map, weekly_timeslot_map, student_map, session_student_map, teacher_map):
     session = session_map.get(row.course_session)
-    timeslot = weekly_timeslot_map.get(session.weekly_timeslot) if session else None
+    timeslot = session_timeslot(session, weekly_timeslot_map.get(session.weekly_timeslot) if session else None)
     return {
         "type": "video_post",
         "id": row.name,

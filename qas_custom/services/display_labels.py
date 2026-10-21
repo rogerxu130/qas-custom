@@ -136,7 +136,7 @@ def _get_session_label(course_session: str | None):
 	session = frappe.db.get_value(
 		"Course Sessions",
 		course_session,
-		["session_date", "weekly_timeslot"],
+		["session_date", "weekly_timeslot", "start_time", "end_time"],
 		as_dict=True,
 	)
 	if not session:
@@ -145,7 +145,9 @@ def _get_session_label(course_session: str | None):
 	date_label = _format_date(session.get("session_date"))
 	time_label = None
 	if session.get("weekly_timeslot"):
-		start_time = frappe.db.get_value("Weekly Timeslot", session.get("weekly_timeslot"), "start_time")
+		start_time = session.get("start_time")
+		if start_time in (None, ""):
+			start_time = frappe.db.get_value("Weekly Timeslot", session.get("weekly_timeslot"), "start_time")
 		time_label = _format_time(start_time)
 
 	return " ".join(part for part in (date_label, time_label) if part)

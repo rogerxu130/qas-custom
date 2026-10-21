@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from hmac import compare_digest
 
 import frappe
+from qas_custom.services.session_schedule import session_timeslot
 from frappe import _
 from frappe.utils import cint, flt, get_time, getdate, now_datetime
 
@@ -1157,7 +1158,7 @@ def _map_trial_form_session(payload: dict):
 	sessions = frappe.get_all(
 		"Course Sessions",
 		filters={"weekly_timeslot": ["in", list(timeslots_by_name)], "session_date": trial_date},
-		fields=["name", "weekly_timeslot", "session_date", "status"],
+		fields=["name", "weekly_timeslot", "session_date", "status", "start_time", "end_time"],
 		order_by="modified desc",
 		limit_page_length=0,
 	)
@@ -1474,7 +1475,7 @@ def _get_session_context(course_session: str | None, require_bookable=False):
 	session = frappe.db.get_value(
 		"Course Sessions",
 		course_session,
-		["name", "weekly_timeslot", "session_date", "status"],
+		["name", "weekly_timeslot", "session_date", "status", "start_time", "end_time"],
 		as_dict=True,
 	)
 	if not session:
@@ -1488,6 +1489,7 @@ def _get_session_context(course_session: str | None, require_bookable=False):
 		["name", "course", "class_language", "campus", "classroom", "teacher", "start_time", "end_time"],
 		as_dict=True,
 	)
+	timeslot = session_timeslot(session, timeslot)
 	if not timeslot:
 		frappe.throw(_("Weekly timeslot was not found."))
 	if require_bookable:
@@ -1498,6 +1500,7 @@ def _get_session_context(course_session: str | None, require_bookable=False):
 
 
 def _get_session_start(session, timeslot):
+	timeslot = session_timeslot(session, timeslot)
 	if not session.get("session_date") or not timeslot.get("start_time"):
 		frappe.throw(_("Course session is missing date or start time."))
 	return datetime.combine(getdate(session.get("session_date")), get_time(timeslot.get("start_time")))

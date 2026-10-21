@@ -8,6 +8,7 @@ from urllib.parse import urlencode
 from qas_custom.services.term_media import annotate_media, assert_media_available
 
 import frappe
+from qas_custom.services.session_schedule import session_timeslot
 from frappe import _
 from frappe.utils import add_days, cint, get_time, getdate, now_datetime, today
 from frappe.utils.file_manager import save_file
@@ -49,7 +50,7 @@ def get_teacher_sessions_data(from_date=None, to_date=None):
 
     timeslot_rows = _get_teacher_timeslots(teacher.name)
     timeslot_map = {row["name"]: row for row in timeslot_rows}
-    session_fields = ["name", "weekly_timeslot", "session_date", "status", "teacher_override"]
+    session_fields = ["name", "weekly_timeslot", "session_date", "status", "teacher_override", "start_time", "end_time"]
     session_rows = []
     if timeslot_map:
         session_rows.extend(
@@ -93,7 +94,7 @@ def get_teacher_sessions_data(from_date=None, to_date=None):
     )
     items = []
     for session in session_rows:
-        timeslot = timeslot_map.get(session.get("weekly_timeslot"))
+        timeslot = session_timeslot(session, timeslot_map.get(session.get("weekly_timeslot")))
         if not timeslot or _resolved_session_teacher(session, timeslot) != teacher.name:
             continue
 
@@ -131,6 +132,7 @@ def get_teacher_session_detail_data(course_session=None):
 
     session = _get_owned_session(course_session, teacher.name)
     timeslot = _get_timeslot(session.get("weekly_timeslot"))
+    timeslot = session_timeslot(session, timeslot)
     all_attendance_rows = _get_attendance_rows([session["name"]])
     attendance_rows = _visible_attendance_rows(all_attendance_rows)
     student_map = _get_student_map([row.get("student") for row in attendance_rows if row.get("student")])
@@ -598,7 +600,7 @@ def _get_owned_session(course_session: str, teacher_name: str):
     session = frappe.db.get_value(
         "Course Sessions",
         course_session,
-        ["name", "weekly_timeslot", "session_date", "status", "teacher_override"],
+        ["name", "weekly_timeslot", "session_date", "status", "teacher_override", "start_time", "end_time"],
         as_dict=True,
     )
     if not session:

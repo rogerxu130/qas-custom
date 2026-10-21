@@ -90,6 +90,13 @@
    "read_only": 1
   },
   {
+   "fieldname": "schedule_effective_date",
+   "fieldtype": "Date",
+   "label": "Schedule Effective From",
+   "read_only": 1,
+   "description": "The latest reviewed schedule change. Regeneration does not create new sessions before this date."
+  },
+  {
    "fieldname": "ndis_section",
    "fieldtype": "Section Break",
    "label": "NDIS listing"

@@ -5,6 +5,7 @@ from datetime import timedelta
 from hashlib import sha256
 
 import frappe
+from qas_custom.services.session_schedule import session_timeslot
 from frappe import _
 from frappe.utils import escape_html, formatdate, get_datetime_in_timezone, now_datetime
 
@@ -104,7 +105,7 @@ def get_teacher_next_day_schedule_groups(target_date):
 	sessions = frappe.get_all(
 		"Course Sessions",
 		filters={"session_date": target_date, "status": ["!=", "Cancelled"]},
-		fields=["name", "weekly_timeslot", "teacher_override"],
+		fields=["name", "weekly_timeslot", "teacher_override", "start_time", "end_time"],
 		order_by="name asc",
 	)
 	timeslots = _get_timeslot_map([session.get("weekly_timeslot") for session in sessions])
@@ -120,7 +121,7 @@ def _build_schedule_groups(sessions, timeslots, attendance_rows):
 
 	groups = defaultdict(list)
 	for session in sessions:
-		timeslot = timeslots.get(session.get("weekly_timeslot"))
+		timeslot = session_timeslot(session, timeslots.get(session.get("weekly_timeslot")))
 		if not timeslot:
 			continue
 		rows = attendance_by_session.get(session.get("name"), [])

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import frappe
+from qas_custom.services.session_schedule import session_timeslot
 from frappe.utils import getdate
 
 
@@ -61,6 +62,7 @@ def build_course_session_label(doc):
 		["term", "course", "class_language", "campus", "classroom", "teacher", "day_of_week", "start_time", "end_time"],
 		as_dict=True,
 	) or frappe._dict()
+	timeslot = session_timeslot(doc, timeslot)
 	teacher = doc.get("teacher_override") or timeslot.get("teacher")
 	campus = _label("Campus", timeslot.get("campus"), "campus_name")
 	room = _label("Classroom", timeslot.get("classroom"), "classroom_name")

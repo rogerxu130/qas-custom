@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 
 import frappe
+from qas_custom.services.session_schedule import session_timeslot
 from frappe import _
 from frappe.utils import add_days, flt, get_time, getdate, now_datetime, today
 
@@ -78,14 +79,14 @@ def get_available_sessions_data(student=None, course=None, campus=None, date_fro
 			"session_date": ["between", [start_date, end_date]],
 			"status": ["!=", "Cancelled"],
 		},
-		fields=["name", "weekly_timeslot", "session_date", "status"],
+		fields=["name", "weekly_timeslot", "session_date", "status", "start_time", "end_time"],
 		order_by="session_date asc, name asc",
 		limit=100,
 	)
 
 	items = []
 	for session in sessions:
-		timeslot = timeslot_map.get(session.weekly_timeslot)
+		timeslot = session_timeslot(session, timeslot_map.get(session.weekly_timeslot))
 		if not timeslot:
 			continue
 		session_start = get_session_start_datetime(session, timeslot)
@@ -285,7 +286,7 @@ def validate_booking_context(parent, student: str, course_session: str | None):
 	session = frappe.db.get_value(
 		"Course Sessions",
 		course_session,
-		["name", "weekly_timeslot", "session_date", "status"],
+		["name", "weekly_timeslot", "session_date", "status", "start_time", "end_time"],
 		as_dict=True,
 	)
 	if not session:
@@ -305,7 +306,7 @@ def validate_booking_context(parent, student: str, course_session: str | None):
 		frappe.throw(_("Pay-as-you-go bookings must be made at least three days before class."))
 	if student_has_session_conflict(student, session.name):
 		frappe.throw(_("This student is already listed or booked for this course session."))
-	return {"session": session, "timeslot": timeslot, "session_start": session_start}
+	return {"session": session, "timeslot": session_timeslot(session, timeslot), "session_start": session_start}
 
 
 def student_has_session_conflict(student: str, course_session: str):
@@ -326,6 +327,7 @@ def student_has_session_conflict(student: str, course_session: str):
 
 
 def get_session_start_datetime(session, timeslot):
+	timeslot = session_timeslot(session, timeslot)
 	if not session.get("session_date") or not timeslot.get("start_time"):
 		frappe.throw(_("Course session is missing date or start time."))
 	return datetime.combine(getdate(session.get("session_date")), get_time(timeslot.get("start_time")))
@@ -400,6 +402,7 @@ def build_student_summary(row):
 
 
 def build_session_item(session, timeslot, student=None):
+	timeslot = session_timeslot(session, timeslot)
 	session_start = get_session_start_datetime(session, timeslot)
 	return {
 		"session_id": session.name,

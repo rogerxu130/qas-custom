@@ -6,6 +6,7 @@ import json
 from urllib.parse import urlencode
 
 import frappe
+from qas_custom.services.session_schedule import session_timeslot
 from frappe import _
 from frappe.utils import cint, flt, get_datetime_in_timezone, getdate, now_datetime, today
 
@@ -694,7 +695,7 @@ def get_school_admin_teacher_trial_conversion_report_data(term=None):
 	sessions = frappe.get_all(
 		"Course Sessions",
 		filters={"weekly_timeslot": ["in", sorted(timeslot_map)]},
-		fields=_safe_fields("Course Sessions", ["name", "weekly_timeslot", "teacher_override", "session_date"]),
+		fields=_safe_fields("Course Sessions", ["name", "weekly_timeslot", "teacher_override", "session_date", "start_time", "end_time"]),
 		order_by="session_date desc, name asc",
 		limit_page_length=0,
 	)
@@ -776,7 +777,7 @@ def get_school_admin_daily_teacher_report_data(session_date=None, campus=None):
 	sessions = frappe.get_all(
 		"Course Sessions",
 		filters={"session_date": target_date, "status": ["!=", "Cancelled"]},
-		fields=_safe_fields("Course Sessions", ["name", "weekly_timeslot", "teacher_override", "session_date", "status"]),
+		fields=_safe_fields("Course Sessions", ["name", "weekly_timeslot", "teacher_override", "session_date", "status", "start_time", "end_time"]),
 		order_by="name asc",
 		limit_page_length=0,
 	)
@@ -957,7 +958,7 @@ def _build_daily_teacher_report_items(
 	items = []
 	for session in sessions:
 		session_id = session.get("name")
-		timeslot = timeslots.get(session.get("weekly_timeslot")) or {}
+		timeslot = session_timeslot(session, timeslots.get(session.get("weekly_timeslot")) or {})
 		teacher = session.get("teacher_override") or timeslot.get("teacher") or ""
 		photo_post_rows = posts_by_session.get(session_id, [])
 		photos = []
@@ -1144,7 +1145,7 @@ def _build_teacher_trial_conversion_items(*, attendance_rows, session_map, times
 		inquiry_id = attendance.get("source_document")
 		inquiry = inquiries.get(inquiry_id) or {}
 		session = session_map.get(attendance.get("course_session")) or {}
-		timeslot = timeslot_map.get(session.get("weekly_timeslot")) or {}
+		timeslot = session_timeslot(session, timeslot_map.get(session.get("weekly_timeslot")) or {})
 		if (
 			not inquiry_id
 			or not inquiry
@@ -1293,7 +1294,7 @@ def _build_reporting_rows(term, generated_at):
 		parent_detail = parents.get(parent) or {"name": parent, "parent_name": parent}
 		student_name = _student_label(students.get(student), student)
 		invoice_detail = invoice_map.get(parent) or _empty_invoice_summary()
-		timeslot = timeslots.get(session.get("weekly_timeslot")) or {}
+		timeslot = session_timeslot(session, timeslots.get(session.get("weekly_timeslot")) or {})
 		end_datetime = _session_end_datetime(session, timeslot)
 		teacher = session.get("teacher_override") or timeslot.get("teacher")
 		class_label = session.get("weekly_timeslot") or row.get("course_session")
@@ -1435,7 +1436,7 @@ def _session_context(attendance):
 		return {}, {}
 	session_fields = _safe_fields(
 		"Course Sessions",
-		["name", "weekly_timeslot", "session_date", "status", "teacher_override"],
+		["name", "weekly_timeslot", "session_date", "status", "teacher_override", "start_time", "end_time"],
 	)
 	sessions = {
 		row.get("name"): dict(row)
@@ -1476,7 +1477,7 @@ def _voucher_session_map(vouchers):
 	)
 	if not session_ids:
 		return {}
-	session_fields = _safe_fields("Course Sessions", ["name", "weekly_timeslot", "session_date", "status"])
+	session_fields = _safe_fields("Course Sessions", ["name", "weekly_timeslot", "session_date", "status", "start_time", "end_time"])
 	sessions = {
 		row.get("name"): dict(row)
 		for row in frappe.get_all("Course Sessions", filters={"name": ["in", session_ids]}, fields=session_fields, limit_page_length=0)
@@ -1490,7 +1491,7 @@ def _voucher_session_map(vouchers):
 		for row in frappe.get_all("Weekly Timeslot", filters={"name": ["in", timeslot_ids]}, fields=timeslot_fields, limit_page_length=0)
 	}
 	for session in sessions.values():
-		session["timeslot"] = timeslots.get(session.get("weekly_timeslot")) or {}
+		session["timeslot"] = session_timeslot(session, timeslots.get(session.get("weekly_timeslot")) or {})
 	return sessions
 
 
@@ -1653,7 +1654,7 @@ def _session_in_completed_range(session, timeslots, term_start, term_end, genera
 	session_date = getdate(session.get("session_date"))
 	if session_date < term_start or session_date > term_end:
 		return False
-	timeslot = timeslots.get(session.get("weekly_timeslot")) or {}
+	timeslot = session_timeslot(session, timeslots.get(session.get("weekly_timeslot")) or {})
 	return _session_end_datetime(session, timeslot) <= generated_at
 
 
@@ -1664,6 +1665,7 @@ def _session_in_unmarked_window(session, timeslots, term_start, term_end, window
 
 
 def _session_end_datetime(session, timeslot):
+	timeslot = session_timeslot(session, timeslot)
 	session_date = getdate(session.get("session_date"))
 	value = timeslot.get("end_time") or timeslot.get("start_time") or time.min
 	return datetime.combine(session_date, _time_value(value))

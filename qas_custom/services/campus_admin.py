@@ -4,6 +4,7 @@ from qas_custom.services.term_media import annotate_media, assert_media_availabl
 
 import frappe
 from qas_custom.services.inquiry_filters import inquiry_queue_filters, inquiry_date_filter, inquiry_status_filter
+from qas_custom.services.session_schedule import session_timeslot
 from frappe import _
 
 from frappe.utils import add_days, cint, escape_html, flt, getdate, now_datetime, today
@@ -666,7 +667,7 @@ def get_campus_admin_contacts_data(from_date=None, to_date=None, campus=None, co
 	sessions = frappe.get_all(
 		"Course Sessions",
 		filters=session_filters,
-		fields=["name", "weekly_timeslot", "session_date", "status"],
+		fields=["name", "weekly_timeslot", "session_date", "status", "start_time", "end_time"],
 		order_by="session_date asc, modified asc",
 	)
 	if not sessions:
@@ -693,7 +694,7 @@ def get_campus_admin_contacts_data(from_date=None, to_date=None, campus=None, co
 	contacts = []
 	for attendance in attendance_rows:
 		session = session_map.get(attendance.course_session)
-		timeslot = timeslot_map.get(session.weekly_timeslot) if session else None
+		timeslot = session_timeslot(session, timeslot_map.get(session.weekly_timeslot) if session else None)
 		student = student_map.get(attendance.student)
 		parent = parent_map.get(student.guardian) if student and student.get("guardian") else None
 		item = {
@@ -731,7 +732,7 @@ def get_campus_admin_contacts_data(from_date=None, to_date=None, campus=None, co
 		session_counts[item["course_session"]] = session_counts.get(item["course_session"], 0) + 1
 	visible_sessions = []
 	for session in sessions:
-		timeslot = timeslot_map.get(session.weekly_timeslot)
+		timeslot = session_timeslot(session, timeslot_map.get(session.weekly_timeslot))
 		if query and not session_counts.get(session.name) and not _contact_session_matches_query(session, timeslot, query):
 			continue
 		visible_sessions.append(session)
@@ -1290,7 +1291,7 @@ def _validate_conversion_session_access(inquiry, course_session):
 	if not course_session:
 		frappe.throw(_("Course session is required."))
 	profile = _require_inquiry_access(inquiry)
-	session = frappe.db.get_value("Course Sessions", course_session, ["weekly_timeslot"], as_dict=True)
+	session = frappe.db.get_value("Course Sessions", course_session, ["weekly_timeslot", "start_time", "end_time"], as_dict=True)
 	if not session:
 		frappe.throw(_("Course session was not found."))
 	timeslot = frappe.db.get_value("Weekly Timeslot", session.weekly_timeslot, ["campus"], as_dict=True)
@@ -1312,7 +1313,7 @@ def _get_inquiry_link_context(inquiry, allowed_statuses=None):
 	session = frappe.db.get_value(
 		"Course Sessions",
 		inquiry_doc.course_session,
-		["weekly_timeslot"],
+		["weekly_timeslot", "start_time", "end_time"],
 		as_dict=True,
 	)
 	if not session or not session.get("weekly_timeslot"):
@@ -1484,7 +1485,7 @@ def _get_attendance_dashboard_items(campuses, start_date, end_date, enrollment_t
 			"weekly_timeslot": ["in", list(timeslot_map.keys())],
 			"session_date": ["between", [start_date, end_date]],
 		},
-		fields=["name", "weekly_timeslot", "session_date", "status"],
+		fields=["name", "weekly_timeslot", "session_date", "status", "start_time", "end_time"],
 		order_by="session_date asc, modified asc",
 	)
 	if not sessions:
@@ -1500,7 +1501,7 @@ def _get_attendance_dashboard_items(campuses, start_date, end_date, enrollment_t
 	items = []
 	for attendance in attendance_rows:
 		session = session_map.get(attendance.course_session)
-		timeslot = timeslot_map.get(session.weekly_timeslot) if session else None
+		timeslot = session_timeslot(session, timeslot_map.get(session.weekly_timeslot) if session else None)
 		student = student_map.get(attendance.student)
 		parent = parent_map.get(student.guardian) if student and student.get("guardian") else None
 		items.append(
@@ -1634,6 +1635,7 @@ def _get_parent_map(parent_ids):
 
 
 def _build_contact_session_item(session, timeslot, contact_count=0):
+	timeslot = session_timeslot(session, timeslot)
 	return {
 		"id": session.name,
 		"course_session": session.name,
@@ -1679,6 +1681,7 @@ def _contact_matches_query(item, query=None):
 
 
 def _contact_session_matches_query(session, timeslot, query=None):
+	timeslot = session_timeslot(session, timeslot)
 	if not query:
 		return True
 	needle = str(query).strip().lower()

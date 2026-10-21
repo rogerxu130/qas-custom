@@ -3,6 +3,7 @@ from __future__ import annotations
 from hashlib import sha256
 
 import frappe
+from qas_custom.services.session_schedule import session_timeslot
 from frappe import _
 from frappe.utils import cint, escape_html, flt, formatdate, now_datetime
 from frappe.utils.file_manager import save_file
@@ -845,7 +846,7 @@ def _session_staff_course_context(course_session: str, student: str):
 	session = frappe.db.get_value(
 		"Course Sessions",
 		course_session,
-		["name", "weekly_timeslot", "session_date", "teacher_override"],
+		["name", "weekly_timeslot", "session_date", "teacher_override", "start_time", "end_time"],
 		as_dict=True,
 	)
 	if not session or not session.get("weekly_timeslot"):
@@ -856,6 +857,7 @@ def _session_staff_course_context(course_session: str, student: str):
 		["name", "course", "campus", "classroom", "teacher", "day_of_week", "start_time", "end_time"],
 		as_dict=True,
 	)
+	timeslot = session_timeslot(session, timeslot)
 	if not timeslot:
 		frappe.throw(_("Weekly timeslot was not found."))
 
@@ -1128,7 +1130,7 @@ def _trial_class_reminder_context(inquiry_doc):
 		session = frappe.db.get_value(
 			"Course Sessions",
 			inquiry_doc.course_session,
-			["name", "weekly_timeslot", "session_date"],
+			["name", "weekly_timeslot", "session_date", "start_time", "end_time"],
 			as_dict=True,
 		)
 		if session and session.get("weekly_timeslot"):
@@ -1138,6 +1140,7 @@ def _trial_class_reminder_context(inquiry_doc):
 				["name", "course", "campus", "start_time", "end_time"],
 				as_dict=True,
 			)
+	timeslot = session_timeslot(session, timeslot)
 
 	campus_name = (timeslot or {}).get("campus") or inquiry_doc.get("campus")
 	campus = frappe.db.get_value("Campus", campus_name, ["name", "address"], as_dict=True) if campus_name else None

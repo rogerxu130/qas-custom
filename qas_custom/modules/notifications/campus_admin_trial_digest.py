@@ -5,6 +5,7 @@ from datetime import timedelta
 from hashlib import sha256
 
 import frappe
+from qas_custom.services.session_schedule import session_timeslot
 from frappe import _
 from frappe.utils import cint, escape_html, flt, fmt_money, formatdate, get_datetime_in_timezone, now_datetime
 
@@ -114,7 +115,7 @@ def get_campus_admin_next_day_trial_groups(target_date, profile=None):
 	sessions = frappe.get_all(
 		"Course Sessions",
 		filters={"session_date": target_date, "status": ["!=", "Cancelled"]},
-		fields=["name", "weekly_timeslot"],
+		fields=["name", "weekly_timeslot", "start_time", "end_time"],
 		order_by="name asc",
 		limit_page_length=0,
 	)
@@ -171,7 +172,7 @@ def _build_eligible_trial_rows(sessions, timeslots, attendance_rows, inquiries, 
 		if inquiry.get("course_session") != session_name:
 			continue
 		session = sessions_by_name.get(session_name)
-		timeslot = timeslots.get((session or {}).get("weekly_timeslot"))
+		timeslot = session_timeslot(session, timeslots.get((session or {}).get("weekly_timeslot")))
 		if not session or not timeslot or not timeslot.get("campus"):
 			continue
 		key = (inquiry.get("name"), session_name)

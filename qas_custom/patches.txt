@@ -92,3 +92,4 @@ qas_custom.patches.v2026_10_09_invoice_gst_display
 qas_custom.patches.v2026_10_16_order_invoices
 
 qas_custom.patches.v2026_10_18_payg_due_days
+qas_custom.patches.v2026_10_21_session_schedule_times

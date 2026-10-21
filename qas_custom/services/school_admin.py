@@ -18,6 +18,7 @@ from qas_custom.services.enrollment_billing_status import attach_billing_status
 
 import frappe
 from qas_custom.services.inquiry_filters import inquiry_queue_filters, inquiry_date_filter, inquiry_status_filter
+from qas_custom.services.session_schedule import session_timeslot
 from frappe import _
 from frappe.model.rename_doc import rename_doc
 from frappe.sessions import clear_sessions
@@ -384,7 +385,7 @@ def get_school_admin_family_attendance_data(parent=None, student=None, customer=
 	sessions = frappe.get_all(
 		"Course Sessions",
 		filters={"name": ["in", session_ids]},
-		fields=["name", "weekly_timeslot", "session_date", "status"],
+		fields=["name", "weekly_timeslot", "session_date", "status", "start_time", "end_time"],
 		limit_page_length=0,
 	)
 	session_map = {row.get("name"): row for row in sessions if row.get("name")}
@@ -401,7 +402,7 @@ def get_school_admin_family_attendance_data(parent=None, student=None, customer=
 	items = []
 	for row in attendance_rows:
 		session = session_map.get(row.get("course_session"))
-		timeslot = timeslot_map.get((session or {}).get("weekly_timeslot"))
+		timeslot = session_timeslot(session, timeslot_map.get((session or {}).get("weekly_timeslot")))
 		if not session or not timeslot:
 			continue
 		student_row = student_map.get(row.get("student")) or {}
@@ -3140,12 +3141,12 @@ def _generate_sessions_for_term(term):
 	timeslots = frappe.get_all(
 		"Weekly Timeslot",
 		filters=filters,
-		fields=_safe_fields("Weekly Timeslot", ["name", "day_of_week"]),
+		fields=_safe_fields("Weekly Timeslot", ["name", "day_of_week", "schedule_effective_date"]),
 		limit_page_length=0,
 	)
 	created = []
 	for timeslot in timeslots:
-		current = getdate(term_doc.start_date)
+		current = max(getdate(term_doc.start_date), getdate(timeslot.get("schedule_effective_date") or term_doc.start_date))
 		end_date = getdate(term_doc.end_date)
 		target_weekday = _weekday_number(timeslot.day_of_week)
 		while current <= end_date:
@@ -3251,7 +3252,7 @@ def _validate_enrollment_start_session(start_session, weekly_timeslot, term_doc)
 	session = frappe.db.get_value(
 		"Course Sessions",
 		start_session,
-		["name", "weekly_timeslot", "session_date", "status"],
+		["name", "weekly_timeslot", "session_date", "status", "start_time", "end_time"],
 		as_dict=True,
 	)
 	if not session:
@@ -3307,7 +3308,7 @@ def _first_course_session_for_timeslot(weekly_timeslot, term_doc):
 			"session_date": ["between", [getdate(term_doc.start_date), getdate(term_doc.end_date)]],
 			"status": ["!=", "Cancelled"],
 		},
-		fields=["name", "session_date"],
+		fields=["name", "session_date", "start_time", "end_time"],
 		order_by="session_date asc",
 		limit=1,
 	)
@@ -3337,7 +3338,7 @@ def _enrollment_invoice_start(doc, requested_start_session=None):
 		"weekly_timeslot": doc.weekly_timeslot,
 		"session_date": ["between", [term.start_date, term.end_date]],
 		"status": ["!=", "Cancelled"],
-	}, fields=["name", "session_date"], order_by="session_date asc", limit=1)
+	}, fields=["name", "session_date", "start_time", "end_time"], order_by="session_date asc", limit=1)
 	# Explicit mid-term starts always retain pro-rata billing, even before attendance.
 	if persisted and first:
 		start_date = frappe.db.get_value("Course Sessions", persisted, "session_date")
@@ -4060,31 +4061,53 @@ def create_school_admin_weekly_timeslot_data(payload=None):
 	return get_school_admin_weekly_timeslot_data(doc.name)
 
 
+def preview_school_admin_weekly_timeslot_schedule_data(weekly_timeslot=None, payload=None):
+	from qas_custom.services.session_schedule import build_schedule_preview
+	_require_school_admin()
+	if not weekly_timeslot:
+		frappe.throw(_("Weekly timeslot is required."))
+	doc = frappe.get_doc("Weekly Timeslot", weekly_timeslot)
+	payload = _get_payload(payload)
+	_validate_weekly_timeslot_change(doc, payload)
+	return build_schedule_preview(doc, payload)
+
+
 def update_school_admin_weekly_timeslot_data(weekly_timeslot=None, payload=None):
+	from qas_custom.services.session_schedule import build_schedule_preview, apply_session_changes, preserve_session_times
 	_require_school_admin()
 	if not weekly_timeslot:
 		frappe.throw(_("Weekly timeslot is required."))
 	payload = _get_payload(payload)
-	doc = frappe.get_doc("Weekly Timeslot", weekly_timeslot)
-	_validate_weekly_timeslot_change(doc, payload)
-	if "teacher" in payload and payload.get("teacher") != doc.get("teacher") and _weekly_timeslot_has_course_sessions(doc.name):
-		frappe.throw(_("Use Change weekly teacher from the Classes workspace after sessions have been created."))
-	previous_day_of_week = doc.get("day_of_week")
-	_apply_weekly_timeslot_payload(doc, payload)
-	doc.save(ignore_permissions=True)
-	session_sync = None
-	if cint(payload.get("apply_future_sessions")):
-		session_sync = _sync_future_course_sessions_for_timeslot(
-			doc,
-			effective_date=payload.get("effective_date"),
-			previous_day_of_week=previous_day_of_week,
-		)
-	frappe.db.commit()
-	_refresh_ndis_friendly_capacity_alerts(doc.name)
-	result = get_school_admin_weekly_timeslot_data(doc.name)
-	if session_sync:
-		result["session_sync"] = session_sync
-	return result
+	# Serialize schedule edits and lock the source rows while rechecking the preview.
+	with frappe.cache.lock("qas-class-schedule-change", timeout=120, blocking_timeout=10):
+		# Shared booking services lock sessions before their weekly class.
+		frappe.db.sql("SELECT name FROM `tabCourse Sessions` WHERE weekly_timeslot=%s ORDER BY name FOR UPDATE", (weekly_timeslot,))
+		doc = frappe.get_doc("Weekly Timeslot", weekly_timeslot, for_update=True)
+		_validate_weekly_timeslot_change(doc, payload)
+		if "teacher" in payload and payload.get("teacher") != doc.get("teacher") and _weekly_timeslot_has_course_sessions(doc.name):
+			frappe.throw(_("Use Change weekly teacher from the Classes workspace after sessions have been created."))
+		schedule_changed = any(_weekly_timeslot_value_changed(doc, payload, f) for f in ("day_of_week", "start_time", "end_time"))
+		session_sync = None
+		if schedule_changed:
+			frappe.db.sql("SELECT a.name FROM `tabClass Attendance Entry` a INNER JOIN `tabCourse Sessions` s ON s.name=a.course_session WHERE s.weekly_timeslot=%s FOR UPDATE", (doc.name,))
+			session_sync = build_schedule_preview(doc, payload)
+			if session_sync["blocking_errors"]:
+				frappe.throw("\n".join(session_sync["blocking_errors"]))
+			if payload.get("schedule_confirmation_token") != session_sync["confirmation_token"]:
+				frappe.throw(_("The schedule or attendance has changed. Review the schedule preview again before saving."))
+			preserve_session_times(doc)
+			doc.flags.reviewed_schedule_change = True
+			doc.schedule_effective_date = session_sync["effective_date"]
+		_apply_weekly_timeslot_payload(doc, payload)
+		doc.save(ignore_permissions=True)
+		if session_sync is not None:
+			apply_session_changes(session_sync)
+		_refresh_ndis_friendly_capacity_alerts(doc.name)
+		result = get_school_admin_weekly_timeslot_data(doc.name)
+		if session_sync is not None:
+			result["session_sync"] = session_sync
+		# The request commits only after all dependent updates and response building succeed.
+		return result
 
 
 def generate_school_admin_course_sessions_data(weekly_timeslot=None, from_date=None, to_date=None):
@@ -4097,7 +4120,7 @@ def generate_school_admin_course_sessions_data(weekly_timeslot=None, from_date=N
 	if to_dt < from_dt:
 		frappe.throw(_("To date cannot be before from date."))
 	created = []
-	current = from_dt
+	current = max(from_dt, getdate(doc.get("schedule_effective_date") or from_dt))
 	target_weekday = _weekday_number(doc.day_of_week)
 	while current <= to_dt:
 		if current.weekday() == target_weekday:
@@ -4151,7 +4174,7 @@ def get_school_admin_course_session_data(course_session=None):
 	doc = frappe.get_doc("Course Sessions", course_session)
 	payload = _document_payload(doc)
 	if payload.get("weekly_timeslot"):
-		payload["weekly_timeslot_detail"] = _get_timeslot_summary(payload.get("weekly_timeslot"))
+		payload["weekly_timeslot_detail"] = session_timeslot(payload, _get_timeslot_summary(payload.get("weekly_timeslot")))
 	attendance_rows = _get_school_admin_attendance_rows(
 		course_session,
 		term=(payload.get("weekly_timeslot_detail") or {}).get("term"),
@@ -4466,7 +4489,7 @@ def change_school_admin_weekly_timeslot_teacher_data(weekly_timeslot=None, teach
 	sessions = frappe.get_all(
 		"Course Sessions",
 		filters={"weekly_timeslot": doc.name, "session_date": ["<", effective_date]},
-		fields=["name", "teacher_override"],
+		fields=["name", "teacher_override", "start_time", "end_time"],
 		limit_page_length=0,
 	)
 	preserved_count = 0
@@ -5479,7 +5502,7 @@ def _get_school_admin_leave_sessions(student, course_session=None):
     session_rows = frappe.get_all(
         "Course Sessions",
         filters={"name": ["in", session_ids]},
-        fields=_safe_fields("Course Sessions", ["name", "weekly_timeslot", "session_date", "status"]),
+        fields=_safe_fields("Course Sessions", ["name", "weekly_timeslot", "session_date", "status", "start_time", "end_time"]),
         order_by="session_date asc, modified asc",
         limit_page_length=0,
     )
@@ -5533,7 +5556,7 @@ def _build_school_admin_leave_session_options(
             continue
         if enrollment.get("weekly_timeslot") and session.get("weekly_timeslot") != enrollment.get("weekly_timeslot"):
             continue
-        timeslot = timeslot_map.get(session.get("weekly_timeslot"))
+        timeslot = session_timeslot(session, timeslot_map.get(session.get("weekly_timeslot")))
         if not timeslot or not timeslot.get("start_time"):
             continue
         session_id = session.get("name")
@@ -5565,6 +5588,7 @@ def _build_school_admin_leave_session_options(
 
 
 def _school_admin_session_start(session, timeslot):
+    timeslot = session_timeslot(session, timeslot)
     if not session.get("session_date") or not timeslot.get("start_time"):
         frappe.throw(_("The selected class session is missing date or time."))
     return datetime.combine(getdate(session.get("session_date")), get_time(timeslot.get("start_time")))
@@ -5702,13 +5726,13 @@ def _get_school_admin_session_summary_map(session_ids):
     rows = frappe.get_all(
         "Course Sessions",
         filters={"name": ["in", session_ids]},
-        fields=_safe_fields("Course Sessions", ["name", "weekly_timeslot", "session_date", "status"]),
+        fields=_safe_fields("Course Sessions", ["name", "weekly_timeslot", "session_date", "status", "start_time", "end_time"]),
         limit_page_length=0,
     )
     timeslot_map = _get_timeslot_map([row.get("weekly_timeslot") for row in rows if row.get("weekly_timeslot")])
     payload = {}
     for row in rows:
-        timeslot = timeslot_map.get(row.get("weekly_timeslot")) or {}
+        timeslot = session_timeslot(row, timeslot_map.get(row.get("weekly_timeslot")) or {})
         payload[row.get("name")] = {
             "session_id": row.get("name"),
             "course": timeslot.get("course"),
@@ -6846,7 +6870,7 @@ def _attach_inquiry_teacher_labels(items):
 	session_rows = frappe.get_all(
 		"Course Sessions",
 		filters={"name": ["in", session_ids]},
-		fields=["name", "weekly_timeslot", "teacher_override"],
+		fields=["name", "weekly_timeslot", "teacher_override", "start_time", "end_time"],
 		limit_page_length=0,
 	)
 	session_map = {row.get("name"): row for row in session_rows}
@@ -8014,7 +8038,7 @@ def _create_enrollment_attendance_entries(doc, start_date=None):
 			filters["session_date"] = [">=", getdate(start_session_date)]
 	start = filters.get("session_date", [None, term.start_date])[1]
 	filters["session_date"] = ["between", [max(getdate(start), getdate(term.start_date)), getdate(term.end_date)]]
-	rows = frappe.get_all("Course Sessions", filters=filters, fields=["name", "session_date"], order_by="session_date asc")
+	rows = frappe.get_all("Course Sessions", filters=filters, fields=["name", "session_date", "start_time", "end_time"], order_by="session_date asc")
 	_ensure_enrollment_attendance_entries(doc, rows)
 	return [row.name for row in rows]
 
@@ -8326,7 +8350,7 @@ def _build_enrollment_transfer_preview(doc, target_timeslot, effective_date):
 			"weekly_timeslot": doc.get("weekly_timeslot"),
 			"session_date": [">=", effective_date],
 		},
-		fields=["name", "session_date", "status"],
+		fields=["name", "session_date", "status", "start_time", "end_time"],
 		order_by="session_date asc, name asc",
 		limit_page_length=0,
 	)
@@ -8337,7 +8361,7 @@ def _build_enrollment_transfer_preview(doc, target_timeslot, effective_date):
 			"session_date": [">=", effective_date],
 			"status": ["!=", "Cancelled"],
 		},
-		fields=["name", "session_date", "status"],
+		fields=["name", "session_date", "status", "start_time", "end_time"],
 		order_by="session_date asc, name asc",
 		limit_page_length=0,
 	)
@@ -8593,6 +8617,8 @@ def _get_course_session_rows(
 			"session_date",
 			"status",
 			"teacher_override",
+			"start_time",
+			"end_time",
 			"revenue_share_override",
 			"revenue_share_teacher",
 			"revenue_share_percent",
@@ -8621,7 +8647,7 @@ def _get_course_session_rows(
 	items = []
 	for row in rows:
 		item = _normalize_row_payload("Course Sessions", row)
-		item["weekly_timeslot_detail"] = timeslot_map.get(row.weekly_timeslot)
+		item["weekly_timeslot_detail"] = session_timeslot(row, timeslot_map.get(row.weekly_timeslot))
 		timeslot_teacher = (item.get("weekly_timeslot_detail") or {}).get("teacher")
 		item["teacher"] = item.get("teacher_override") or timeslot_teacher
 		item["teacher_assignment_source"] = "Session override" if item.get("teacher_override") else "Weekly timeslot"
@@ -8952,86 +8978,6 @@ def _ensure_course_session(weekly_timeslot, session_date):
 	session.insert(ignore_permissions=True)
 	_create_session_attendance_for_active_enrollments(session)
 	return {"name": session.name, "created": True}
-
-
-def _sync_future_course_sessions_for_timeslot(doc, effective_date=None, previous_day_of_week=None):
-	if not _doctype_available("Course Sessions"):
-		return {"updated": 0, "skipped": 0, "checked": 0, "reason": "Course Sessions is not installed."}
-	start_date = getdate(effective_date or today())
-	filters = {
-		"weekly_timeslot": doc.name,
-		"session_date": [">=", start_date],
-		"status": "Scheduled",
-	}
-	sessions = frappe.get_all(
-		"Course Sessions",
-		filters=filters,
-		fields=["name", "session_date", "status"],
-		order_by="session_date asc, modified asc",
-		limit_page_length=0,
-	)
-	if not sessions:
-		return {"updated": 0, "skipped": 0, "checked": 0}
-
-	if not doc.get("day_of_week") or previous_day_of_week == doc.get("day_of_week"):
-		return {"updated": 0, "skipped": 0, "checked": len(sessions), "reason": "Session dates already match this weekday."}
-
-	target_dates = _future_weekday_dates(start_date, doc.get("day_of_week"), len(sessions))
-	updated = 0
-	skipped = 0
-	skipped_sessions = []
-	for session, target_date in zip(sessions, target_dates):
-		current_date = getdate(session.get("session_date"))
-		if current_date == target_date:
-			continue
-		if _course_session_date_exists(doc.name, target_date, exclude=session.name):
-			skipped += 1
-			skipped_sessions.append({"session": session.name, "reason": _("Target date already has a session."), "target_date": str(target_date)})
-			continue
-		if _course_session_has_locked_attendance(session.name):
-			skipped += 1
-			skipped_sessions.append({"session": session.name, "reason": _("Attendance has already been marked."), "target_date": str(target_date)})
-			continue
-		frappe.db.set_value("Course Sessions", session.name, "session_date", target_date, update_modified=True)
-		updated += 1
-	return {
-		"updated": updated,
-		"skipped": skipped,
-		"checked": len(sessions),
-		"effective_date": str(start_date),
-		"day_of_week": doc.get("day_of_week"),
-		"skipped_sessions": skipped_sessions,
-	}
-
-
-def _future_weekday_dates(start_date, day_of_week, count):
-	target_weekday = _weekday_number(day_of_week)
-	current = getdate(start_date)
-	while current.weekday() != target_weekday:
-		current = current + timedelta(days=1)
-	dates = []
-	while len(dates) < count:
-		dates.append(current)
-		current = current + timedelta(days=7)
-	return dates
-
-
-def _course_session_date_exists(weekly_timeslot, session_date, exclude=None):
-	filters = {"weekly_timeslot": weekly_timeslot, "session_date": getdate(session_date)}
-	existing = frappe.db.exists("Course Sessions", filters)
-	return bool(existing and existing != exclude)
-
-
-def _course_session_has_locked_attendance(course_session):
-	if not _doctype_available("Class Attendance Entry"):
-		return False
-	return bool(frappe.db.exists(
-		"Class Attendance Entry",
-		{
-			"course_session": course_session,
-			"status": ["not in", ["To be started", "Cancelled"]],
-		},
-	))
 
 
 def _create_session_attendance_for_active_enrollments(session):

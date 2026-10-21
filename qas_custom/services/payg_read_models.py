@@ -2,6 +2,7 @@
 from datetime import datetime, timedelta
 
 import frappe
+from qas_custom.services.session_schedule import session_timeslot
 from frappe.utils import getdate, get_time, get_datetime_in_timezone
 
 from qas_custom.modules.payg.rules import as_brisbane_datetime, can_parent_cancel
@@ -83,7 +84,7 @@ def enrich_cards(cards, products=None):
 
 def _session_context(session_ids):
     sessions = {row.name: row for row in _rows(
-        "Course Sessions", session_ids, ["name", "session_date", "weekly_timeslot", "teacher_override"])}
+        "Course Sessions", session_ids, ["name", "session_date", "weekly_timeslot", "teacher_override", "start_time", "end_time"])}
     slots = {row.name: row for row in _rows(
         "Weekly Timeslot", {row.weekly_timeslot for row in sessions.values() if row.weekly_timeslot},
         ["name", "course", "term", "campus", "classroom", "teacher", "start_time", "end_time"])}
@@ -94,7 +95,7 @@ def _session_context(session_ids):
                 _rows("Teacher", {name for name in teacher_ids if name}, ["name", "teacher_name"])}
     context = {}
     for name, session in sessions.items():
-        slot = slots.get(session.weekly_timeslot)
+        slot = session_timeslot(session, slots.get(session.weekly_timeslot))
         if not slot:
             continue
         teacher = session.teacher_override or slot.teacher

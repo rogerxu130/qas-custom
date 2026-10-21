@@ -8,6 +8,7 @@ from decimal import Decimal
 from uuid import uuid4
 
 import frappe
+from qas_custom.services.session_schedule import session_timeslot
 from frappe.utils import getdate, get_time, get_datetime_in_timezone
 
 from qas_custom.modules.payg.money import stored_currency
@@ -103,7 +104,7 @@ def _booking_starts(bookings):
     starts = []
     for booking in bookings:
         session = sessions[booking.course_session]
-        slot = slots[session.weekly_timeslot]
+        slot = session_timeslot(session, slots[session.weekly_timeslot])
         if not session.session_date or not slot.start_time:
             frappe.throw(f"PAYG booking {booking.name} has no session start")
         start = as_brisbane_datetime(datetime.combine(getdate(session.session_date),

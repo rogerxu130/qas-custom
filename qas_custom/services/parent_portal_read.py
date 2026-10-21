@@ -4,6 +4,7 @@ from collections import defaultdict
 from datetime import datetime
 from qas_custom.services.term_lifecycle import open_enrollment_or_filters
 import frappe
+from qas_custom.services.session_schedule import session_timeslot
 from frappe.utils import getdate, get_time, now_datetime, today
 
 from qas_custom.modules.billing.invoice_gst import invoice_gst_context
@@ -93,7 +94,7 @@ def get_parent_schedule_data(student=None):
     session_rows = frappe.get_all(
         "Course Sessions",
         filters={"name": ["in", session_ids], "session_date": [">=", today()], "status": ["!=", "Cancelled"]},
-        fields=["name", "weekly_timeslot", "session_date", "status"],
+        fields=["name", "weekly_timeslot", "session_date", "status", "start_time", "end_time"],
         order_by="session_date asc, modified asc",
     )
 
@@ -110,7 +111,7 @@ def get_parent_schedule_data(student=None):
 
     sessions = []
     for session_row in session_rows:
-        timeslot = timeslot_map.get(session_row.get("weekly_timeslot"))
+        timeslot = session_timeslot(session_row, timeslot_map.get(session_row.get("weekly_timeslot")))
         if not timeslot:
             continue
 
@@ -244,7 +245,7 @@ def get_parent_vouchers_data(student=None):
         session_list = frappe.get_all(
             "Course Sessions",
             filters={"name": ["in", list(session_ids)]},
-            fields=["name", "weekly_timeslot", "session_date", "status"],
+            fields=["name", "weekly_timeslot", "session_date", "status", "start_time", "end_time"],
         )
         session_rows = {row["name"]: row for row in session_list}
         timeslot_map = _get_weekly_timeslot_map(
@@ -262,6 +263,7 @@ def get_parent_vouchers_data(student=None):
             timeslot_map.get(original_session.get("weekly_timeslot")) if original_session else None
         )
 
+        original_timeslot = session_timeslot(original_session, original_timeslot)
         leave_start_dt = None
         if original_session and original_session.get("session_date") and original_timeslot and original_timeslot.get("start_time"):
             leave_start_dt = datetime.combine(

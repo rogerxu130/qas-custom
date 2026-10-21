@@ -5,6 +5,7 @@ from hashlib import sha256
 from zoneinfo import ZoneInfo
 
 import frappe
+from qas_custom.services.session_schedule import session_timeslot
 from frappe import _
 from frappe.utils import cint, get_datetime, get_datetime_in_timezone, get_system_timezone
 
@@ -180,14 +181,14 @@ def _get_24h_candidates(now):
 	sessions = frappe.get_all(
 		"Course Sessions",
 		filters={"session_date": target_date.date()},
-		fields=["name", "weekly_timeslot", "session_date", "status"],
+		fields=["name", "weekly_timeslot", "session_date", "status", "start_time", "end_time"],
 		limit_page_length=0,
 	)
 	session_map = {row.get("name"): row for row in sessions if row.get("status") != "Cancelled"}
 	timeslot_map = _get_timeslot_map([row.get("weekly_timeslot") for row in session_map.values()])
 	due_sessions = []
 	for session in session_map.values():
-		timeslot = timeslot_map.get(session.get("weekly_timeslot"))
+		timeslot = session_timeslot(session, timeslot_map.get(session.get("weekly_timeslot")))
 		class_start = _session_start_datetime(session.get("session_date"), (timeslot or {}).get("start_time"))
 		if class_start and _is_24h_window(now, class_start):
 			due_sessions.append(session.get("name"))
@@ -395,6 +396,7 @@ def _get_class_start(course_session):
 	if not session or session.get("status") == "Cancelled":
 		return None
 	timeslot = _get_timeslot_map([session.get("weekly_timeslot")]).get(session.get("weekly_timeslot"))
+	timeslot = session_timeslot(session, timeslot)
 	return _session_start_datetime(session.get("session_date"), (timeslot or {}).get("start_time"))
 
 
@@ -405,7 +407,7 @@ def _get_session_map(names):
 	rows = frappe.get_all(
 		"Course Sessions",
 		filters={"name": ["in", names]},
-		fields=["name", "weekly_timeslot", "session_date", "status"],
+		fields=["name", "weekly_timeslot", "session_date", "status", "start_time", "end_time"],
 		limit_page_length=0,
 	)
 	return {row.get("name"): row for row in rows}

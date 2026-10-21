@@ -16,7 +16,7 @@ def _report(weekly_timeslot):
 		frappe.throw(_("Weekly timeslot is required."))
 	doc = frappe.get_doc("Weekly Timeslot", weekly_timeslot)
 	sessions = frappe.get_all("Course Sessions", filters={"weekly_timeslot": doc.name},
-		fields=["name", "session_date", "status", "modified"], order_by="name asc", limit_page_length=0)
+		fields=["name", "session_date", "status", "modified", "start_time", "end_time"], order_by="name asc", limit_page_length=0)
 	errors = []
 	current_time = now_datetime()
 	for row in sessions:

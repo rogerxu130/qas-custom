@@ -182,6 +182,7 @@ doc_events = {
 		"on_update": "qas_custom.modules.makeup.commands.sync_makeup_voucher_attendance_after_save",
 	},
 	"Weekly Timeslot": {
+		"before_validate": "qas_custom.services.session_schedule.guard_weekly_schedule_change",
 		"validate": ["qas_custom.services.term_lifecycle.validate_term_child", "qas_custom.services.school_admin.validate_weekly_timeslot_document"],
 		"on_update": "qas_custom.services.class_record_labels.refresh_linked_course_session_labels",
 	},

@@ -2,6 +2,7 @@
 from datetime import datetime
 
 import frappe
+from qas_custom.services.session_schedule import session_timeslot
 from frappe.utils import cint, getdate, get_time, now_datetime
 from qas_custom.services.class_attendance import create_attendance_entry
 
@@ -9,7 +10,7 @@ from qas_custom.services.class_attendance import create_attendance_entry
 def session_context(session_id, lock=False):
     session = frappe.get_doc("Course Sessions", session_id, for_update=lock)
     slot = frappe.get_doc("Weekly Timeslot", session.weekly_timeslot, for_update=lock)
-    return session, slot
+    return session, session_timeslot(session, slot)
 
 
 def active_rows(session_id, exclude=None, lock=False):
@@ -25,6 +26,7 @@ def overlaps(start, end, other_start, other_end):
 
 
 def student_has_conflict(student, session, slot, exclude=None, lock=False):
+    slot = session_timeslot(session, slot)
     if lock:
         # Lock only this student's attendance rows. A JOIN ... FOR UPDATE would also
         # lock other sessions after the target session and invert the session order.
@@ -37,7 +39,7 @@ def student_has_conflict(student, session, slot, exclude=None, lock=False):
         if not session_ids:
             return False
         rows = frappe.db.sql(
-            """SELECT s.name AS course_session, w.start_time, w.end_time
+            """SELECT s.name AS course_session, COALESCE(s.start_time, w.start_time) AS start_time, COALESCE(s.end_time, w.end_time) AS end_time
             FROM `tabCourse Sessions` s
             JOIN `tabWeekly Timeslot` w ON w.name=s.weekly_timeslot
             WHERE s.name IN %s AND s.status != 'Cancelled' AND s.session_date=%s""",
@@ -45,7 +47,7 @@ def student_has_conflict(student, session, slot, exclude=None, lock=False):
         )
         return any(r.course_session == session.name or overlaps(slot.start_time, slot.end_time, r.start_time, r.end_time) for r in rows)
     rows = frappe.db.sql(
-        """SELECT a.course_session, w.start_time, w.end_time
+        """SELECT a.course_session, COALESCE(s.start_time, w.start_time) AS start_time, COALESCE(s.end_time, w.end_time) AS end_time
         FROM `tabClass Attendance Entry` a
         JOIN `tabCourse Sessions` s ON s.name=a.course_session
         JOIN `tabWeekly Timeslot` w ON w.name=s.weekly_timeslot
@@ -70,6 +72,7 @@ def effective_capacity(slot, lock=False):
 
 
 def session_is_future(session, slot):
+    slot = session_timeslot(session, slot)
     return session.status == "Scheduled" and datetime.combine(getdate(session.session_date), get_time(slot.start_time)) > now_datetime()
 
 

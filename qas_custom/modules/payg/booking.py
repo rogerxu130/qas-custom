@@ -6,6 +6,7 @@ from datetime import date, datetime, timedelta
 from uuid import uuid4
 
 import frappe
+from qas_custom.services.session_schedule import session_timeslot
 from frappe.utils import getdate, get_time, get_datetime_in_timezone
 
 from qas_custom.modules.course_schedule import session_resources
@@ -81,6 +82,7 @@ def _query_limit(value, maximum):
 
 
 def _start(session, slot):
+    slot = session_timeslot(session, slot)
     if not session.session_date or not slot.start_time:
         frappe.throw("Session date and start time are required")
     return as_brisbane_datetime(datetime.combine(getdate(session.session_date), get_time(slot.start_time)))
@@ -213,7 +215,7 @@ def available_sessions(student, course, cursor=None, limit=30, parent=None):
     items = []
     for row in candidates[:limit]:
         session = frappe.get_doc("Course Sessions", row.name)
-        slot = frappe.get_doc("Weekly Timeslot", session.weekly_timeslot)
+        slot = session_timeslot(session, frappe.get_doc("Weekly Timeslot", session.weekly_timeslot))
         term = frappe.get_doc("Term", slot.term)
         reasons = _basic_reasons(pupil, session, slot, term, course_doc, now)
         selected = choose_card(cards, now=now, session_start=_start(session, slot)) if slot.start_time else None
@@ -231,7 +233,7 @@ def preview_booking(student, session, parent=None):
     family = _family(parent)
     pupil = _student(student, family.name)
     occurrence = frappe.get_doc("Course Sessions", session)
-    slot = frappe.get_doc("Weekly Timeslot", occurrence.weekly_timeslot)
+    slot = session_timeslot(occurrence, frappe.get_doc("Weekly Timeslot", occurrence.weekly_timeslot))
     term = frappe.get_doc("Term", slot.term)
     course = frappe.get_doc("Course", slot.course)
     now = _now()
@@ -305,9 +307,11 @@ def confirm_booking(student, session, preview_card, request_key, *, confirmed_ru
             if selected.name != booking.card:
                 frappe.throw("Card changed; refresh preview")
         # Booking must exist before its Reserve Entry; shared reservation runs after the card lock.
-        occurrence = frappe.db.get_value("Course Sessions", session, ["session_date", "weekly_timeslot"], as_dict=True)
+        occurrence = frappe.db.get_value("Course Sessions", session, ["session_date", "weekly_timeslot", "start_time"], as_dict=True)
         slot_id = occurrence.weekly_timeslot if occurrence else None
-        slot_start = frappe.db.get_value("Weekly Timeslot", slot_id, "start_time") if slot_id else None
+        slot_start = occurrence.get("start_time") if occurrence else None
+        if slot_start in (None, ""):
+            slot_start = frappe.db.get_value("Weekly Timeslot", slot_id, "start_time") if slot_id else None
         if not slot_start:
             frappe.throw("Session start is unavailable")
         start = as_brisbane_datetime(datetime.combine(getdate(occurrence.session_date), get_time(slot_start)))

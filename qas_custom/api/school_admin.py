@@ -1345,6 +1345,12 @@ def school_admin_create_weekly_timeslot(payload=None):
 
 
 @frappe.whitelist()
+def school_admin_preview_weekly_timeslot_schedule(weekly_timeslot=None, payload=None):
+	from qas_custom.services.school_admin import preview_school_admin_weekly_timeslot_schedule_data
+	return preview_school_admin_weekly_timeslot_schedule_data(weekly_timeslot=weekly_timeslot, payload=payload)
+
+
+@frappe.whitelist()
 def school_admin_update_weekly_timeslot(weekly_timeslot=None, payload=None):
 	return update_school_admin_weekly_timeslot_data(weekly_timeslot=weekly_timeslot, payload=payload)
 

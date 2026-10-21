@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import frappe
+from qas_custom.services.session_schedule import session_timeslot
 from frappe import _
 from frappe.utils import getdate
 
 
 def build_session_option(session, timeslot):
+	timeslot = session_timeslot(session, timeslot)
 	return {
 		"id": session.name,
 		"name": session.name,
@@ -47,7 +49,7 @@ def get_remaining_sessions(weekly_timeslot: str, start_date):
 			"session_date": [">=", getdate(start_date)],
 			"status": ["!=", "Cancelled"],
 		},
-		fields=["name", "weekly_timeslot", "session_date", "status"],
+		fields=["name", "weekly_timeslot", "session_date", "status", "start_time", "end_time"],
 		order_by="session_date asc, name asc",
 	)
 
@@ -56,7 +58,7 @@ def get_session_context(course_session: str):
 	session = frappe.db.get_value(
 		"Course Sessions",
 		course_session,
-		["name", "weekly_timeslot", "session_date", "status"],
+		["name", "weekly_timeslot", "session_date", "status", "start_time", "end_time"],
 		as_dict=True,
 	)
 	if not session:
@@ -69,6 +71,7 @@ def get_session_context(course_session: str):
 		["name", "term", "course", "class_language", "campus", "classroom", "teacher", "start_time", "end_time"],
 		as_dict=True,
 	)
+	timeslot = session_timeslot(session, timeslot)
 	if not timeslot:
 		frappe.throw(_("Weekly timeslot was not found."))
 	return {"session": session, "timeslot": timeslot}
