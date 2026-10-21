@@ -16,7 +16,7 @@
   },
   {
    "fieldname": "display_label",
-   "fieldtype": "Data",
+   "fieldtype": "Small Text",
    "hidden": 1,
    "label": "Display Label",
    "read_only": 1
