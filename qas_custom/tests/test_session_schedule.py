@@ -160,9 +160,40 @@ class TestSessionSchedule(TestCase):
         plan = self.plan()
         other = session("OTHER", "2026-10-24", weekly_timeslot="CLASS-2", start_time="16:30:00", end_time="18:00:00", teacher_override="TEACHER")
         other_slot = slot(name="CLASS-2", start_time="08:00:00", end_time="09:00:00", classroom="OTHER-ROOM", teacher="OTHER-TEACHER")
-        with patch("qas_custom.services.session_schedule.frappe.get_all", side_effect=[[other],[other_slot]]):
+        with patch("qas_custom.services.session_schedule.frappe.get_all", side_effect=[[other],[other_slot]]), patch("qas_custom.services.session_schedule.frappe.db", Mock(get_value=lambda dt, name, field: name)):
             _check_resource_conflicts(self.new, self.rows, plan)
         self.assertIn("OTHER", " ".join(plan["blocking_errors"]))
+
+
+    def test_conflict_details_identify_resources_courses_and_actual_times(self):
+        for room, teacher, expected, absent in [
+            ("ROOM", "OTHER-TEACHER", "教室 Indooroopilly / R5", "老师 Roman在"),
+            ("OTHER-ROOM", "TEACHER", "老师 Roman", "教室 Indooroopilly / R5在"),
+            ("ROOM", "TEACHER", "老师 Roman、教室 Indooroopilly / R5", None),
+        ]:
+            with self.subTest(room=room, teacher=teacher):
+                plan = self.plan()
+                self.new.update(course="STORY", campus="CAMPUS", class_language="English")
+                other = session("OTHER", "2026-10-24", weekly_timeslot="CLASS-2", start_time="16:30", end_time="18:00")
+                other_slot = slot(name="CLASS-2", course="ART", campus="CAMPUS", classroom=room, teacher=teacher, start_time="08:00", end_time="09:00")
+                names = {"STORY": "Storytelling", "ART": "Realistic Art", "CAMPUS": "Indooroopilly", "ROOM": "R5", "TEACHER": "Roman"}
+                db = Mock(get_value=lambda dt, name, field: names.get(name, name))
+                with patch("qas_custom.services.session_schedule.frappe.get_all", side_effect=[[other], [other_slot]]), patch("qas_custom.services.session_schedule.frappe.db", db):
+                    _check_resource_conflicts(self.new, self.rows, plan)
+                message = plan["blocking_errors"][0]
+                self.assertIn(expected, message.split("在以下")[0])
+                if absent:
+                    self.assertNotIn(absent, message)
+                for text in ("2026-10-24", "本次调整：Storytelling", "16:00–17:30", "已有课程：Realistic Art", "16:30–18:00", "课次 OTHER", "班级 CLASS-2", "尚未保存"):
+                    self.assertIn(text, message)
+                self.assertNotIn("08:00–09:00", message)
+
+    def test_adjacent_sessions_do_not_report_conflict(self):
+        plan = self.plan()
+        other = session("OTHER", "2026-10-24", weekly_timeslot="CLASS-2", start_time="17:30", end_time="19:00")
+        with patch("qas_custom.services.session_schedule.frappe.get_all", side_effect=[[other], [slot(name="CLASS-2")]]):
+            _check_resource_conflicts(self.new, self.rows, plan)
+        self.assertEqual(plan["blocking_errors"], [])
 
     def test_saving_updates_dependencies_without_changing_enrollment(self):
         plan = self.plan(rows=[self.rows[1]])

@@ -186,9 +186,29 @@ def _check_resource_conflicts(new, sessions, plan):
         filters={"session_date": ["in", dates], "status": ["!=", "Cancelled"], "weekly_timeslot": ["!=", new.name]},
         fields=["name", "weekly_timeslot", "session_date", "start_time", "end_time", "teacher_override"], limit_page_length=0)
     slots = frappe.get_all("Weekly Timeslot", filters={"name": ["in", sorted({r.weekly_timeslot for r in other})]},
-        fields=["name", "classroom", "teacher", "start_time", "end_time"], limit_page_length=0) if other else []
+        fields=["name", "course", "class_language", "campus", "classroom", "teacher", "start_time", "end_time"], limit_page_length=0) if other else []
     slot_map = {r.name: r for r in slots}
     source = {r.name: r for r in sessions}
+    labels = {}
+
+    def label(doctype, name, field):
+        if not name:
+            return "未指定"
+        key = (doctype, name, field)
+        if key not in labels:
+            labels[key] = frappe.db.get_value(doctype, name, field) or name
+        return labels[key]
+
+    def description(slot, teacher, start, end):
+        return (
+            f"{label('Course', slot.get('course'), 'course_name')}"
+            f" · {slot.get('class_language') or 'English'}"
+            f" · {str(_time(start))[:5]}–{str(_time(end))[:5]}"
+            f" · {label('Campus', slot.get('campus'), 'campus_name')}"
+            f" / {label('Classroom', slot.get('classroom'), 'classroom_name')}"
+            f" · 老师：{label('Teacher', teacher, 'teacher_name')}"
+        )
+
     for change in plan["changes"]:
         teacher = source[change["session"]].get("teacher_override") or new.get("teacher")
         for row in other:
@@ -200,7 +220,17 @@ def _check_resource_conflicts(new, sessions, plan):
             room_conflict = new.get("classroom") and actual.get("classroom") == new.get("classroom")
             teacher_conflict = teacher and teacher == (row.get("teacher_override") or actual.get("teacher"))
             if (room_conflict or teacher_conflict) and _time(change["start_time"]) < _time(actual.get("end_time")) and _time(actual.get("start_time")) < _time(change["end_time"]):
-                plan["blocking_errors"].append(f"{change['session']}: room or teacher conflicts with {row.name} on {change['session_date']}.")
+                resources = []
+                if teacher_conflict:
+                    resources.append(f"老师 {label('Teacher', teacher, 'teacher_name')}")
+                if room_conflict:
+                    resources.append(f"教室 {label('Campus', new.get('campus'), 'campus_name')} / {label('Classroom', new.get('classroom'), 'classroom_name')}")
+                plan["blocking_errors"].append(
+                    f"{change['session_date']}：{'、'.join(resources)}在以下两节课的时间内重叠。\n"
+                    f"本次调整：{description(new, teacher, change['start_time'], change['end_time'])}（课次 {change['session']}）\n"
+                    f"已有课程：{description(actual, row.get('teacher_override') or actual.get('teacher'), actual.get('start_time'), actual.get('end_time'))}（课次 {row.name}；班级 {row.weekly_timeslot}）\n"
+                    "请调整时间、老师或教室；如怀疑是重复课次，请到 Classes 核对后再处理。本次修改尚未保存。"
+                )
 
 
 def apply_session_changes(plan):
