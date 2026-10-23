@@ -387,26 +387,42 @@ def cancel_upload(name):
 
 
 def cleanup_metadata(data):
+    # Keep older admin pages safe while the replacement UI deploys.
+    return _delete_selected_files(data, metadata_only=True)
+
+
+def delete_files(data):
+    return _delete_selected_files(data)
+
+
+def _delete_selected_files(data, metadata_only=False):
     require_user(True)
     data = payload(data)
     names = data.get('files')
-    if data.get('confirmation') != 'DELETE METADATA' or not isinstance(names, list) or not 1 <= len(names) <= MAX_FILES or any(not isinstance(name, str) or not name for name in names):
-        frappe.throw('Confirm the specific metadata files before cleanup.')
+    confirmation = 'DELETE METADATA' if metadata_only else 'DELETE FILES'
+    if data.get('confirmation') != confirmation or not isinstance(names, list) or not 1 <= len(names) <= MAX_FILES or any(not isinstance(name, str) or not name for name in names):
+        frappe.throw('Confirm the specific selected files before deletion.')
     doc = lock_resource(data['resource'], data['modified'])
     require_editable(doc)
     targets = [frappe.get_doc(FILE, name) for name in dict.fromkeys(names)]
     # Validate the complete selection before changing state or deleting any objects.
     for file in targets:
-        if file.resource != doc.name or file.status not in ('Ready', 'Uploading') or not is_metadata_file(file.filename) or not 0 < float(file.size_bytes or 0) <= 65536:
+        if file.resource != doc.name or file.status not in ('Ready', 'Uploading'):
+            frappe.throw('Only current files belonging to this resource can be deleted.')
+        if metadata_only and (not is_metadata_file(file.filename) or not 0 < float(file.size_bytes or 0) <= 65536):
             frappe.throw('Cleanup only accepts system metadata files up to 64 KiB in this resource.')
-    if frappe.db.exists(FILE, {'replaces': ['in', [file.name for file in targets]], 'status': 'Uploading'}):
-        frappe.throw('Finish or cancel pending replacements before cleaning these files.')
+    if frappe.db.exists(FILE, {'replaces': ['in', [file.name for file in targets]], 'status': 'Uploading', 'name': ['not in', [file.name for file in targets]]}):
+        frappe.throw('Finish or cancel pending replacements before deleting these files.')
     for file in targets:
         file.status = 'Retired'
         file.replaces = ''
         file.save(ignore_permissions=True)
+    unpublished = False
+    if doc.status == 'Published' and not frappe.db.exists(FILE, {'resource': doc.name, 'status': 'Ready', 'name': ['not in', [file.name for file in targets]]}):
+        doc.status = 'Draft'
+        unpublished = True
     doc.save(ignore_permissions=True)
-    audit(doc, 'Metadata cleanup requested: ' + ', '.join(file.filename for file in targets))
+    audit(doc, 'File deletion requested: ' + ', '.join(file.filename for file in targets))
     # Persist retryable state before cloud calls; the existing hourly job retries failures.
     frappe.db.commit()
     pending = 0
@@ -417,9 +433,11 @@ def cleanup_metadata(data):
         except Exception:
             frappe.db.rollback()
             pending += 1
-            frappe.log_error(title='Teaching metadata cleanup needs retry', message='File: ' + file.name)
+            frappe.log_error(title='Teaching file deletion needs retry', message='File: ' + file.name)
     result = detail(doc.name, True)
-    result['metadata_cleanup'] = {'deleted': len(targets) - pending, 'pending': pending}
+    result['file_deletion'] = {'deleted': len(targets) - pending, 'pending': pending, 'unpublished': unpublished}
+    if metadata_only:
+        result['metadata_cleanup'] = {'deleted': len(targets) - pending, 'pending': pending}
     return result
 
 

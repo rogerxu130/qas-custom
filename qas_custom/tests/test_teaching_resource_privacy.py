@@ -160,3 +160,41 @@ class ResourcePrivacyTests(TestCase):
         self.assertEqual(self.metadata.status, 'Retired')
         self.frappe.db.rollback.assert_called_once()
         self.frappe.log_error.assert_called_once()
+
+    def test_selected_file_deletion_accepts_normal_large_attachments(self):
+        data = self.metadata_cleanup_fixture(filename='lesson.mp4', size_bytes=900000000)
+        data['confirmation'] = 'DELETE FILES'
+        result = self.service.delete_files(data)
+        self.service.cleanup_file.assert_called_once_with('META')
+        self.frappe.get_doc.assert_called_once_with(self.service.FILE, 'META')
+        self.assertEqual(result['file_deletion'], {'deleted': 1, 'pending': 0, 'unpublished': False})
+        self.service.require_user.assert_called_once_with(True)
+
+    def test_selected_deletion_rejects_another_resources_file_before_mutation(self):
+        data = self.metadata_cleanup_fixture(filename='lesson.pptx', resource='OTHER')
+        data['confirmation'] = 'DELETE FILES'
+        with self.assertRaises(ValueError):
+            self.service.delete_files(data)
+        self.metadata.save.assert_not_called()
+        self.service.cleanup_file.assert_not_called()
+
+    def test_deleting_last_published_attachment_restores_draft(self):
+        for remaining in [False, True]:
+            with self.subTest(remaining=remaining):
+                data = self.metadata_cleanup_fixture(filename='lesson.pptx')
+                data['confirmation'] = 'DELETE FILES'
+                self.resource.status = 'Published'
+                self.frappe.db.exists.side_effect = [False, remaining]
+                result = self.service.delete_files(data)
+                self.assertEqual(self.resource.status, 'Published' if remaining else 'Draft')
+                self.assertEqual(result['file_deletion']['unpublished'], not remaining)
+                self.assertEqual(self.frappe.db.exists.call_args.args[1]['name'], ['not in', ['META']])
+
+    def test_selected_deletion_failure_reports_pending_and_preserves_retry(self):
+        data = self.metadata_cleanup_fixture(filename='lesson.mp4', size_bytes=900000000)
+        data['confirmation'] = 'DELETE FILES'
+        self.service.cleanup_file.side_effect = RuntimeError('Storage unavailable')
+        result = self.service.delete_files(data)
+        self.assertEqual(result['file_deletion']['deleted'], 0)
+        self.assertEqual(result['file_deletion']['pending'], 1)
+        self.assertEqual(self.metadata.status, 'Retired')
