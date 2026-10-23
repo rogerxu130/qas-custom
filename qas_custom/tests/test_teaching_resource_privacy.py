@@ -86,3 +86,15 @@ class ResourcePrivacyTests(TestCase):
         with self.assertRaises(ValueError):
             self.save(admin_note='x' * 2001)
         self.doc.save.assert_not_called()
+
+    def test_case_variants_reuse_one_existing_tag_object(self):
+        self.frappe.db.get_value.return_value = 'TAG-EXISTING'
+        self.frappe.get_doc.side_effect = lambda value: SimpleNamespace(insert=Mock())
+        self.save(tags=['Sketching', ' sketching, ', 'SKETCHING'])
+        self.frappe.db.get_value.assert_called_once_with(self.service.TAG, {'tag': 'sketching'}, 'name')
+        self.frappe.get_doc.assert_called_once_with(dict(doctype=self.service.TAG_LINK, resource='R1', tag='TAG-EXISTING'))
+
+    def test_multiple_tags_in_one_name_are_rejected_before_saving(self):
+        with self.assertRaises(ValueError):
+            self.save(tags=['Sketching, Animals'])
+        self.doc.save.assert_not_called()

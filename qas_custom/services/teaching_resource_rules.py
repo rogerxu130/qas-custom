@@ -56,3 +56,12 @@ def link_lifetime(deadlines, direct=False, now=None):
     if not valid:
         return 0
     return max(0, min(900, int((max(valid) - now).total_seconds())))
+
+
+def normalize_tag(value):
+    if not isinstance(value, str):
+        raise ValueError('Tags must be text.')
+    tag = ' '.join(value.strip(' ,，\t\r\n').split()).casefold()
+    if not tag or len(tag) > 100 or ',' in tag or '，' in tag:
+        raise ValueError('Add one tag at a time, up to 100 characters. Select or create each tag separately.')
+    return tag

@@ -7,7 +7,7 @@ import frappe
 from frappe.utils import cint, get_datetime, now_datetime, add_days
 
 from qas_custom.services import teaching_resource_storage as storage
-from qas_custom.services.teaching_resource_rules import MAX_FILES, PART_SIZE, ZONE, link_lifetime, part_count, validate_file, validate_parts
+from qas_custom.services.teaching_resource_rules import MAX_FILES, PART_SIZE, ZONE, link_lifetime, part_count, validate_file, validate_parts, normalize_tag
 
 RESOURCE = 'Teaching Resource'
 FILE = 'Teaching Resource File'
@@ -191,7 +191,10 @@ def save(data):
             frappe.throw('Select a valid teacher.')
     if any(not isinstance(tag, str) for tag in tags):
         frappe.throw('Tags must be text.')
-    clean_tags = sorted({text(t, 100, True).casefold() for t in tags})
+    try:
+        clean_tags = sorted({normalize_tag(t) for t in tags})
+    except ValueError as exc:
+        frappe.throw(str(exc))
     doc.save(ignore_permissions=True)
     for doctype in (ASSIGN, GRANT, TAG_LINK):
         for child in frappe.get_all(doctype, filters={'resource': doc.name}, pluck='name', limit_page_length=0):
