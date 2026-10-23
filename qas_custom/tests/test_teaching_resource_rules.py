@@ -11,6 +11,11 @@ class ResourceRules(unittest.TestCase):
             with self.subTest(name=name, size=size), self.assertRaises(ValueError):
                 validate_file(name, size)
 
+    def test_system_sidecars_are_not_accepted_as_video_or_ppt(self):
+        for name in ['._02_Eagle_Part_1_EN.mp4', '._02_Eagle_EN.pptx', '~$02_Eagle_EN.pptx', '.DS_Store', 'Thumbs.db']:
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                validate_file(name, 4096)
+
     def test_parts_must_match_size_and_order(self):
         validate_parts([{'PartNumber': 1, 'Size': PART_SIZE}, {'PartNumber': 2, 'Size': 7}], PART_SIZE + 7)
         for rows in [[], [{'PartNumber': 1, 'Size': 1}], [{'PartNumber': 2, 'Size': 7}, {'PartNumber': 1, 'Size': PART_SIZE}]]:
