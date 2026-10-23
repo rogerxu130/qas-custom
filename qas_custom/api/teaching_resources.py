@@ -35,6 +35,8 @@ def manage(action, data=None):
         return service.complete_upload(data.get('file'))
     if action == 'cancel_upload':
         return service.cancel_upload(data.get('file'))
+    if action == 'cleanup_metadata':
+        return service.cleanup_metadata(data)
     if action == 'edit_files':
         return service.edit_files(data)
     frappe.throw('Unknown teaching resource action.')

@@ -14,7 +14,7 @@ TYPES = {'.mp4': ('video', 'video/mp4'), '.ppt': ('ppt', 'application/vnd.ms-pow
 def validate_file(filename, size):
     if not isinstance(filename, str) or not filename or len(filename) > 200 or any(c in filename for c in '/\\\r\n\x00'):
         raise ValueError('Choose a filename without folders or control characters (up to 200 characters).')
-    if filename.startswith(('._', '~$')) or filename.casefold() in {'.ds_store', 'thumbs.db', 'desktop.ini'}:
+    if is_metadata_file(filename):
         raise ValueError('System metadata and temporary files are not course files.')
     if isinstance(size, bool):
         raise ValueError('Invalid file size.')
@@ -67,3 +67,7 @@ def normalize_tag(value):
     if not tag or len(tag) > 100 or ',' in tag or '，' in tag:
         raise ValueError('Add one tag at a time, up to 100 characters. Select or create each tag separately.')
     return tag
+
+
+def is_metadata_file(filename):
+    return isinstance(filename, str) and (filename.startswith(('._', '~$')) or filename.casefold() in {'.ds_store', 'thumbs.db', 'desktop.ini'})

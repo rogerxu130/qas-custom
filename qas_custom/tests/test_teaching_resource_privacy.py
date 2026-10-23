@@ -98,3 +98,65 @@ class ResourcePrivacyTests(TestCase):
         with self.assertRaises(ValueError):
             self.save(tags=['Sketching, Animals'])
         self.doc.save.assert_not_called()
+
+    def metadata_cleanup_fixture(self, **changes):
+        self.resource = SimpleNamespace(name='R1', status='Draft', save=Mock())
+        self.metadata = SimpleNamespace(**dict(dict(name='META', resource='R1', filename='._lesson.mp4', size_bytes=4096, status='Ready', replaces='', save=Mock()), **changes))
+        self.service.lock_resource = Mock(return_value=self.resource)
+        self.frappe.get_doc.return_value = self.metadata
+        self.frappe.db.exists.return_value = False
+        self.frappe.log_error = Mock()
+        self.service.audit = Mock()
+        self.service.detail = Mock(return_value={'files': []})
+        self.service.cleanup_file = Mock()
+        return dict(resource='R1', modified='v1', files=['META'], confirmation='DELETE METADATA')
+
+    def test_cleanup_only_targets_confirmed_metadata_after_durable_state(self):
+        data = self.metadata_cleanup_fixture()
+        def remove(name):
+            self.assertEqual(name, 'META')
+            self.assertEqual(self.metadata.status, 'Retired')
+            self.frappe.db.commit.assert_called_once()
+        self.service.cleanup_file.side_effect = remove
+        result = self.service.cleanup_metadata(data)
+        self.assertEqual(result['metadata_cleanup'], {'deleted': 1, 'pending': 0})
+        self.service.require_user.assert_called_once_with(True)
+        self.service.lock_resource.assert_called_once_with('R1', 'v1')
+
+    def test_real_large_foreign_and_invalid_state_files_cannot_be_cleaned(self):
+        for change in [dict(filename='lesson.mp4'), dict(size_bytes=900000000), dict(resource='OTHER'), dict(status='Cancelled')]:
+            with self.subTest(change=change):
+                data = self.metadata_cleanup_fixture(**change)
+                with self.assertRaises(ValueError):
+                    self.service.cleanup_metadata(data)
+                self.service.cleanup_file.assert_not_called()
+                self.metadata.save.assert_not_called()
+        self.frappe.db.commit.assert_not_called()
+
+    def test_whole_selection_is_validated_before_any_file_changes(self):
+        data = self.metadata_cleanup_fixture()
+        real = SimpleNamespace(name='REAL', resource='R1', filename='lesson.pptx', size_bytes=4096, status='Ready')
+        self.frappe.get_doc.side_effect = [self.metadata, real]
+        data['files'].append('REAL')
+        with self.assertRaises(ValueError):
+            self.service.cleanup_metadata(data)
+        self.metadata.save.assert_not_called()
+        self.service.cleanup_file.assert_not_called()
+
+    def test_cleanup_requires_confirmation_and_no_pending_replacement(self):
+        data = self.metadata_cleanup_fixture()
+        with self.assertRaises(ValueError):
+            self.service.cleanup_metadata({**data, 'confirmation': ''})
+        self.frappe.db.exists.return_value = True
+        with self.assertRaises(ValueError):
+            self.service.cleanup_metadata(data)
+        self.service.cleanup_file.assert_not_called()
+
+    def test_failed_cloud_cleanup_remains_retryable_and_is_not_reported_deleted(self):
+        data = self.metadata_cleanup_fixture()
+        self.service.cleanup_file.side_effect = RuntimeError('Storage unavailable')
+        result = self.service.cleanup_metadata(data)
+        self.assertEqual(result['metadata_cleanup'], {'deleted': 0, 'pending': 1})
+        self.assertEqual(self.metadata.status, 'Retired')
+        self.frappe.db.rollback.assert_called_once()
+        self.frappe.log_error.assert_called_once()
