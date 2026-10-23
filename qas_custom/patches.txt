@@ -95,3 +95,4 @@ qas_custom.patches.v2026_10_18_payg_due_days
 qas_custom.patches.v2026_10_21_session_schedule_times
 
 qas_custom.patches.v2026_10_23_teaching_resources
+qas_custom.patches.v2026_10_23_teaching_resource_admin_note

@@ -120,7 +120,7 @@ def catalog(filters=None, offset=0, admin=False):
     if filters.get('query'):
         conditions.append('r.title LIKE %(query)s')
         params['query'] = '%' + text(filters['query'], 200) + '%'
-    if filters.get('tag'):
+    if admin and filters.get('tag'):
         conditions.append('EXISTS (SELECT 1 FROM `tabTeaching Resource Tag Link` l JOIN `tabTeaching Resource Tag` t ON t.name=l.tag WHERE l.resource=r.name AND t.tag=%(tag)s)')
         params['tag'] = text(filters['tag'], 100).casefold()
     selected = []
@@ -144,10 +144,12 @@ def detail(name, admin=False):
     if not admin:
         file_filters['is_visible'] = 1
     result['files'] = frappe.get_all(FILE, filters=file_filters, fields=['name', 'filename', 'label', 'kind', 'size_bytes', 'status', 'sort_order', 'last_modified', 'replaces', 'is_visible'], order_by='sort_order asc,creation asc', limit_page_length=0)
-    result['tags'] = frappe.db.sql('SELECT t.tag FROM `tabTeaching Resource Tag Link` l JOIN `tabTeaching Resource Tag` t ON t.name=l.tag WHERE l.resource=%s ORDER BY t.tag', (name,), as_dict=True)
-    result['tags'] = [r.tag for r in result['tags']]
     result['assignments'] = frappe.get_all(ASSIGN, filters={'resource': name}, fields=['name', 'term', 'campus', 'course', 'note'], limit_page_length=0) if admin else allowed
+    # Older teacher pages expect this key; never send their internal tag values.
+    result['tags'] = []
     if admin:
+        result['admin_note'] = doc.get('admin_note') or ''
+        result['tags'] = [r.tag for r in frappe.db.sql('SELECT t.tag FROM `tabTeaching Resource Tag Link` l JOIN `tabTeaching Resource Tag` t ON t.name=l.tag WHERE l.resource=%s ORDER BY t.tag', (name,), as_dict=True)]
         result['teachers'] = frappe.get_all(GRANT, filters={'resource': name}, pluck='teacher', limit_page_length=0)
     return result
 
@@ -165,6 +167,8 @@ def save(data):
         doc.status = 'Draft'
     doc.title = text(data.get('title'), 200, True)
     doc.summary = text(data.get('summary'), 2000)
+    if 'admin_note' in data:
+        doc.admin_note = text(data['admin_note'], 2000)
     assignments = data.get('assignments', [])
     teachers = data.get('teachers', [])
     tags = data.get('tags', [])
