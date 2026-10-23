@@ -1,0 +1,128 @@
+{
+ "doctype": "DocType",
+ "name": "Teaching Resource File",
+ "module": "QAS Custom",
+ "autoname": "hash",
+ "engine": "InnoDB",
+ "track_changes": 1,
+ "field_order": [
+  "resource",
+  "filename",
+  "label",
+  "kind",
+  "sort_order",
+  "object_key",
+  "size_bytes",
+  "mime",
+  "status",
+  "upload_id",
+  "request_id",
+  "last_modified",
+  "replaces",
+  "cleanup_error",
+  "is_visible"
+ ],
+ "fields": [
+  {
+   "fieldname": "resource",
+   "label": "Resource",
+   "fieldtype": "Link",
+   "options": "Teaching Resource",
+   "reqd": 1
+  },
+  {
+   "fieldname": "filename",
+   "label": "Filename",
+   "fieldtype": "Data",
+   "reqd": 1,
+   "length": 200
+  },
+  {
+   "fieldname": "label",
+   "label": "Label",
+   "fieldtype": "Data",
+   "length": 200
+  },
+  {
+   "fieldname": "kind",
+   "label": "Kind",
+   "fieldtype": "Select",
+   "options": "video\nppt",
+   "reqd": 1
+  },
+  {
+   "fieldname": "sort_order",
+   "label": "Sort Order",
+   "fieldtype": "Int"
+  },
+  {
+   "fieldname": "object_key",
+   "label": "Object Key",
+   "fieldtype": "Data",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "size_bytes",
+   "label": "Size Bytes",
+   "fieldtype": "Float"
+  },
+  {
+   "fieldname": "mime",
+   "label": "Mime",
+   "fieldtype": "Data"
+  },
+  {
+   "fieldname": "status",
+   "label": "Status",
+   "fieldtype": "Select",
+   "options": "Uploading\nReady\nRetired\nDeleting\nCancelled",
+   "default": "Uploading"
+  },
+  {
+   "fieldname": "upload_id",
+   "label": "Upload Id",
+   "fieldtype": "Small Text",
+   "hidden": 1
+  },
+  {
+   "fieldname": "request_id",
+   "label": "Request Id",
+   "fieldtype": "Data",
+   "unique": 1
+  },
+  {
+   "fieldname": "last_modified",
+   "label": "Last Modified",
+   "fieldtype": "Data"
+  },
+  {
+   "fieldname": "replaces",
+   "label": "Replaces",
+   "fieldtype": "Link",
+   "options": "Teaching Resource File"
+  },
+  {
+   "fieldname": "cleanup_error",
+   "label": "Cleanup Error",
+   "fieldtype": "Small Text"
+  },
+  {
+   "fieldname": "is_visible",
+   "fieldtype": "Check",
+   "label": "Published attachment",
+   "default": "0"
+  }
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC"
+}

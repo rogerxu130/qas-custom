@@ -1,0 +1,39 @@
+{
+ "doctype": "DocType",
+ "name": "Teaching Resource Tag Link",
+ "module": "QAS Custom",
+ "autoname": "hash",
+ "engine": "InnoDB",
+ "track_changes": 1,
+ "field_order": [
+  "resource",
+  "tag"
+ ],
+ "fields": [
+  {
+   "fieldname": "resource",
+   "label": "Resource",
+   "fieldtype": "Link",
+   "options": "Teaching Resource",
+   "reqd": 1
+  },
+  {
+   "fieldname": "tag",
+   "label": "Tag",
+   "fieldtype": "Link",
+   "options": "Teaching Resource Tag",
+   "reqd": 1
+  }
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC"
+}

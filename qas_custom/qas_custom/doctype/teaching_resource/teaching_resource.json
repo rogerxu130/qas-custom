@@ -1,0 +1,46 @@
+{
+ "doctype": "DocType",
+ "name": "Teaching Resource",
+ "module": "QAS Custom",
+ "autoname": "hash",
+ "engine": "InnoDB",
+ "track_changes": 1,
+ "field_order": [
+  "title",
+  "summary",
+  "status"
+ ],
+ "fields": [
+  {
+   "fieldname": "title",
+   "label": "Title",
+   "fieldtype": "Data",
+   "reqd": 1,
+   "length": 200
+  },
+  {
+   "fieldname": "summary",
+   "label": "Summary",
+   "fieldtype": "Small Text"
+  },
+  {
+   "fieldname": "status",
+   "label": "Status",
+   "fieldtype": "Select",
+   "options": "Draft\nPublished\nArchived\nDeleting\nDeleted",
+   "default": "Draft",
+   "reqd": 1
+  }
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC"
+}

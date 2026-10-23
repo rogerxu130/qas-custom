@@ -1,0 +1,61 @@
+{
+ "doctype": "DocType",
+ "name": "Teaching Resource Assignment",
+ "module": "QAS Custom",
+ "autoname": "hash",
+ "engine": "InnoDB",
+ "track_changes": 1,
+ "field_order": [
+  "resource",
+  "term",
+  "campus",
+  "course",
+  "note"
+ ],
+ "fields": [
+  {
+   "fieldname": "resource",
+   "label": "Resource",
+   "fieldtype": "Link",
+   "options": "Teaching Resource",
+   "reqd": 1
+  },
+  {
+   "fieldname": "term",
+   "label": "Term",
+   "fieldtype": "Link",
+   "options": "Term",
+   "reqd": 1
+  },
+  {
+   "fieldname": "campus",
+   "label": "Campus",
+   "fieldtype": "Link",
+   "options": "Campus",
+   "reqd": 1
+  },
+  {
+   "fieldname": "course",
+   "label": "Course",
+   "fieldtype": "Link",
+   "options": "Course",
+   "reqd": 1
+  },
+  {
+   "fieldname": "note",
+   "label": "Note",
+   "fieldtype": "Small Text"
+  }
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC"
+}
