@@ -9,7 +9,9 @@ def collect_payg_payment_followups():
     from qas_custom.services.school_admin import _doctype_available
     if not _doctype_available("QAS PAYG Operation"):
         return []
-    rows = frappe.db.sql("""SELECT i.name, i.customer, i.customer_name, i.parent AS invoice_parent,
+    # Some sites do not have the optional invoice-to-family custom field.
+    parent_condition = "AND (IFNULL(i.parent,'')='' OR i.parent=o.family_parent)" if frappe.db.has_column("Sales Invoice", "parent") else ""
+    rows = frappe.db.sql(f"""SELECT i.name, i.customer, i.customer_name,
         i.outstanding_amount, i.currency, i.due_date, i.status, o.family_parent AS parent,
         p.parent_name, o.card, o.target_card, o.operation_type, c.issued_on
         FROM `tabQAS PAYG Operation` o
@@ -18,7 +20,8 @@ def collect_payg_payment_followups():
         LEFT JOIN `tabQAS PAYG Card` c ON c.name=IF(o.operation_type='Purchase',o.card,o.target_card)
         WHERE o.operation_type IN ('Purchase','Exchange') AND o.status!='Cancelled'
         AND i.docstatus=1 AND i.is_return=0 AND i.outstanding_amount>0.005
-        AND i.customer=o.customer AND (IFNULL(i.parent,'')='' OR i.parent=o.family_parent)
+        AND i.customer=o.customer
+        {parent_condition}
         ORDER BY i.due_date,i.name,o.name""", as_dict=True)
     if not rows:
         return []
@@ -66,7 +69,6 @@ def collect_payg_payment_followups():
         if row.name in result:
             continue
         item = dict(row)
-        item.pop("invoice_parent", None)
         item.update(customer_name=row.parent_name or row.customer_name, cards=[], bookings=[], docstatus=1, non_payg_debt_types=sorted(non_payg_types[row.name]))
         seen = set()
         for root in invoice_cards[row.name].values():

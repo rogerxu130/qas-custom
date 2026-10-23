@@ -79,7 +79,7 @@ class FamilyFollowupTests(TestCase):
 
 class PaygReadModelTests(TestCase):
     def test_exchange_descendant_bookings_find_original_unpaid_purchase_once(self):
-        source=frappe._dict(name='INV',customer='C',customer_name='Family',invoice_parent='P',outstanding_amount=300,currency='AUD',due_date='2026-10-25',status='Unpaid',parent='P',parent_name='Family',card='OLD',target_card=None,operation_type='Purchase',issued_on='2026-10-10')
+        source=frappe._dict(name='INV',customer='C',customer_name='Family',outstanding_amount=300,currency='AUD',due_date='2026-10-25',status='Unpaid',parent='P',parent_name='Family',card='OLD',target_card=None,operation_type='Purchase',issued_on='2026-10-10')
         data={
             'Sales Invoice Item':[],
             'QAS PAYG Operation':[frappe._dict(family_parent='P',source_card='OLD',target_card='NEW')],
@@ -88,7 +88,7 @@ class PaygReadModelTests(TestCase):
             'Weekly Timeslot':[frappe._dict(name='W',day_of_week='Friday',course='Art')],
             'Class Attendance Entry':[frappe._dict(name='ATT',status='To be started')],
             'Student':[frappe._dict(name='S',student_name='Ava')]}
-        fake=SimpleNamespace(db=SimpleNamespace(sql=Mock(return_value=[source])),get_all=Mock(side_effect=lambda dt,**kw:data[dt]))
+        fake=SimpleNamespace(db=SimpleNamespace(sql=Mock(return_value=[source]),has_column=Mock(return_value=True)),get_all=Mock(side_effect=lambda dt,**kw:data[dt]))
         with patch.object(followups,'frappe',fake),patch('qas_custom.services.school_admin._doctype_available',return_value=True),patch.object(followups,'get_datetime_in_timezone',return_value=datetime(2026,10,18)):
             rows=followups.collect_payg_payment_followups()
         self.assertEqual(rows[0]['booking_count'],1)
