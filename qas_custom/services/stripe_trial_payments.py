@@ -71,12 +71,53 @@ def is_trial(doc):
 	return bool(frappe.db.exists('Inquiry', {'trial_invoice': doc.name, 'inquiry_type': 'Trial Lesson'}))
 
 
+def linked_order(doc):
+	from qas_custom.services.order_invoices import is_order_invoice
+	if not is_order_invoice(doc) or doc.get('source_doctype') != 'Store Order' or not doc.get('source_document'):
+		return None
+	order = frappe.get_doc('Store Order', doc.source_document)
+	if (order.parent != doc.get('parent') or order.customer != doc.customer
+		or order.status == 'Cancelled' or order.get('pending_revision')):
+		return None
+	return order
+
+def payable_amount(doc):
+	from qas_custom.services.order_invoices import is_order_invoice, financials
+	amount = get_invoice_payable_amount(doc)
+	if not is_order_invoice(doc):
+		return amount
+	order = linked_order(doc)
+	if not order:
+		return 0
+	state = financials(order)
+	if state['invoice_status'] != 'Issued':
+		return 0
+	# Use the same invoice order/shares displayed in the email and portal.
+	remaining = state['remaining_amount']
+	for row in state['invoices']:
+		if cint(row.docstatus) != 1 or cint(row.is_return) or float(row.outstanding_amount or 0) <= 0:
+			continue
+		share = max(0, min(float(row.outstanding_amount), remaining))
+		if row.name == doc.name:
+			return min(amount, share)
+		remaining -= share
+	return 0
+
+def lock_order(doc):
+	if doc.get('source_doctype') == 'Store Order' and doc.get('source_document'):
+		frappe.db.sql('select name from `tabStore Order` where name=%s for update', doc.source_document)
+
+def supported_invoice(doc):
+	from qas_custom.services.order_invoices import is_order_invoice
+	return bool(linked_order(doc)) if is_order_invoice(doc) else is_trial(doc)
+
+
 def eligible(doc, config):
 	return bool(configured(config) and doc.get('company') == config.company
 		and cint(doc.docstatus) == 1 and not cint(doc.get('is_return'))
 		and not (config.mode == 'Live' and cint(doc.get('qas_stripe_test')))
-		and doc.get('currency') == 'AUD' and is_trial(doc) and payment_parent(doc, config)
-		and cents(get_invoice_payable_amount(doc)) > 0)
+		and doc.get('currency') == 'AUD' and supported_invoice(doc) and payment_parent(doc, config)
+		and cents(payable_amount(doc)) > 0)
 
 
 def support_request():
@@ -113,7 +154,8 @@ def payment_url(doc):
 		return ''
 	from qas_custom.modules.billing.presentation import parent_portal_invoice_link
 	portal = parent_portal_invoice_link(doc.name).split('/invoices', 1)[0]
-	return portal + '/trial-payment#' + urlencode({'token': sign_token(doc.name, payment_parent(doc, config).name, config)})
+	route = '/order-payment#' if linked_order(doc) else '/trial-payment#'
+	return portal + route + urlencode({'token': sign_token(doc.name, payment_parent(doc, config).name, config)})
 
 
 def authorize(token):
@@ -123,7 +165,7 @@ def authorize(token):
 	invoice, parent_name = decode_token(token, config)
 	doc = frappe.get_doc('Sales Invoice', invoice)
 	parent = payment_parent(doc, config)
-	if not parent or parent.name != parent_name or not is_trial(doc) or doc.company != config.company:
+	if not parent or parent.name != parent_name or not supported_invoice(doc) or doc.company != config.company:
 		frappe.throw('Online payment is not available.', frappe.PermissionError)
 	return doc, config
 
@@ -135,7 +177,7 @@ def summary(token):
 		fields=['status'], order_by='creation desc', limit_page_length=1)
 	state = latest[0].status if latest else ''
 	can_pay = eligible(doc, config) and state not in ('Needs Review', 'Retry', 'Test Paid', 'Paid')
-	return {'invoice': doc.name, 'amount': max(0, cents(get_invoice_payable_amount(doc))) / 100,
+	return {'invoice': doc.name, 'invoice_type': 'Order Invoice' if linked_order(doc) else 'Trial Invoice', 'amount': max(0, cents(payable_amount(doc))) / 100,
 		'currency': doc.currency, 'mode': config.mode, 'can_pay': can_pay,
 		'status': state, 'settled': cint(doc.docstatus) == 1 and cents(get_invoice_payable_amount(doc)) <= 0,
 		'csrf_token': get_csrf_token()}
@@ -158,6 +200,7 @@ def start_checkout(token):
 	validate_accounts(config)
 	# Redis serialises our external calls, DB locks coordinate accounting writes.
 	with frappe.cache.lock('qas-stripe:' + doc.name, timeout=90, blocking_timeout=5):
+		lock_order(doc)
 		frappe.db.sql('select name from `tabSales Invoice` where name=%s for update', doc.name)
 		doc.reload()
 		if not eligible(doc, config):
@@ -166,7 +209,7 @@ def start_checkout(token):
 			from qas_custom.modules.billing.store_credit import get_invoice_store_credit_applied
 			if get_invoice_store_credit_applied(doc.name) > 0:
 				frappe.throw('Use a test invoice without store credit.')
-		amount = cents(get_invoice_payable_amount(doc))
+		amount = cents(payable_amount(doc))
 		rows = frappe.get_all(PAYMENT, filters={'invoice': doc.name, 'mode': config.mode,
 			'status': ['!=', 'Expired']}, pluck='name', order_by='creation desc', limit_page_length=1)
 		attempt = frappe.get_doc(PAYMENT, rows[0]) if rows else None
@@ -200,11 +243,12 @@ def start_checkout(token):
 		from qas_custom.modules.billing.presentation import parent_portal_invoice_link
 		portal = parent_portal_invoice_link(doc.name).split('/invoices', 1)[0]
 		# Stable return URL allows retry after a timeout with the same idempotency key.
-		return_url = portal + '/trial-payment?attempt=' + attempt.name
+		route = '/order-payment' if linked_order(doc) else '/trial-payment'
+		return_url = portal + route + '?attempt=' + attempt.name
 		data = {'mode': 'payment', 'locale': 'en', 'payment_method_types[0]': 'card',
 			'line_items[0][price_data][currency]': 'aud',
 			'line_items[0][price_data][unit_amount]': attempt.amount_cents,
-			'line_items[0][price_data][product_data][name]': 'QAS trial invoice ' + doc.name,
+			'line_items[0][price_data][product_data][name]': ('QAS order invoice ' if linked_order(doc) else 'QAS trial invoice ') + doc.name,
 			'line_items[0][quantity]': 1, 'client_reference_id': attempt.name,
 			'metadata[qas_attempt]': attempt.name, 'metadata[qas_invoice]': doc.name,
 			'payment_intent_data[metadata][qas_attempt]': attempt.name,
@@ -220,7 +264,7 @@ def start_checkout(token):
 		frappe.db.commit()
 		# If balance changed during an uncertain creation, never send customer to stale Checkout.
 		doc.reload()
-		if not eligible(doc, config) or cents(get_invoice_payable_amount(doc)) != attempt.amount_cents:
+		if not eligible(doc, config) or cents(payable_amount(doc)) != attempt.amount_cents:
 			stripe_request(config, 'POST', 'checkout/sessions/' + attempt.checkout_session + '/expire')
 			attempt.status = 'Expired'
 			attempt.save(ignore_permissions=True)
@@ -313,13 +357,15 @@ def settle(session, config, event_id):
 	attempt.last_event = event_id
 	if not attempt.payment_intent:
 		frappe.throw('Missing payment reference.')
+	doc = frappe.get_doc('Sales Invoice', attempt.invoice)
+	lock_order(doc)
 	frappe.db.sql('select name from `tabSales Invoice` where name=%s for update', attempt.invoice)
 	doc = frappe.get_doc('Sales Invoice', attempt.invoice)
 	# Rollout gating remains enforced, but disabling checkout must not discard money already received.
-	if (not payment_parent(doc, config) or not is_trial(doc) or cint(doc.docstatus) != 1 or cint(doc.get('is_return'))
+	if (not payment_parent(doc, config) or not supported_invoice(doc) or cint(doc.docstatus) != 1 or cint(doc.get('is_return'))
 		or doc.company != config.company or doc.currency != 'AUD'
 		or (config.mode == 'Live' and cint(doc.get('qas_stripe_test')))
-		or cents(get_invoice_payable_amount(doc)) != attempt.amount_cents):
+		or cents(payable_amount(doc)) != attempt.amount_cents):
 		attempt.status = 'Needs Review'
 		attempt.last_error = 'Invoice owner, eligibility or balance changed after Checkout. Reconcile the Stripe payment manually.'
 	elif config.mode == 'Test' and not cint(attempt.get('full_test_flow')):
@@ -367,7 +413,7 @@ def create_payment_entry(doc, attempt, config):
 		entry.reference_no = attempt.payment_intent
 		entry.reference_date = now_datetime().date()
 		entry.qas_stripe_test = cint(config.mode == 'Test')
-		entry.remarks = ('TEST - no real funds - ' if config.mode == 'Test' else '') + 'Stripe trial invoice payment ' + attempt.payment_intent
+		entry.remarks = ('TEST - no real funds - ' if config.mode == 'Test' else '') + 'Stripe invoice payment ' + attempt.payment_intent
 		entry.paid_amount = entry.received_amount = attempt.amount_cents / 100
 		for reference in entry.references:
 			reference.allocated_amount = attempt.amount_cents / 100 if reference.reference_name == doc.name else 0

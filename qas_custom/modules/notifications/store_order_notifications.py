@@ -28,7 +28,7 @@ def ready_email_content(doc, recipient):
 <p>Hello {escape_html(recipient.get('parent_name') or 'Parent')},</p>
 <p>Your art materials are ready. Please quote order number <strong>{escape_html(doc.name)}</strong> at reception.</p>
 <p><strong>Pickup campus:</strong> {escape_html(doc.pickup_campus)}<br>{escape_html(address)}</p>
-<p>Collect during normal opening hours. Please pay for your materials at reception before collecting your order.</p>
+<p>Collect during normal opening hours. You can pay your issued Order Invoice online or by bank transfer, or arrange payment with reception.</p>
 <p><a href="{escape_html(url)}">View your order</a></p>"""
 
 
@@ -101,7 +101,7 @@ def new_order_email_content(doc, *, campus_admin=False):
 <strong>Pickup campus:</strong> {escape_html(doc.pickup_campus)}</p>
 <table cellpadding="8"><tr><th>Product</th><th>Quantity</th><th>Amount</th></tr>{rows}</table>
 <p><strong>Total: A${total:.2f}</strong></p>
-<p>Please prepare this order for collection. Payment is collected in person.</p>
+<p>Please prepare this order for collection. Payment options are shown on the issued Order Invoice.</p>
 <p><a href="{escape_html(url)}">View order</a></p>"""
 
 
@@ -164,7 +164,7 @@ def send_new_order_email_queue(queue_name):
 
 def queue_order_invoice_notification(doc, invoice=None):
     """Queue atomically; email preparation failure must not erase a saved financial change."""
-    from qas_custom.services.order_invoices import financials, totals
+    from qas_custom.services.order_invoices import financials, totals, payment_options
     from qas_custom.modules.notifications.makeup_parent_notifications import _parent_recipient, _parent_portal_url
     frappe.db.savepoint("order_invoice_mail")
     try:
@@ -176,6 +176,19 @@ def queue_order_invoice_notification(doc, invoice=None):
         if doc.status == "Cancelled":
             amounts["order_total"] = 0
         url = _parent_portal_url("/order-invoices?order=" + quote(doc.name, safe=""))
+        payment_html = ""
+        for option in payment_options(doc, state):
+            payment_html += f"<h3>Payment for {escape_html(option['invoice'])}: A${option['amount']:.2f}</h3>"
+            if option['online_payment_url']:
+                payment_html += f"<p><a href=\"{escape_html(option['online_payment_url'])}\">Pay online with Stripe</a></p>"
+            if option['bank_bsb'] and option['bank_account_number']:
+                payment_html += f"""<p><strong>Bank transfer</strong><br>
+Account name: {escape_html(option['bank_account_name'])}<br>
+BSB: {escape_html(option['bank_bsb'])}<br>
+Account number: {escape_html(option['bank_account_number'])}<br>
+Payment reference: {escape_html(option['bank_reference'])}</p>
+<p>{escape_html(option['bank_reference_note'])}</p>
+<p>Bank transfers are recorded after the school confirms receipt.</p>"""
         rows = "".join(f"<tr><td>{escape_html(r.product_name)}</td><td>{r.qty}</td><td>A${flt(r.amount):.2f}</td></tr>" for r in doc.get("items") or [])
         message = f"""<h2>Order Invoice: {escape_html(doc.name)}</h2>
 <p>Order status: {escape_html(doc.status)}. Invoice status: {escape_html(state['invoice_status'])}.</p>
@@ -183,6 +196,7 @@ def queue_order_invoice_notification(doc, invoice=None):
 <p>Subtotal: A${amounts['subtotal']:.2f}<br>Discount: A${amounts['discount_amount']:.2f}<br>
 Order total: A${amounts['order_total']:.2f}<br>Received: A${state['paid_amount']:.2f}<br>
 Remaining to pay: A${state['remaining_amount']:.2f}</p>
+{payment_html}
 <p>This is separate from tuition. Store Credit cannot be used.</p>
 <p>For a revised invoice, use the current version shown on your order; a cancelled version is no longer payable.</p>
 <p><a href="{escape_html(url)}">View Order Invoice and history</a></p>"""

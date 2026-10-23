@@ -91,11 +91,41 @@ def financials(doc):
     return {"invoice_status": status, "paid_amount": money(paid), "remaining_amount": max(0, money(amount - paid)), "invoices": rows}
 
 
+def payment_options(doc, state=None):
+    """Expose only issued, positive invoices; each link pays its current share of the debt."""
+    state = state or financials(doc)
+    if state['invoice_status'] != 'Issued' or doc.get('pending_revision') or state['remaining_amount'] <= 0:
+        return []
+    from qas_custom.services.stripe_trial_payments import payment_url
+    from qas_custom.modules.billing.invoice_settings import get_invoice_payment_context
+    result = []
+    remaining = state['remaining_amount']
+    for row in state['invoices']:
+        if cint(row.docstatus) != 1 or cint(row.is_return) or flt(row.outstanding_amount) <= 0:
+            continue
+        invoice = frappe.get_doc('Sales Invoice', row.name)
+        amount = min(flt(row.outstanding_amount), remaining)
+        bank = get_invoice_payment_context(invoice)
+        result.append({
+            'invoice': row.name, 'amount': money(amount), 'online_payment_url': payment_url(invoice),
+            'bank_account_name': bank.get('bank_account_name') or '',
+            'bank_bsb': bank.get('bank_bsb') or '',
+            'bank_account_number': bank.get('bank_account_number') or '',
+            'bank_reference_note': bank.get('bank_reference_note') or '',
+            'bank_reference': row.name,
+        })
+        remaining = money(remaining - amount)
+        if remaining <= 0:
+            break
+    return result
+
+
 def order_payload(doc, parent=False):
     from qas_custom.services.material_orders import _order_payload
     result = _order_payload(doc)
     result.update(totals(doc.get("items") or [], doc.get("discount_type") or "", doc.get("discount_value"), doc.get("discount_reason")))
     result.update(financials(doc))
+    result["payment_options"] = payment_options(doc, result)
     if doc.status == "Cancelled":
         result["order_total"] = 0
     result.update({key: doc.get(key) for key in ("discount_type", "discount_value", "discount_reason", "created_by", "invoice_notification_error", "invoice_email_queue")})
