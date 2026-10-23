@@ -28,6 +28,7 @@ class ResourcePrivacyTests(TestCase):
         self.service = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(self.service)
         self.service.require_user = Mock()
+        self.teacher_name_fn = self.service.teacher_name
         self.service.teacher_name = Mock(return_value='TEACHER')
         self.service.teacher_access = Mock(return_value=([{'note': 'Lesson 1'}], 900))
 
@@ -198,3 +199,35 @@ class ResourcePrivacyTests(TestCase):
         self.assertEqual(result['file_deletion']['deleted'], 0)
         self.assertEqual(result['file_deletion']['pending'], 1)
         self.assertEqual(self.metadata.status, 'Retired')
+
+    def test_options_only_return_active_teacher_candidates(self):
+        self.frappe.get_meta = Mock()
+        self.frappe.get_meta.return_value.has_field.return_value = True
+        self.service.options()
+        teacher_call = next(call for call in self.frappe.get_all.call_args_list if call.args[0] == 'Teacher')
+        self.assertEqual(teacher_call.kwargs['filters'], {'status': 'Active'})
+
+    def test_old_client_cannot_assign_inactive_teacher(self):
+        self.frappe.db.exists.return_value = False
+        with self.assertRaises(ValueError):
+            self.save(teachers=['INACTIVE'])
+        self.doc.save.assert_not_called()
+        self.frappe.db.exists.assert_called_once_with('Teacher', {'name': 'INACTIVE', 'status': 'Active'})
+
+    def test_active_teacher_can_receive_direct_grant(self):
+        self.frappe.db.exists.return_value = True
+        self.frappe.get_doc.return_value = SimpleNamespace(insert=Mock())
+        self.save(teachers=['ACTIVE'])
+        self.doc.save.assert_called_once()
+        self.frappe.get_doc.assert_called_once_with(dict(doctype=self.service.GRANT, resource='R1', teacher='ACTIVE'))
+
+    def test_inactive_teacher_cannot_use_existing_grants(self):
+        portal = ModuleType('qas_custom.services.teacher_portal')
+        portal._require_teacher = Mock(return_value=SimpleNamespace(name='TEACHER'))
+        self.frappe.PermissionError = ValueError
+        with patch.dict(sys.modules, {'qas_custom.services.teacher_portal': portal}):
+            self.frappe.db.get_value.return_value = 'Inactive'
+            with self.assertRaises(ValueError):
+                self.teacher_name_fn()
+            self.frappe.db.get_value.return_value = 'Active'
+            self.assertEqual(self.teacher_name_fn(), 'TEACHER')

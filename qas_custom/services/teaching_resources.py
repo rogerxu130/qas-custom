@@ -36,7 +36,10 @@ def require_user(admin=False):
 def teacher_name():
     from qas_custom.services.teacher_portal import _require_teacher
     require_user()
-    return _require_teacher().name
+    teacher = _require_teacher()
+    if frappe.db.get_value('Teacher', teacher.name, 'status') != 'Active':
+        frappe.throw('An active teacher record is required.', frappe.PermissionError)
+    return teacher.name
 
 
 def payload(value):
@@ -187,8 +190,8 @@ def save(data):
         unique.add(combination)
         row['note'] = text(row.get('note'), 2000)
     for teacher in teachers:
-        if not isinstance(teacher, str) or not frappe.db.exists('Teacher', teacher):
-            frappe.throw('Select a valid teacher.')
+        if not isinstance(teacher, str) or not frappe.db.exists('Teacher', {'name': teacher, 'status': 'Active'}):
+            frappe.throw('Only Active teachers can receive direct access. Refresh and select an active teacher.')
     if any(not isinstance(tag, str) for tag in tags):
         frappe.throw('Tags must be text.')
     try:
@@ -249,7 +252,7 @@ def options():
     for key, doctype, label in (('terms', 'Term', 'term_name'), ('campuses', 'Campus', 'campus_name'), ('courses', 'Course', 'course_name'), ('teachers', 'Teacher', 'teacher_name')):
         meta = frappe.get_meta(doctype)
         label = label if meta.has_field(label) else 'name'
-        result[key] = frappe.get_all(doctype, fields=list(dict.fromkeys(['name', label] + (['status'] if meta.has_field('status') else []))), limit_page_length=0)
+        result[key] = frappe.get_all(doctype, filters={'status': 'Active'} if doctype == 'Teacher' else {}, fields=list(dict.fromkeys(['name', label] + (['status'] if meta.has_field('status') else []))), limit_page_length=0)
     result['tags'] = frappe.get_all(TAG, pluck='tag', order_by='tag', limit_page_length=0)
     return result
 
