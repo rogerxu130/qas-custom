@@ -130,7 +130,7 @@ class TestTrialReferralRebilling(TestCase):
 
 	def test_converted_inquiry_uses_existing_historical_path(self):
 		self.doc.status = "Converted"
-		with self.assertRaisesRegex(ValueError, "Only a booked trial"):
+		with self.assertRaisesRegex(ValueError, "Only a booked or completed trial"):
 			service.add_invoiced_trial_referral("INQ-1", "P-REF")
 		self.cancel.assert_not_called()
 
@@ -139,6 +139,20 @@ class TestTrialReferralRebilling(TestCase):
 			summary = referral_summary(self.doc)
 		self.assertTrue(summary["can_add_to_invoiced_trial"])
 		self.assertFalse(summary["can_verify"])
+
+
+	def test_completed_trial_can_replace_invoice_without_reopening_inquiry(self):
+		self.doc.status = "Completed"
+		result = service.add_invoiced_trial_referral("INQ-1", "P-REF")
+		self.assertEqual(result["invoice"], "INV-2")
+		self.assertEqual(self.doc.status, "Completed")
+		self.link.assert_called_once_with("INQ-1", "INV-2")
+		self.submit.assert_called_once_with(invoice="INV-2", enqueue_notification=True, commit=False)
+
+	def test_late_referral_action_is_visible_for_completed_trial(self):
+		self.doc.status = "Completed"
+		with patch("qas_custom.modules.trial_referrals._existing_referral_reward", return_value=None), patch("qas_custom.modules.trial_referrals.trial_referral_discount_amount", return_value=30), patch("qas_custom.modules.trial_referrals.referral_conversion_reward_amount", return_value=30):
+			self.assertTrue(referral_summary(self.doc)["can_add_to_invoiced_trial"])
 
 
 class TestReferralRebillingDeferredCommit(TestCase):

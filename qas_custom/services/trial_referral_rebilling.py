@@ -33,8 +33,8 @@ def _replace_invoiced_trial(inquiry, referring_parent):
 
 	frappe.db.sql("select name from `tabInquiry` where name=%s for update", inquiry)
 	doc = _get_trial_inquiry(inquiry)
-	if doc.get("status") not in {"Booked", "Rescheduled"}:
-		frappe.throw(_("Only a booked trial can have its invoice replaced for a late referral."))
+	if doc.get("status") not in {"Booked", "Rescheduled", "Completed"}:
+		frappe.throw(_("Only a booked or completed trial can have its invoice replaced for a late referral."))
 	if referral_status(doc) == REFERRAL_VERIFIED or doc.get("referral_reward_ledger"):
 		frappe.throw(_("This Inquiry already has a verified referral. Refresh to see its current invoice."))
 	parent, customer = _validated_referrer(doc, referring_parent)

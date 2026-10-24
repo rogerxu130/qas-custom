@@ -270,7 +270,7 @@ def referral_summary(inquiry_doc) -> dict:
 		"reward_amount": flt((reward or {}).get("credit_amount") or 0),
 		"can_add_to_invoiced_trial": bool(
 			inquiry_doc.get("inquiry_type") == "Trial Lesson"
-			and inquiry_doc.get("status") in {"Booked", "Rescheduled"}
+			and inquiry_doc.get("status") in {"Booked", "Rescheduled", "Completed"}
 			and inquiry_doc.get("trial_invoice")
 			and status != REFERRAL_VERIFIED and not reward
 		),
