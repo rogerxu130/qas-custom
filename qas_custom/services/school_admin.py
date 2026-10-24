@@ -2082,7 +2082,7 @@ def delete_school_admin_draft_invoice_data(invoice=None, allow_campus_admin=Fals
 		raise
 
 
-def submit_school_admin_invoice_data(invoice=None, enqueue_notification=False, send_notifications=True, payload=None):
+def submit_school_admin_invoice_data(invoice=None, enqueue_notification=False, send_notifications=True, payload=None, *, commit=True):
 	_require_school_admin()
 	if not invoice:
 		frappe.throw(_("Invoice is required."))
@@ -2098,7 +2098,8 @@ def submit_school_admin_invoice_data(invoice=None, enqueue_notification=False, s
 			if payload is not None:
 				frappe.throw(_("Edit this Order Invoice using its order details before issuing."))
 			result = submit_order_invoice(invoice, send_notifications=send_notifications)
-			frappe.db.commit()
+			if commit:
+				frappe.db.commit()
 			return {**_build_invoice_payload(frappe.get_doc("Sales Invoice", invoice)), "notification": result}
 		doc = _lock_school_admin_draft_invoice(invoice)
 		validate_payg_bindings(doc, payg_operations)
@@ -2132,7 +2133,8 @@ def submit_school_admin_invoice_data(invoice=None, enqueue_notification=False, s
 		doc = frappe.get_doc("Sales Invoice", doc.name)
 		sync_invoice_store_credit_snapshot(doc)
 		applied_amount = flt(get_invoice_store_credit_applied(doc.name))
-		frappe.db.commit()
+		if commit:
+			frappe.db.commit()
 		doc = frappe.get_doc("Sales Invoice", doc.name)
 	except Exception:
 		frappe.db.rollback(save_point=savepoint)
@@ -2152,7 +2154,8 @@ def submit_school_admin_invoice_data(invoice=None, enqueue_notification=False, s
 			if enqueue_notification
 			else _maybe_send_paid_receipt(doc, source="invoice_submit")
 		)
-	frappe.db.commit()
+	if commit:
+		frappe.db.commit()
 	payload = _build_invoice_payload(frappe.get_doc("Sales Invoice", doc.name))
 	payload["store_credit_application"] = application
 	payload["notification"] = notification

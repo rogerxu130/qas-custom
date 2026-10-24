@@ -1739,3 +1739,13 @@ def school_admin_get_voucher_transfer_options(parent=None):
 def school_admin_transfer_vouchers(parent=None, voucher_ids=None, source_course=None, target_course=None, reason=None):
     from qas_custom.services.voucher_transfer import transfer_vouchers
     return transfer_vouchers(parent, voucher_ids, source_course, target_course, reason)
+
+
+@frappe.whitelist(methods=["POST"])
+def school_admin_add_invoiced_trial_referral(inquiry=None, referring_parent=None):
+	from qas_custom.services.school_admin import _require_school_admin, get_school_admin_inquiry_data
+	from qas_custom.services.trial_referral_rebilling import add_invoiced_trial_referral
+
+	_require_school_admin()
+	result = add_invoiced_trial_referral(inquiry, referring_parent)
+	return {"detail": get_school_admin_inquiry_data(inquiry), "trial_invoice": result}

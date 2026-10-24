@@ -268,6 +268,12 @@ def referral_summary(inquiry_doc) -> dict:
 		"conversion_reward": referral_conversion_reward_amount(),
 		"reward_ledger": (reward or {}).get("name") or inquiry_doc.get("referral_reward_ledger") or "",
 		"reward_amount": flt((reward or {}).get("credit_amount") or 0),
+		"can_add_to_invoiced_trial": bool(
+			inquiry_doc.get("inquiry_type") == "Trial Lesson"
+			and inquiry_doc.get("status") in {"Booked", "Rescheduled"}
+			and inquiry_doc.get("trial_invoice")
+			and status != REFERRAL_VERIFIED and not reward
+		),
 		"can_verify": bool(is_referral_claim(inquiry_doc) and status == REFERRAL_PENDING and inquiry_doc.get("status") != "Converted"),
 		"can_release_standard_invoice": bool(is_referral_claim(inquiry_doc) and status == REFERRAL_PENDING and inquiry_doc.get("status") != "Converted"),
 		"can_recognise_historical": bool(inquiry_doc.get("inquiry_type") == "Trial Lesson" and inquiry_doc.get("status") == "Converted" and not reward),
