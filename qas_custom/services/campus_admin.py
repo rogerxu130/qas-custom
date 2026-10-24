@@ -1204,11 +1204,18 @@ def _get_campus_admin_enrollment_search_students(query):
 	if len(query) < 2 or any(char in query for char in "%_*?\\"):
 		return []
 	pattern = f"%{query}%"
+	parents = frappe.get_all(
+		"Parent",
+		filters={"parent_name": ["like", pattern]},
+		pluck="name",
+		limit_page_length=0,
+	)
+	or_filters = [["Student", "student_name", "like", pattern]]
+	if parents:
+		or_filters.append(["Student", "guardian", "in", parents])
 	rows = frappe.get_all(
 		"Student",
-		or_filters=[
-			["Student", "student_name", "like", pattern],
-		],
+		or_filters=or_filters,
 		fields=["name", "student_name"],
 		limit_page_length=200,
 	)

@@ -21,10 +21,43 @@ class CampusStudentOrdersTests(TestCase):
                 self.assertEqual(campus_admin._get_campus_admin_enrollment_search_students(query), [])
             get.assert_not_called()
 
-    def test_search_uses_student_name_only(self):
+    def test_search_without_matching_parents_still_uses_student_name(self):
         with patch.object(frappe, "get_all", return_value=[]) as get:
             campus_admin._get_campus_admin_enrollment_search_students("Amy")
         self.assertEqual(get.call_args.kwargs["or_filters"], [["Student", "student_name", "like", "%Amy%"]])
+
+    def test_search_matches_parent_names_and_students_in_one_query(self):
+        students = [{"name": "CHILD-1", "student_name": "Amy"}, {"name": "CHILD-2", "student_name": "Ben"}, {"name": "CHILD-3", "student_name": "Chen"}]
+        with patch.object(frappe, "get_all", side_effect=[["PARENT-1", "PARENT-2"], students]) as get:
+            result = campus_admin._get_campus_admin_enrollment_search_students("  Chen  ")
+        self.assertEqual(get.call_args_list[0].args, ("Parent",))
+        self.assertEqual(get.call_args_list[0].kwargs, {"filters": {"parent_name": ["like", "%Chen%"]}, "pluck": "name", "limit_page_length": 0})
+        self.assertEqual(get.call_args.kwargs["or_filters"], [["Student", "student_name", "like", "%Chen%"], ["Student", "guardian", "in", ["PARENT-1", "PARENT-2"]]])
+        self.assertEqual({row["name"] for row in result}, {"CHILD-1", "CHILD-2", "CHILD-3"})
+        self.assertEqual(len(result), 3)
+        self.assertEqual(result[0]["name"], "CHILD-3")
+        self.assertEqual(get.call_count, 2)
+
+    def test_parent_name_search_preserves_term_and_campus_filters(self):
+        def rows(doctype, **kwargs):
+            if doctype == "Parent":
+                return ["PARENT"]
+            if doctype == "Student":
+                self.assertIn(["Student", "guardian", "in", ["PARENT"]], kwargs["or_filters"])
+                return [{"name": "CHILD", "student_name": "Amy"}]
+            if doctype == "Weekly Timeslot":
+                self.assertEqual(kwargs["filters"], {"term": ["in", ["Term 4", "Makeup"]], "campus": ["in", ["North"]]})
+                return [{"name": "TS", "campus": "North"}]
+            if doctype == "Enrollment":
+                self.assertEqual(kwargs["filters"], {"term": ["in", ["Term 4", "Makeup"]], "student": ["in", ["CHILD"]], "weekly_timeslot": ["in", ["TS"]]})
+                return [{"name": "ENR", "student": "CHILD", "weekly_timeslot": "TS", "term": "Makeup"}]
+            self.fail(doctype)
+        with patch.object(campus_admin, "_require_campus_admin_profile", return_value={"campuses": ["North"]}), patch.object(campus_admin, "_get_campus_admin_current_active_term", return_value={"state": "ready", "term": "Term 4, Makeup", "terms": ["Term 4", "Makeup"]}), patch.object(frappe, "get_all", side_effect=rows):
+            result = campus_admin.get_campus_admin_current_term_enrollments_data(query="Jane")
+        self.assertEqual(len(result["items"]), 1)
+        self.assertEqual(result["items"][0]["student_name"], "Amy")
+        self.assertEqual(result["items"][0]["campus"], "North")
+        self.assertEqual(result["items"][0]["term"], "Makeup")
 
     def test_no_enrollment_denies_contact_access_before_loading_parent(self):
         with patch.object(api, "get_campus_admin_current_term_enrollments_data", return_value={"items": []}) as search, patch.object(frappe, "db", SimpleNamespace(get_value=Mock())) as db:

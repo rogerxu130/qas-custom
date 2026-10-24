@@ -15,6 +15,8 @@ class TestCampusAdminCurrentTermEnrollmentSearch(TestCase):
 		def get_all_side_effect(doctype, **kwargs):
 			if doctype == "Term":
 				return [{"name": "Term 3 2026"}]
+			if doctype == "Parent":
+				return []
 			if doctype == "Student":
 				return [
 					{"name": "STU-AMY", "student_name": "Amy Chen"},
@@ -101,6 +103,8 @@ class TestCampusAdminCurrentTermEnrollmentSearch(TestCase):
 				self.assertEqual(kwargs["filters"], {"status": "Active"})
 				self.assertEqual(kwargs["limit_page_length"], 0)
 				return [{"name": name} for name in terms]
+			if doctype == "Parent":
+				return []
 			if doctype == "Student":
 				return [{"name": "STUDENT", "student_name": "Isabella"}]
 			if doctype == "Weekly Timeslot":
