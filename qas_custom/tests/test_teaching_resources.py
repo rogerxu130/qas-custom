@@ -21,14 +21,14 @@ class Database:
             'Teaching Resource': 'name TEXT,title TEXT,summary TEXT,status TEXT,modified TEXT',
             'Teaching Resource Teacher Grant': 'name TEXT,resource TEXT,teacher TEXT',
             'Teaching Resource Assignment': 'name TEXT,resource TEXT,term TEXT,campus TEXT,course TEXT,note TEXT',
-            'Term': 'name TEXT,status TEXT,end_date TEXT', 'Campus': 'name TEXT,status TEXT', 'Course': 'name TEXT,status TEXT',
+            'Term': 'name TEXT,status TEXT,end_date TEXT,term_name TEXT', 'Campus': 'name TEXT,status TEXT,campus_name TEXT', 'Course': 'name TEXT,status TEXT,course_name TEXT',
             'Weekly Timeslot': 'name TEXT,term TEXT,campus TEXT,course TEXT,teacher TEXT',
             'Course Sessions': 'name TEXT,weekly_timeslot TEXT,teacher_override TEXT,status TEXT',
         }.items():
             self.db.execute(f'CREATE TABLE `tab{table}` ({columns})')
         for table, rows in {
             'Teaching Resource': [('R1','Apple','Lesson','Published','2026'), ('R2','Other campus','','Published','2026'), ('DRAFT','Hidden','','Draft','2026')],
-            'Term': [('T1','Active','2099-01-01')], 'Campus': [('A','Active'),('B','Active')], 'Course': [('C','Active')],
+            'Term': [('T1','Active','2099-01-01','Term 1')], 'Campus': [('A','Active','Campus A'),('B','Active','Campus B')], 'Course': [('C','Active','Sketching')],
             'Teaching Resource Assignment': [('A1','R1','T1','A','C','Lesson 1'),('A2','R2','T1','B','C','Private note')],
             'Weekly Timeslot': [('W1','T1','A','C','MAIN'),('W2','T1','B','C','OTHER')],
             'Course Sessions': [('S1','W1','SUB','Completed')],
@@ -106,6 +106,47 @@ class ResourceAuthorization(TestCase):
             self.assertEqual([r.name for r in result['items']], ['R1'])
             self.assertEqual(service.catalog({'campus':'B'})['items'], [])
             self.assertEqual(service.catalog({'query':"' OR 1=1 --"})['items'], [])
+
+    def test_catalog_includes_only_matching_notes_on_shared_resource(self):
+        self.db.db.execute("INSERT INTO `tabTeaching Resource Assignment` VALUES ('A3','R1','T1','B','C','Other campus private note')")
+        with patch.object(service, 'require_user'), patch.object(service, 'teacher_name', return_value='MAIN'):
+            self.db.sql = Mock(wraps=self.db.sql)
+            result = service.catalog()
+            row = result['items'][0]
+            self.assertEqual([a.name for a in row.assignments], ['A1'])
+            self.assertEqual(row.assignments[0].term_label, 'Term 1')
+            self.assertEqual(row.assignments[0].campus_label, 'Campus A')
+            self.assertEqual(row.assignments[0].course_label, 'Sketching')
+            self.assertNotIn('Other campus private note', str(row))
+            self.assertEqual(self.db.sql.call_count, 2)
+
+    def test_direct_only_catalog_does_not_expose_unrelated_assignment_notes(self):
+        self.db.db.execute("INSERT INTO `tabTeaching Resource Teacher Grant` VALUES ('G1','R2','MAIN')")
+        with patch.object(service, 'require_user'), patch.object(service, 'teacher_name', return_value='MAIN'):
+            rows = service.catalog()['items']
+            direct = next(row for row in rows if row.name == 'R2')
+            self.assertEqual(direct.assignments, [])
+            self.assertNotIn('Private note', str(direct))
+
+    def test_catalog_batches_assignment_context_after_pagination(self):
+        for i in range(35):
+            self.db.db.execute("INSERT INTO `tabTeaching Resource` VALUES (?,?,'','Published','2027')", ('P'+str(i), 'Page '+str(i)))
+            self.db.db.execute("INSERT INTO `tabTeaching Resource Teacher Grant` VALUES (?,?,'MAIN')", ('G'+str(i), 'P'+str(i)))
+        with patch.object(service, 'require_user'), patch.object(service, 'teacher_name', return_value='MAIN'):
+            self.db.sql = Mock(wraps=self.db.sql)
+            result = service.catalog()
+            self.assertEqual(len(result['items']), 30)
+            self.assertTrue(result['has_more'])
+            self.assertEqual(self.db.sql.call_count, 2)
+            context_params = self.db.sql.call_args.args[1]
+            self.assertEqual(len([key for key in context_params if key.startswith('resource')]), 30)
+
+    def test_catalog_notes_for_completed_substitute_and_expired_direct_grants(self):
+        with patch.object(service, 'require_user'), patch.object(service, 'teacher_name', return_value='SUB'):
+            self.assertEqual(service.catalog()['items'][0].assignments[0].note, 'Lesson 1')
+            self.db.db.execute("INSERT INTO `tabTeaching Resource Teacher Grant` VALUES ('G1','R1','SUB')")
+            self.db.change('Term', 'end_date', '2000-01-01')
+            self.assertEqual(service.catalog()['items'][0].assignments, [])
 
 
 class Publishing(TestCase):

@@ -95,15 +95,26 @@ def resource_access_sql(teacher, params):
       OR EXISTS (SELECT 1 FROM `tabTeaching Resource Assignment` a WHERE a.resource=r.name AND {scope}))'''
 
 
-def teacher_access(name, teacher):
-    params = {'resource': name}
+def teacher_assignments(resources, teacher):
+    if not resources:
+        return []
+    params = {f'resource{i}': name for i, name in enumerate(resources)}
+    placeholders = ','.join(f'%(resource{i})s' for i in range(len(resources)))
     scope = scope_sql(teacher, params)
+    return frappe.db.sql(f'''SELECT a.resource,a.name,a.term,a.campus,a.course,a.note,t.end_date,
+        COALESCE(NULLIF(t.term_name,''),a.term) AS term_label,
+        COALESCE(NULLIF(c.campus_name,''),a.campus) AS campus_label,
+        COALESCE(NULLIF(k.course_name,''),a.course) AS course_label
+        FROM `tabTeaching Resource Assignment` a JOIN `tabTerm` t ON t.name=a.term
+        JOIN `tabCampus` c ON c.name=a.campus JOIN `tabCourse` k ON k.name=a.course
+        WHERE a.resource IN ({placeholders}) AND {scope} ORDER BY a.term,a.campus,a.course''', params, as_dict=True)
+
+
+def teacher_access(name, teacher):
     if frappe.db.get_value(RESOURCE, name, 'status') != 'Published':
         frappe.throw('This resource is unavailable.', frappe.PermissionError)
     direct = bool(frappe.db.exists(GRANT, {'resource': name, 'teacher': teacher}))
-    assignments = frappe.db.sql(f'''SELECT a.name,a.term,a.campus,a.course,a.note,t.end_date
-        FROM `tabTeaching Resource Assignment` a JOIN `tabTerm` t ON t.name=a.term
-        WHERE a.resource=%(resource)s AND {scope} ORDER BY a.term,a.campus,a.course''', params, as_dict=True)
+    assignments = teacher_assignments([name], teacher)
     lifetime = link_lifetime([r.end_date for r in assignments], direct=direct)
     if not lifetime:
         frappe.throw('You no longer have access to this resource.', frappe.PermissionError)
@@ -116,7 +127,8 @@ def catalog(filters=None, offset=0, admin=False):
     params = {'offset': max(0, cint(offset))}
     conditions = ["r.status <> 'Deleted'"]
     if not admin:
-        conditions.append(resource_access_sql(teacher_name(), params))
+        teacher = teacher_name()
+        conditions.append(resource_access_sql(teacher, params))
     elif filters.get('status'):
         conditions.append('r.status=%(status)s')
         params['status'] = filters['status']
@@ -132,10 +144,17 @@ def catalog(filters=None, offset=0, admin=False):
             selected.append(f'a.{key}=%({key})s')
             params[key] = filters[key]
     if selected:
-        scope = '' if admin else ' AND ' + scope_sql(params['teacher'], params)
+        scope = '' if admin else ' AND ' + scope_sql(teacher, params)
         conditions.append('EXISTS (SELECT 1 FROM `tabTeaching Resource Assignment` a WHERE a.resource=r.name AND ' + ' AND '.join(selected) + scope + ')')
     rows = frappe.db.sql('SELECT r.name,r.title,r.summary,r.status,r.modified FROM `tabTeaching Resource` r WHERE ' + ' AND '.join(conditions) + ' ORDER BY r.modified DESC,r.name LIMIT 31 OFFSET %(offset)s', params, as_dict=True)
-    return {'items': rows[:30], 'has_more': len(rows) > 30}
+    items = rows[:30]
+    if not admin:
+        by_resource = {row.name: [] for row in items}
+        for assignment in teacher_assignments(list(by_resource), teacher):
+            by_resource[assignment.resource].append(assignment)
+        for row in items:
+            row['assignments'] = by_resource[row.name]
+    return {'items': items, 'has_more': len(rows) > 30}
 
 
 def detail(name, admin=False):
