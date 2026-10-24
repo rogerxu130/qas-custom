@@ -5,6 +5,7 @@ import frappe
 from frappe import _
 from frappe.utils import cint, flt
 
+from qas_custom.modules.billing.commands import get_invoice_customer
 from qas_custom.modules.billing.store_credit import get_invoice_store_credit_applied
 from qas_custom.modules.trial_referrals import (
 	REFERRAL_VERIFIED, _get_trial_inquiry, _set_referrer, _validated_referrer,
@@ -70,6 +71,7 @@ def _replace_invoiced_trial(inquiry, referring_parent):
 	new.source_type = "Replacement Trial Inquiry"
 	new.parent = doc.parent
 	new.student = doc.student
+	new.primary_student = doc.student
 	new.qas_invoice_message = referral_invoice_message(doc)
 	new.qas_apply_store_credit_on_submit = old.get("qas_apply_store_credit_on_submit", 1)
 	adjustments = [
@@ -96,11 +98,16 @@ def _validate_invoice(inquiry, invoice):
 
 	if cint(invoice.docstatus) != 1:
 		frappe.throw(_("The linked Trial Invoice must be submitted and active."))
+	# Invoice item students are authoritative; some sites have no header Parent/Student fields.
+	students = {row.get("student") for row in (invoice.get("items") or []) if row.get("student")}
+	students.update(value for value in (invoice.get("primary_student"), invoice.get("student")) if value)
 	if (invoice.get("source_doctype") != "Inquiry" or invoice.get("source_document") != inquiry.name
-		or invoice.get("parent") != inquiry.get("parent")
-		or invoice.get("student") != inquiry.get("student")):
+		or invoice.get("customer") != get_invoice_customer(inquiry.get("parent"))
+		or (invoice.get("parent") and invoice.get("parent") != inquiry.get("parent"))
+		or students != {inquiry.get("student")}):
 		frappe.throw(_("The linked invoice does not belong to this Trial Inquiry and family."))
-	if invoice.get("is_return") or invoice.get("source_type") not in {"Trial Inquiry", "Replacement Trial Inquiry"}:
+	source_type = invoice.get("source_type")
+	if invoice.get("is_return") or (source_type and source_type not in {"Trial Inquiry", "Replacement Trial Inquiry"}):
 		frappe.throw(_("Only a standard Trial Invoice can be replaced for a referral."))
 	if (_invoice_payment_amount(invoice.name) > 0 or flt(invoice.get("paid_amount")) > 0
 		or get_invoice_store_credit_applied(invoice.name) > 0

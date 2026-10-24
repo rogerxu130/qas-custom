@@ -18,9 +18,11 @@ class TestTrialReferralRebilling(TestCase):
 		self.addCleanup(self.stack.close)
 		self.doc = frappe._dict(name="INQ-1", inquiry_type="Trial Lesson", status="Booked", parent="P-1", student="ST-1", trial_invoice="INV-1")
 		self.doc.save = Mock()
-		self.old = frappe._dict(name="INV-1", docstatus=1, grand_total=68, outstanding_amount=68,
-			parent="P-1", student="ST-1", source_doctype="Inquiry", source_document="INQ-1", source_type="Trial Inquiry")
-		self.new = frappe._dict(name="INV-2", grand_total=38)
+		# Match production invoices: Customer + Primary Student + item students, no optional headers.
+		self.old = frappe._dict(name="INV-1", docstatus=1, grand_total=55, outstanding_amount=55,
+			customer="C-1", primary_student="ST-1", items=[frappe._dict(student="ST-1")],
+			source_doctype="Inquiry", source_document="INQ-1")
+		self.new = frappe._dict(name="INV-2", grand_total=25)
 		self.new.insert = Mock()
 		self.db = SimpleNamespace(sql=Mock(), commit=Mock(), rollback=Mock(), exists=Mock(return_value=False))
 		self.fake = SimpleNamespace(db=self.db, get_doc=Mock(return_value=self.old), copy_doc=Mock(return_value=self.new),
@@ -34,6 +36,7 @@ class TestTrialReferralRebilling(TestCase):
 		self.stack.enter_context(patch.object(service, "trial_referral_discount_amount", return_value=30))
 		self.stack.enter_context(patch.object(service, "referral_invoice_message", return_value="Referral discount $30"))
 		self.stack.enter_context(patch.object(service, "get_invoice_store_credit_applied", return_value=0))
+		self.stack.enter_context(patch.object(service, "get_invoice_customer", return_value="C-1"))
 		self.set_referrer = self.stack.enter_context(patch.object(service, "_set_referrer", side_effect=lambda doc, **kw: doc.update(referral_status="Verified")))
 		self.link = self.stack.enter_context(patch.object(service, "_link_invoice"))
 		base = "qas_custom.services.school_admin."
@@ -54,6 +57,7 @@ class TestTrialReferralRebilling(TestCase):
 		self.assertEqual(self.new.source_document, "INQ-1")
 		self.assertEqual(self.new.amended_from, "INV-1")
 		self.assertEqual(self.new.parent, "P-1")
+		self.assertEqual(self.new.primary_student, "ST-1")
 		self.cancel.assert_called_once()
 		self.assertFalse(self.cancel.call_args.kwargs["commit"])
 		self.assertFalse(self.cancel.call_args.kwargs["send_notifications"])
@@ -153,6 +157,38 @@ class TestTrialReferralRebilling(TestCase):
 		self.doc.status = "Completed"
 		with patch("qas_custom.modules.trial_referrals._existing_referral_reward", return_value=None), patch("qas_custom.modules.trial_referrals.trial_referral_discount_amount", return_value=30), patch("qas_custom.modules.trial_referrals.referral_conversion_reward_amount", return_value=30):
 			self.assertTrue(referral_summary(self.doc)["can_add_to_invoiced_trial"])
+
+
+	def test_invoice_without_optional_parent_student_and_source_type_headers_is_valid(self):
+		for field in ("parent", "student", "source_type"):
+			self.assertNotIn(field, self.old)
+		service.add_invoiced_trial_referral("INQ-1", "P-REF")
+		self.assertEqual(self.new.primary_student, "ST-1")
+		self.submit.assert_called_once()
+
+	def test_other_customer_is_rejected_even_when_student_and_source_match(self):
+		self.old.customer = "C-OTHER"
+		with self.assertRaisesRegex(ValueError, "does not belong"):
+			service.add_invoiced_trial_referral("INQ-1", "P-REF")
+		self.cancel.assert_not_called()
+
+	def test_other_item_student_is_rejected(self):
+		self.old["items"] = [frappe._dict(student="ST-OTHER")]
+		with self.assertRaisesRegex(ValueError, "does not belong"):
+			service.add_invoiced_trial_referral("INQ-1", "P-REF")
+		self.cancel.assert_not_called()
+
+	def test_multiple_students_are_rejected(self):
+		self.old["items"].append(frappe._dict(student="ST-OTHER"))
+		with self.assertRaisesRegex(ValueError, "does not belong"):
+			service.add_invoiced_trial_referral("INQ-1", "P-REF")
+		self.cancel.assert_not_called()
+
+	def test_conflicting_primary_student_is_rejected(self):
+		self.old.primary_student = "ST-OTHER"
+		with self.assertRaisesRegex(ValueError, "does not belong"):
+			service.add_invoiced_trial_referral("INQ-1", "P-REF")
+		self.cancel.assert_not_called()
 
 
 class TestReferralRebillingDeferredCommit(TestCase):
