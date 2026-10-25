@@ -133,7 +133,8 @@ def catalog(filters=None, offset=0, admin=False):
         conditions.append('r.status=%(status)s')
         params['status'] = filters['status']
     if filters.get('query'):
-        conditions.append('(r.title LIKE %(query)s OR r.summary LIKE %(query)s)')
+        search_fields = ['r.title', 'r.summary'] + (['r.admin_note'] if admin else [])
+        conditions.append('(' + ' OR '.join(f'{field} LIKE %(query)s' for field in search_fields) + ')')
         params['query'] = '%' + text(filters['query'], 200) + '%'
     if admin and filters.get('tag'):
         conditions.append('EXISTS (SELECT 1 FROM `tabTeaching Resource Tag Link` l JOIN `tabTeaching Resource Tag` t ON t.name=l.tag WHERE l.resource=r.name AND t.tag=%(tag)s)')
@@ -155,7 +156,8 @@ def catalog(filters=None, offset=0, admin=False):
     if selected:
         scope = '' if admin else ' AND ' + scope_sql(teacher, params)
         conditions.append('EXISTS (SELECT 1 FROM `tabTeaching Resource Assignment` a WHERE a.resource=r.name AND ' + ' AND '.join(selected) + scope + ')')
-    rows = frappe.db.sql('SELECT r.name,r.title,r.summary,r.status,r.modified FROM `tabTeaching Resource` r WHERE ' + ' AND '.join(conditions) + ' ORDER BY r.modified DESC,r.name LIMIT 31 OFFSET %(offset)s', params, as_dict=True)
+    fields = 'r.name,r.title,r.summary,r.status,r.modified' + (',r.admin_note' if admin else '')
+    rows = frappe.db.sql('SELECT ' + fields + ' FROM `tabTeaching Resource` r WHERE ' + ' AND '.join(conditions) + ' ORDER BY r.modified DESC,r.name LIMIT 31 OFFSET %(offset)s', params, as_dict=True)
     items = rows[:30]
     if admin and filters.get('assignment_term'):
         add_assignment_summaries(items, filters['assignment_term'])

@@ -18,7 +18,7 @@ class Database:
     def __init__(self):
         self.db = sqlite3.connect(':memory:')
         for table, columns in {
-            'Teaching Resource': 'name TEXT,title TEXT,summary TEXT,status TEXT,modified TEXT',
+            'Teaching Resource': 'name TEXT,title TEXT,summary TEXT,status TEXT,modified TEXT,admin_note TEXT',
             'Teaching Resource Teacher Grant': 'name TEXT,resource TEXT,teacher TEXT',
             'Teaching Resource Assignment': 'name TEXT,resource TEXT,term TEXT,campus TEXT,course TEXT,note TEXT',
             'Term': 'name TEXT,status TEXT,end_date TEXT,term_name TEXT', 'Campus': 'name TEXT,status TEXT,campus_name TEXT', 'Course': 'name TEXT,status TEXT,course_name TEXT',
@@ -27,7 +27,7 @@ class Database:
         }.items():
             self.db.execute(f'CREATE TABLE `tab{table}` ({columns})')
         for table, rows in {
-            'Teaching Resource': [('R1','Apple','Lesson','Published','2026'), ('R2','Other campus','','Published','2026'), ('DRAFT','Hidden','','Draft','2026')],
+            'Teaching Resource': [('R1','Apple','Lesson','Published','2026','内部备课苹果'), ('R2','Other campus','','Published','2026','其他校区备注'), ('DRAFT','Hidden','','Draft','2026','草稿备注')],
             'Term': [('T1','Active','2099-01-01','Term 1')], 'Campus': [('A','Active','Campus A'),('B','Active','Campus B')], 'Course': [('C','Active','Sketching')],
             'Teaching Resource Assignment': [('A1','R1','T1','A','C','Lesson 1'),('A2','R2','T1','B','C','Private note')],
             'Weekly Timeslot': [('W1','T1','A','C','MAIN'),('W2','T1','B','C','OTHER')],
@@ -111,6 +111,17 @@ class ResourceAuthorization(TestCase):
             self.assertEqual(service.catalog({'query': "' OR 1=1 --"})['items'], [])
             self.assertEqual({r.name for r in service.catalog({'query': '苹果'}, admin=True)['items']}, {'R1', 'R2', 'DRAFT'})
 
+    def test_admin_note_is_returned_and_searchable_only_for_admins(self):
+        with patch.object(service, 'require_user'), patch.object(service, 'teacher_name', return_value='MAIN'):
+            admin_items = service.catalog({'query': '内部备课苹果'}, admin=True)['items']
+            self.assertEqual([r.name for r in admin_items], ['R1'])
+            self.assertEqual(admin_items[0].admin_note, '内部备课苹果')
+            self.assertEqual(service.catalog({'query': '内部备课苹果'})['items'], [])
+            teacher_items = service.catalog({'query': 'Apple'})['items']
+            self.assertEqual([r.name for r in teacher_items], ['R1'])
+            self.assertNotIn('admin_note', teacher_items[0])
+            self.assertEqual(service.catalog({'query': '内部备课苹果', 'campus': 'B'}, admin=True)['items'], [])
+
     def test_teacher_catalog_filters_before_pagination(self):
         with patch.object(service,'require_user'), patch.object(service,'teacher_name',return_value='MAIN'):
             result = service.catalog()
@@ -141,7 +152,7 @@ class ResourceAuthorization(TestCase):
 
     def test_catalog_batches_assignment_context_after_pagination(self):
         for i in range(35):
-            self.db.db.execute("INSERT INTO `tabTeaching Resource` VALUES (?,?,'','Published','2027')", ('P'+str(i), 'Page '+str(i)))
+            self.db.db.execute("INSERT INTO `tabTeaching Resource` VALUES (?,?,'','Published','2027','')", ('P'+str(i), 'Page '+str(i)))
             self.db.db.execute("INSERT INTO `tabTeaching Resource Teacher Grant` VALUES (?,?,'MAIN')", ('G'+str(i), 'P'+str(i)))
         with patch.object(service, 'require_user'), patch.object(service, 'teacher_name', return_value='MAIN'):
             self.db.sql = Mock(wraps=self.db.sql)
