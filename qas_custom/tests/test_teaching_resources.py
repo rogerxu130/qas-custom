@@ -100,6 +100,17 @@ class ResourceAuthorization(TestCase):
         self.db.db.execute("INSERT INTO `tabTeaching Resource Teacher Grant` VALUES ('G1','DRAFT','MAIN')")
         with self.assertRaises(Denied): service.teacher_access('DRAFT','MAIN')
 
+    def test_catalog_searches_title_and_description_without_widening_access(self):
+        self.db.db.execute("UPDATE `tabTeaching Resource` SET summary='苹果静物写生' WHERE name='R1'")
+        self.db.db.execute("UPDATE `tabTeaching Resource` SET summary='苹果高级私有课' WHERE name='R2'")
+        self.db.db.execute("UPDATE `tabTeaching Resource` SET summary='苹果未发布' WHERE name='DRAFT'")
+        with patch.object(service, 'require_user'), patch.object(service, 'teacher_name', return_value='MAIN'):
+            self.assertEqual([r.name for r in service.catalog({'query': 'Apple'})['items']], ['R1'])
+            self.assertEqual([r.name for r in service.catalog({'query': '苹果'})['items']], ['R1'])
+            self.assertEqual(service.catalog({'query': '高级私有课'})['items'], [])
+            self.assertEqual(service.catalog({'query': "' OR 1=1 --"})['items'], [])
+            self.assertEqual({r.name for r in service.catalog({'query': '苹果'}, admin=True)['items']}, {'R1', 'R2', 'DRAFT'})
+
     def test_teacher_catalog_filters_before_pagination(self):
         with patch.object(service,'require_user'), patch.object(service,'teacher_name',return_value='MAIN'):
             result = service.catalog()

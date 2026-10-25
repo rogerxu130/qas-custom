@@ -133,7 +133,7 @@ def catalog(filters=None, offset=0, admin=False):
         conditions.append('r.status=%(status)s')
         params['status'] = filters['status']
     if filters.get('query'):
-        conditions.append('r.title LIKE %(query)s')
+        conditions.append('(r.title LIKE %(query)s OR r.summary LIKE %(query)s)')
         params['query'] = '%' + text(filters['query'], 200) + '%'
     if admin and filters.get('tag'):
         conditions.append('EXISTS (SELECT 1 FROM `tabTeaching Resource Tag Link` l JOIN `tabTeaching Resource Tag` t ON t.name=l.tag WHERE l.resource=r.name AND t.tag=%(tag)s)')
