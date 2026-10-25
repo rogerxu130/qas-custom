@@ -149,6 +149,95 @@ class ResourceAuthorization(TestCase):
             self.assertEqual(service.catalog()['items'][0].assignments, [])
 
 
+class AdminTermCatalog(TestCase):
+    setUp = ResourceAuthorization.setUp
+
+    def test_new_term_keeps_unassigned_resources_visible_with_history(self):
+        def get_all(doctype, filters, **kwargs):
+            return [a for a in self.db.sql('SELECT resource,term,campus,course FROM `tabTeaching Resource Assignment`', as_dict=True) if a.resource in filters['resource'][1]]
+        with patch.object(service, 'require_user'), patch.object(service.frappe, 'get_all', get_all, create=True):
+            result = service.catalog({'assignment_term': 'NEW'}, admin=True)
+            self.assertEqual(len(result['items']), 3)
+            apple = next(r for r in result['items'] if r.name == 'R1')
+            self.assertEqual(apple.term_assignment_count, 0)
+            self.assertEqual(apple.other_term_assignments[0].term, 'T1')
+            self.assertEqual(service.catalog({'assignment_term': 'NEW', 'assignment_status': 'assigned'}, admin=True)['items'], [])
+            current = service.catalog({'assignment_term': 'T1', 'assignment_status': 'assigned', 'campus': 'A'}, admin=True)
+            self.assertEqual([r.name for r in current['items']], ['R1'])
+            self.assertEqual(service.catalog({'assignment_term': 'NEW', 'campus': 'A'}, admin=True)['items'], [])
+
+    def test_teacher_requests_never_include_admin_history(self):
+        with patch.object(service, 'require_user'), patch.object(service, 'teacher_name', return_value='MAIN'):
+            items = service.catalog({'assignment_term': 'NEW'})['items']
+            self.assertEqual([r.name for r in items], ['R1'])
+            self.assertNotIn('other_term_assignments', items[0])
+            self.assertNotIn('term_assignment_count', items[0])
+
+
+class TermAssignmentHistory(TestCase):
+    def setUp(self):
+        self.assignments = [dict(name='OLD', resource='R1', term='PAST', campus='A', course='C', note='Original history'), dict(name='CURRENT', resource='R1', term='NOW', campus='B', course='C', note='Old current note')]
+        self.doc = SimpleNamespace(name='R1', status='Published', save=Mock())
+        self.state = frappe._dict(status='Active', end_date='2099-01-01')
+        self.deleted = []
+        def get_all(doctype, filters, **kwargs):
+            if doctype != service.ASSIGN:
+                return []
+            matches = [a for a in self.assignments if all(a.get(k) == v for k, v in filters.items())]
+            return [a['name'] for a in matches] if kwargs.get('pluck') else matches
+        def delete(doctype, name, **kwargs):
+            self.deleted.append((doctype, name))
+            self.assignments[:] = [a for a in self.assignments if a['name'] != name]
+        def insert(data):
+            def apply(**kwargs):
+                if data['doctype'] == service.ASSIGN:
+                    self.assignments.append(dict(data, name='INSERTED'))
+            return SimpleNamespace(insert=apply)
+        fake = SimpleNamespace(db=SimpleNamespace(sql=lambda *a, **kw: [self.state], exists=lambda *a: True), get_all=get_all, delete_doc=delete, get_doc=insert, throw=lambda message, *a: (_ for _ in ()).throw(Denied(message)))
+        for patcher in [patch.object(service, 'frappe', fake), patch.object(service, 'require_user'), patch.object(service, 'lock_resource', return_value=self.doc), patch.object(service, 'detail', side_effect=lambda *a: self.assignments.copy()), patch.object(service, 'audit')]:
+            patcher.start(); self.addCleanup(patcher.stop)
+
+    def data(self, **overrides):
+        return dict(name='R1', modified='version', title='Apple', summary='Updated', tags=[], teachers=[], **overrides)
+
+    def test_saving_one_term_keeps_other_terms_and_notes(self):
+        service.save(self.data(assignment_term='NOW', assignments=[dict(term='NOW', campus='A', course='C', note='New note')]))
+        self.assertEqual(self.assignments[0], dict(name='OLD', resource='R1', term='PAST', campus='A', course='C', note='Original history'))
+        self.assertEqual(self.assignments[1]['note'], 'New note')
+        self.assertEqual(self.deleted, [(service.ASSIGN, 'CURRENT')])
+
+    def test_clearing_new_term_does_not_clear_history(self):
+        service.save(self.data(assignment_term='NEW', assignments=[]))
+        self.assertEqual(len(self.assignments), 2)
+        self.assertEqual(self.deleted, [])
+
+    def test_metadata_only_save_leaves_all_assignments(self):
+        service.save(self.data())
+        self.assertEqual(len(self.assignments), 2)
+        self.assertEqual(self.deleted, [])
+
+    def test_rejects_cross_term_payload_and_old_client_whole_resource_save(self):
+        for extra in [dict(assignment_term='NOW', assignments=[dict(term='PAST', campus='A', course='C')]), dict(assignments=[])]:
+            with self.subTest(extra=extra), self.assertRaises(Denied):
+                service.save(self.data(**extra))
+        self.doc.save.assert_not_called()
+        self.assertEqual(self.deleted, [])
+
+    def test_closed_expired_and_invalid_terms_cannot_change_history(self):
+        for status, end_date in [('Completed', '2099-01-01'), ('Archived', '2099-01-01'), ('Active', '2000-01-01'), ('Active', None)]:
+            self.state.update(status=status, end_date=end_date)
+            with self.subTest(status=status, end_date=end_date), self.assertRaises(Denied):
+                service.save(self.data(assignment_term='PAST', assignments=[]))
+        self.doc.save.assert_not_called()
+        self.assertEqual(len(self.assignments), 2)
+
+    def test_upcoming_term_can_be_planned_without_copying_previous_term(self):
+        self.state.status = 'Upcoming'
+        service.save(self.data(assignment_term='NEXT', assignments=[dict(term='NEXT', campus='B', course='C', note='Next lesson')]))
+        self.assertEqual(len(self.assignments), 3)
+        self.assertEqual(self.assignments[0]['note'], 'Original history')
+
+
 class Publishing(TestCase):
     def test_single_kind_can_publish(self):
         # File checks deliberately do not require separate video and PPT kinds.

@@ -1,7 +1,7 @@
 """Teaching resource catalog, transactional grants and resumable direct uploads."""
 import json
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
 import frappe
 from frappe.utils import cint, get_datetime, now_datetime, add_days
@@ -140,14 +140,25 @@ def catalog(filters=None, offset=0, admin=False):
         params['tag'] = text(filters['tag'], 100).casefold()
     selected = []
     for key in ('term', 'campus', 'course'):
+        if admin and filters.get('assignment_term') and key == 'term':
+            continue
         if filters.get(key):
             selected.append(f'a.{key}=%({key})s')
             params[key] = filters[key]
+    if admin and filters.get('assignment_term'):
+        params['assignment_term'] = filters['assignment_term']
+        if selected:
+            selected.append('a.term=%(assignment_term)s')
+        if filters.get('assignment_status') in ('assigned', 'unassigned'):
+            negation = 'NOT ' if filters['assignment_status'] == 'unassigned' else ''
+            conditions.append(negation + 'EXISTS (SELECT 1 FROM `tabTeaching Resource Assignment` a WHERE a.resource=r.name AND a.term=%(assignment_term)s)')
     if selected:
         scope = '' if admin else ' AND ' + scope_sql(teacher, params)
         conditions.append('EXISTS (SELECT 1 FROM `tabTeaching Resource Assignment` a WHERE a.resource=r.name AND ' + ' AND '.join(selected) + scope + ')')
     rows = frappe.db.sql('SELECT r.name,r.title,r.summary,r.status,r.modified FROM `tabTeaching Resource` r WHERE ' + ' AND '.join(conditions) + ' ORDER BY r.modified DESC,r.name LIMIT 31 OFFSET %(offset)s', params, as_dict=True)
     items = rows[:30]
+    if admin and filters.get('assignment_term'):
+        add_assignment_summaries(items, filters['assignment_term'])
     if not admin:
         by_resource = {row.name: [] for row in items}
         for assignment in teacher_assignments(list(by_resource), teacher):
@@ -155,6 +166,36 @@ def catalog(filters=None, offset=0, admin=False):
         for row in items:
             row['assignments'] = by_resource[row.name]
     return {'items': items, 'has_more': len(rows) > 30}
+
+
+def add_assignment_summaries(items, term):
+    # One query for the page, including unassigned resources in the catalog.
+    by_resource = {row.name: [] for row in items}
+    if not by_resource:
+        return
+    assignments = frappe.get_all(ASSIGN, filters={'resource': ['in', list(by_resource)]},
+        fields=['resource', 'term', 'campus', 'course'], order_by='term desc,campus asc,course asc', limit_page_length=0)
+    for assignment in assignments:
+        by_resource[assignment.resource].append(assignment)
+    for row in items:
+        assigned = by_resource[row.name]
+        row['term_assignment_count'] = sum(a.term == term for a in assigned)
+        row['other_term_assignments'] = [a for a in assigned if a.term != term]
+
+
+def require_assignment_term(term):
+    if not isinstance(term, str) or not term:
+        frappe.throw('Select a term before saving assignments. / 请先选择分配学期。')
+    rows = frappe.db.sql('SELECT status,end_date FROM `tabTerm` WHERE name=%s FOR UPDATE', (term,), as_dict=True)
+    if not rows:
+        frappe.throw('Select a valid term. / 请选择有效学期。')
+    row = rows[0]
+    try:
+        expired = date.fromisoformat(str(row.end_date)) < datetime.now(ZONE).date()
+    except (ValueError, TypeError):
+        frappe.throw('Fix the term end date before assigning resources. / 请先修复学期结束日期。')
+    if row.status not in ('Active', 'Upcoming') or expired:
+        frappe.throw('Past term assignments are read-only. / 已结束学期的分配记录仅供查看。')
 
 
 def detail(name, admin=False):
@@ -196,10 +237,16 @@ def save(data):
     tags = data.get('tags', [])
     if not all(isinstance(v, list) for v in (assignments, teachers, tags)) or max(len(assignments), len(teachers), len(tags)) > 100:
         frappe.throw('Use lists with at most 100 assignments, teachers or tags.')
+    assignment_term = data.get('assignment_term')
+    # Older clients must never replace all historical assignments.
+    if 'assignments' in data and (assignment_term or assignments or data.get('name')):
+        require_assignment_term(assignment_term)
     unique = set()
     for row in assignments:
         if not isinstance(row, dict):
             frappe.throw('Invalid assignment data.')
+        if row.get('term') != assignment_term:
+            frappe.throw('Assignments must belong to the selected term. / 只能保存所选学期的分配。')
         for key, doctype in (('term', 'Term'), ('campus', 'Campus'), ('course', 'Course')):
             if not frappe.db.exists(doctype, row.get(key)):
                 frappe.throw(f'Select a valid {key}.')
@@ -218,7 +265,10 @@ def save(data):
     except ValueError as exc:
         frappe.throw(str(exc))
     doc.save(ignore_permissions=True)
-    for doctype in (ASSIGN, GRANT, TAG_LINK):
+    if 'assignments' in data and assignment_term:
+        for child in frappe.get_all(ASSIGN, filters={'resource': doc.name, 'term': assignment_term}, pluck='name', limit_page_length=0):
+            frappe.delete_doc(ASSIGN, child, ignore_permissions=True)
+    for doctype in (GRANT, TAG_LINK):
         for child in frappe.get_all(doctype, filters={'resource': doc.name}, pluck='name', limit_page_length=0):
             frappe.delete_doc(doctype, child, ignore_permissions=True)
     for row in assignments:
@@ -230,7 +280,7 @@ def save(data):
         if not tag_id:
             tag_id = frappe.get_doc(dict(doctype=TAG, tag=tag)).insert(ignore_permissions=True).name
         frappe.get_doc(dict(doctype=TAG_LINK, resource=doc.name, tag=tag_id)).insert(ignore_permissions=True)
-    audit(doc, 'Resource details, teaching assignments and teacher grants saved.')
+    audit(doc, f'Resource details and teacher grants saved; assignment term: {assignment_term or "unchanged"}.')
     return detail(doc.name, True)
 
 
@@ -271,7 +321,12 @@ def options():
     for key, doctype, label in (('terms', 'Term', 'term_name'), ('campuses', 'Campus', 'campus_name'), ('courses', 'Course', 'course_name'), ('teachers', 'Teacher', 'teacher_name')):
         meta = frappe.get_meta(doctype)
         label = label if meta.has_field(label) else 'name'
-        result[key] = frappe.get_all(doctype, filters={'status': 'Active'} if doctype == 'Teacher' else {}, fields=list(dict.fromkeys(['name', label] + (['status'] if meta.has_field('status') else []))), limit_page_length=0)
+        fields = list(dict.fromkeys(['name', label] + (['status'] if meta.has_field('status') else [])))
+        if key == 'terms':
+            fields += ['start_date', 'end_date']
+        result[key] = frappe.get_all(doctype, filters={'status': 'Active'} if doctype == 'Teacher' else {}, fields=fields, limit_page_length=0)
+    result['assignment_terms_version'] = 1
+    result['today'] = datetime.now(ZONE).date().isoformat()
     result['tags'] = frappe.get_all(TAG, pluck='tag', order_by='tag', limit_page_length=0)
     return result
 
