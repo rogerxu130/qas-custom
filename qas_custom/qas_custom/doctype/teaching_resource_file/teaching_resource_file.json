@@ -20,7 +20,12 @@
   "last_modified",
   "replaces",
   "cleanup_error",
-  "is_visible"
+  "is_visible",
+  "preview_status",
+  "preview_error",
+  "preview_started_at",
+  "preview_token",
+  "preview_size_bytes"
  ],
  "fields": [
   {
@@ -112,6 +117,37 @@
    "fieldtype": "Check",
    "label": "Published attachment",
    "default": "0"
+  },
+  {
+   "fieldname": "preview_status",
+   "label": "PDF preview status",
+   "fieldtype": "Select",
+   "options": "\nPending\nProcessing\nReady\nFailed",
+   "read_only": 1
+  },
+  {
+   "fieldname": "preview_error",
+   "label": "PDF preview error",
+   "fieldtype": "Small Text",
+   "read_only": 1
+  },
+  {
+   "fieldname": "preview_started_at",
+   "label": "PDF preview started",
+   "fieldtype": "Datetime",
+   "hidden": 1
+  },
+  {
+   "fieldname": "preview_token",
+   "label": "PDF preview token",
+   "fieldtype": "Data",
+   "hidden": 1
+  },
+  {
+   "fieldname": "preview_size_bytes",
+   "label": "PDF preview size",
+   "fieldtype": "Float",
+   "read_only": 1
   }
  ],
  "permissions": [

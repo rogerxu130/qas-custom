@@ -23,6 +23,9 @@ def admin_detail(resource):
 def manage(action, data=None):
     service.require_user(True)
     data = service.payload(data or {})
+    if action == 'prepare_preview':
+        from qas_custom.services.teaching_resource_previews import request
+        return request(data.get('file'))
     if action == 'save':
         return service.save(data)
     if action in ('publish', 'archive', 'restore', 'delete'):
@@ -67,3 +70,9 @@ def teacher_file(file):
 @frappe.whitelist()
 def teacher_options():
     return service.teacher_options()
+
+
+@frappe.whitelist()
+def admin_preview(file):
+    from qas_custom.services.teaching_resource_previews import status
+    return status(file)

@@ -40,6 +40,9 @@ class ResourcePrivacyTests(TestCase):
         self.assertEqual(result['assignments'], [{'note': 'Lesson 1'}])
         self.frappe.db.sql.assert_not_called()
         self.service.teacher_access.assert_called_once_with('R1', 'TEACHER')
+        file_call = next(call for call in self.frappe.get_all.call_args_list if call.args[0] == self.service.FILE)
+        self.assertNotIn('preview_status', file_call.kwargs['fields'])
+        self.assertNotIn('preview_token', file_call.kwargs['fields'])
 
     def test_admin_detail_returns_note_and_tags(self):
         self.frappe.db.sql.return_value = [SimpleNamespace(tag='Internal label')]
@@ -206,6 +209,8 @@ class ResourcePrivacyTests(TestCase):
         self.service.options()
         teacher_call = next(call for call in self.frappe.get_all.call_args_list if call.args[0] == 'Teacher')
         self.assertEqual(teacher_call.kwargs['filters'], {'status': 'Active'})
+        course_call = next(call for call in self.frappe.get_all.call_args_list if call.args[0] == 'Course')
+        self.assertEqual(course_call.kwargs['filters'], {'is_makeup_course': 0})
 
     def test_old_client_cannot_assign_inactive_teacher(self):
         self.frappe.db.exists.return_value = False

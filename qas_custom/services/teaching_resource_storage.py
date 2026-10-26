@@ -1,4 +1,4 @@
-"""IDrive e2 calls. File bytes never pass through Frappe."""
+"""IDrive e2 calls. Interactive transfers are browser-direct; preview workers use bounded temporary files."""
 from urllib.parse import urlparse, quote
 
 import frappe
@@ -69,3 +69,30 @@ def get_url(key, filename, inline, lifetime):
     s3, bucket = config()
     disposition = 'inline' if inline else 'attachment'
     return s3.generate_presigned_url('get_object', Params={'Bucket': bucket, 'Key': key, 'ResponseContentDisposition': disposition + "; filename*=UTF-8''" + quote(filename, safe=''), 'ResponseCacheControl': 'private, no-store'}, ExpiresIn=lifetime)
+
+
+def download_preview_source(key, path, maximum):
+    s3, bucket = config()
+    response = s3.get_object(Bucket=bucket, Key=key)
+    body = response['Body']
+    try:
+        if int(response['ContentLength']) > maximum:
+            raise ValueError('Preview input exceeds size limit.')
+        total = 0
+        with open(path, 'wb') as stream:
+            while True:
+                chunk = body.read(min(1024 * 1024, maximum - total + 1))
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > maximum:
+                    raise ValueError('Preview input exceeds size limit.')
+                stream.write(chunk)
+        return total
+    finally:
+        body.close()
+
+
+def upload_preview(key, path, source_file):
+    s3, bucket = config()
+    s3.upload_file(str(path), bucket, key, ExtraArgs={'ContentType': 'application/pdf', 'Metadata': {'qas-preview-of': source_file}})

@@ -189,6 +189,52 @@ class ResourceAuthorization(TestCase):
             self.assertEqual(service.catalog()['items'][0].assignments, [])
 
 
+class ResourceSearchPriority(TestCase):
+    setUp = ResourceAuthorization.setUp
+
+    def add_resource(self, name, title='', summary='', note='', modified='2090'):
+        self.db.db.execute('INSERT INTO `tabTeaching Resource` VALUES (?,?,?,?,?,?)', (name, title, summary, 'Published', modified, note))
+
+    def add_tag(self, resource, name, tag):
+        self.db.db.execute('INSERT INTO `tabTeaching Resource Tag` VALUES (?,?)', (name, tag))
+        self.db.db.execute('INSERT INTO `tabTeaching Resource Tag Link` VALUES (?,?,?)', (name, resource, name))
+
+    def test_priority_is_note_tag_title_description_even_when_lower_matches_are_newer(self):
+        self.add_resource('NOTE', note='needle', modified='2000')
+        self.add_resource('TAG', modified='2090')
+        self.add_tag('TAG', 'TG1', 'prefix-needle-tag')
+        self.add_tag('TAG', 'TG2', 'another-needle-tag')
+        self.add_resource('TITLE', title='needle', modified='2091')
+        self.add_resource('DESCRIPTION', summary='needle', modified='2092')
+        with patch.object(service, 'require_user'):
+            items = service.catalog({'query': 'needle'}, admin=True)['items']
+            self.assertEqual([r.name for r in items], ['NOTE', 'TAG', 'TITLE', 'DESCRIPTION'])
+            self.assertEqual(service.catalog(admin=True)['items'][0].name, 'DESCRIPTION')
+            self.assertEqual(service.catalog({'query': '   '}, admin=True)['items'][0].name, 'DESCRIPTION')
+            # A combination of lower-priority matches still uses its highest matching field.
+            self.db.db.execute("UPDATE `tabTeaching Resource` SET title='needle',summary='needle' WHERE name='TAG'")
+            self.assertEqual([r.name for r in service.catalog({'query': 'needle'}, admin=True)['items']], ['NOTE', 'TAG', 'TITLE', 'DESCRIPTION'])
+
+    def test_ranking_happens_before_pagination_and_ties_remain_stable(self):
+        self.add_resource('NOTE', note='needle', modified='2000')
+        for index in range(35):
+            self.add_resource(f'DESC{index:02d}', summary='needle', modified='2099')
+        with patch.object(service, 'require_user'):
+            first = service.catalog({'query': 'needle'}, admin=True)
+            second = service.catalog({'query': 'needle'}, offset=30, admin=True)
+            self.assertTrue(first['has_more'])
+            self.assertFalse(second['has_more'])
+            self.assertEqual([r.name for r in first['items']] + [r.name for r in second['items']], ['NOTE'] + [f'DESC{i:02d}' for i in range(35)])
+
+    def test_tag_search_keeps_filters_and_private_teacher_search_boundaries(self):
+        self.add_tag('R1', 'PRIVATE', 'needle-private-tag')
+        with patch.object(service, 'require_user'), patch.object(service, 'teacher_name', return_value='MAIN'):
+            self.assertEqual([r.name for r in service.catalog({'query': 'needle-private'}, admin=True)['items']], ['R1'])
+            self.assertEqual(service.catalog({'query': 'needle-private', 'campus': 'B'}, admin=True)['items'], [])
+            self.assertEqual(service.catalog({'query': 'needle-private'})['items'], [])
+            self.assertEqual([r.name for r in service.catalog({'query': 'Apple'})['items']], ['R1'])
+
+
 class AdminTermCatalog(TestCase):
     setUp = ResourceAuthorization.setUp
 

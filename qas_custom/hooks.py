@@ -220,6 +220,7 @@ scheduler_events = {
 	},
 	"hourly": [
 		"qas_custom.services.teaching_resources.cleanup",
+		"qas_custom.services.teaching_resource_previews.enqueue_missing",
 		"qas_custom.services.inquiry_parking.close_expired_parked_inquiries",
 		"qas_custom.tasks.adhoc_booking_tasks.lock_due_adhoc_bookings",
 		"qas_custom.tasks.payg_booking_tasks.lock_due_payg_bookings",

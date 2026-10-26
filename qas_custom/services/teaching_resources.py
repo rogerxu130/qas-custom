@@ -132,10 +132,17 @@ def catalog(filters=None, offset=0, admin=False):
     elif filters.get('status'):
         conditions.append('r.status=%(status)s')
         params['status'] = filters['status']
-    if filters.get('query'):
-        search_fields = ['r.title', 'r.summary'] + (['r.admin_note'] if admin else [])
-        conditions.append('(' + ' OR '.join(f'{field} LIKE %(query)s' for field in search_fields) + ')')
-        params['query'] = '%' + text(filters['query'], 200) + '%'
+    order_by = 'r.modified DESC,r.name'
+    query = text(filters.get('query'), 200)
+    if query:
+        matches = ['r.title LIKE %(query)s', 'r.summary LIKE %(query)s']
+        if admin:
+            matches = ['r.admin_note LIKE %(query)s',
+                'EXISTS (SELECT 1 FROM `tabTeaching Resource Tag Link` sl JOIN `tabTeaching Resource Tag` st ON st.name=sl.tag WHERE sl.resource=r.name AND st.tag LIKE %(query)s)',
+                *matches]
+            order_by = 'CASE ' + ' '.join(f'WHEN {match} THEN {rank}' for rank, match in enumerate(matches)) + ' ELSE 4 END,' + order_by
+        conditions.append('(' + ' OR '.join(matches) + ')')
+        params['query'] = '%' + query + '%'
     if admin and filters.get('tag'):
         conditions.append('EXISTS (SELECT 1 FROM `tabTeaching Resource Tag Link` l JOIN `tabTeaching Resource Tag` t ON t.name=l.tag WHERE l.resource=r.name AND t.tag=%(tag)s)')
         params['tag'] = text(filters['tag'], 100).casefold()
@@ -157,7 +164,7 @@ def catalog(filters=None, offset=0, admin=False):
         scope = '' if admin else ' AND ' + scope_sql(teacher, params)
         conditions.append('EXISTS (SELECT 1 FROM `tabTeaching Resource Assignment` a WHERE a.resource=r.name AND ' + ' AND '.join(selected) + scope + ')')
     fields = 'r.name,r.title,r.summary,r.status,r.modified' + (',r.admin_note' if admin else '')
-    rows = frappe.db.sql('SELECT ' + fields + ' FROM `tabTeaching Resource` r WHERE ' + ' AND '.join(conditions) + ' ORDER BY r.modified DESC,r.name LIMIT 31 OFFSET %(offset)s', params, as_dict=True)
+    rows = frappe.db.sql('SELECT ' + fields + ' FROM `tabTeaching Resource` r WHERE ' + ' AND '.join(conditions) + ' ORDER BY ' + order_by + ' LIMIT 31 OFFSET %(offset)s', params, as_dict=True)
     items = rows[:30]
     if admin:
         add_admin_tags(items)
@@ -225,7 +232,8 @@ def detail(name, admin=False):
     file_filters = {'resource': name, 'status': ['in', ['Uploading', 'Ready']] if admin else 'Ready'}
     if not admin:
         file_filters['is_visible'] = 1
-    result['files'] = frappe.get_all(FILE, filters=file_filters, fields=['name', 'filename', 'label', 'kind', 'size_bytes', 'status', 'sort_order', 'last_modified', 'replaces', 'is_visible'], order_by='sort_order asc,creation asc', limit_page_length=0)
+    preview_fields = ['preview_status', 'preview_error', 'preview_size_bytes'] if admin else []
+    result['files'] = frappe.get_all(FILE, filters=file_filters, fields=['name', 'filename', 'label', 'kind', 'size_bytes', 'status', 'sort_order', 'last_modified', 'replaces', 'is_visible'] + preview_fields, order_by='sort_order asc,creation asc', limit_page_length=0)
     result['assignments'] = frappe.get_all(ASSIGN, filters={'resource': name}, fields=['name', 'term', 'campus', 'course', 'note'], limit_page_length=0) if admin else allowed
     # Older teacher pages expect this key; never send their internal tag values.
     result['tags'] = []
@@ -343,7 +351,13 @@ def options():
         fields = list(dict.fromkeys(['name', label] + (['status'] if meta.has_field('status') else [])))
         if key == 'terms':
             fields += ['start_date', 'end_date']
-        result[key] = frappe.get_all(doctype, filters={'status': 'Active'} if doctype == 'Teacher' else {}, fields=fields, limit_page_length=0)
+        option_filters = {}
+        if doctype == 'Teacher':
+            option_filters['status'] = 'Active'
+        elif doctype == 'Course':
+            option_filters['is_makeup_course'] = 0
+        result[key] = frappe.get_all(doctype, filters=option_filters, fields=fields, limit_page_length=0)
+    result['ppt_previews_version'] = 1
     result['assignment_terms_version'] = 1
     result['today'] = datetime.now(ZONE).date().isoformat()
     result['tags'] = frappe.get_all(TAG, pluck='tag', order_by='tag', limit_page_length=0)
@@ -463,6 +477,9 @@ def complete_upload(name):
     file.save(ignore_permissions=True)
     doc.save(ignore_permissions=True)
     audit(doc, 'File ready: ' + file.filename)
+    if getattr(file, 'kind', None) == 'ppt':
+        from qas_custom.services.teaching_resource_previews import queue
+        queue(file)
     return detail(doc.name, True)
 
 
@@ -578,6 +595,9 @@ def cleanup_file(name):
         return
     if file.upload_id:
         storage.abort(file.object_key, file.upload_id)
+    if file.kind == 'ppt':
+        from qas_custom.services.teaching_resource_previews import object_key
+        storage.delete(object_key(file))
     storage.delete(file.object_key)
     frappe.delete_doc(FILE, name, ignore_permissions=True)
 
