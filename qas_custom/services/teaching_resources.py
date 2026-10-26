@@ -159,6 +159,8 @@ def catalog(filters=None, offset=0, admin=False):
     fields = 'r.name,r.title,r.summary,r.status,r.modified' + (',r.admin_note' if admin else '')
     rows = frappe.db.sql('SELECT ' + fields + ' FROM `tabTeaching Resource` r WHERE ' + ' AND '.join(conditions) + ' ORDER BY r.modified DESC,r.name LIMIT 31 OFFSET %(offset)s', params, as_dict=True)
     items = rows[:30]
+    if admin:
+        add_admin_tags(items)
     if admin and filters.get('assignment_term'):
         add_assignment_summaries(items, filters['assignment_term'])
     if not admin:
@@ -168,6 +170,21 @@ def catalog(filters=None, offset=0, admin=False):
         for row in items:
             row['assignments'] = by_resource[row.name]
     return {'items': items, 'has_more': len(rows) > 30}
+
+
+def add_admin_tags(items):
+    if not items:
+        return
+    by_resource = {row.name: [] for row in items}
+    params = {f'resource{i}': name for i, name in enumerate(by_resource)}
+    placeholders = ','.join(f'%(resource{i})s' for i in range(len(by_resource)))
+    tags = frappe.db.sql(f'''SELECT l.resource,t.tag FROM `tabTeaching Resource Tag Link` l
+        JOIN `tabTeaching Resource Tag` t ON t.name=l.tag
+        WHERE l.resource IN ({placeholders}) ORDER BY t.tag''', params, as_dict=True)
+    for tag in tags:
+        by_resource[tag.resource].append(tag.tag)
+    for row in items:
+        row['tags'] = by_resource[row.name]
 
 
 def add_assignment_summaries(items, term):

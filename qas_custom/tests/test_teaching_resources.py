@@ -19,6 +19,8 @@ class Database:
         self.db = sqlite3.connect(':memory:')
         for table, columns in {
             'Teaching Resource': 'name TEXT,title TEXT,summary TEXT,status TEXT,modified TEXT,admin_note TEXT',
+            'Teaching Resource Tag': 'name TEXT,tag TEXT',
+            'Teaching Resource Tag Link': 'name TEXT,resource TEXT,tag TEXT',
             'Teaching Resource Teacher Grant': 'name TEXT,resource TEXT,teacher TEXT',
             'Teaching Resource Assignment': 'name TEXT,resource TEXT,term TEXT,campus TEXT,course TEXT,note TEXT',
             'Term': 'name TEXT,status TEXT,end_date TEXT,term_name TEXT', 'Campus': 'name TEXT,status TEXT,campus_name TEXT', 'Course': 'name TEXT,status TEXT,course_name TEXT',
@@ -121,6 +123,22 @@ class ResourceAuthorization(TestCase):
             self.assertEqual([r.name for r in teacher_items], ['R1'])
             self.assertNotIn('admin_note', teacher_items[0])
             self.assertEqual(service.catalog({'query': '内部备课苹果', 'campus': 'B'}, admin=True)['items'], [])
+
+    def test_admin_catalog_returns_all_resource_tags_in_one_query(self):
+        tags = [f'标签{i:02d}' for i in range(40)]
+        for index, tag in enumerate(tags):
+            self.db.db.execute('INSERT INTO `tabTeaching Resource Tag` VALUES (?,?)', (str(index), tag))
+            self.db.db.execute('INSERT INTO `tabTeaching Resource Tag Link` VALUES (?,?,?)', (str(index), 'R1', str(index)))
+        with patch.object(service, 'require_user'), patch.object(service, 'teacher_name', return_value='MAIN'), patch.object(self.db, 'sql', wraps=self.db.sql) as sql:
+            items = service.catalog(admin=True)['items']
+            by_name = {row.name: row for row in items}
+            self.assertEqual(by_name['R1'].tags, tags)
+            self.assertEqual(by_name['R2'].tags, [])
+            self.assertEqual(sum('JOIN `tabTeaching Resource Tag`' in call.args[0] for call in sql.call_args_list), 1)
+            sql.reset_mock()
+            teacher_items = service.catalog()['items']
+            self.assertNotIn('tags', teacher_items[0])
+            self.assertFalse(any('Teaching Resource Tag' in call.args[0] for call in sql.call_args_list))
 
     def test_teacher_catalog_filters_before_pagination(self):
         with patch.object(service,'require_user'), patch.object(service,'teacher_name',return_value='MAIN'):
