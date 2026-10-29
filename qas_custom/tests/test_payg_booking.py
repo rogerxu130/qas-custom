@@ -443,3 +443,76 @@ class TestBooking(TestCase):
         self.assertIn("ORDER BY s.session_date, s.name LIMIT %s", sql.args[0])
         self.assertNotIn("60", sql.args[0])
         self.assertEqual(sql.args[1][-1], 2)
+
+
+class TestAdminBooking(TestCase):
+    add = TestBooking.add
+    get_doc = TestBooking.get_doc
+    get_all = TestBooking.get_all
+    sql = TestBooking.sql
+    value = TestBooking.value
+    reserve = TestBooking.reserve
+
+    def setUp(self):
+        TestBooking.setUp(self)
+        self.fake.get_roles = Mock(return_value=["School Admin"])
+        self.fake._dict = frappe._dict
+        self.db.exists.return_value = True
+
+    def test_admin_can_reserve_inside_72_hours_with_audit_actor(self):
+        self.fake.session.user = "admin@example.com"
+        with patch.object(booking, "_now", return_value=datetime(2026, 9, 26, 10)):
+            preview = booking.preview_booking("S-1", "CS-1", parent="P-1", as_admin=True)
+            self.assertTrue(preview["bookable"])
+            result = booking.confirm_booking("S-1", "CS-1", "A", "admin-request",
+                confirmed_rules=True, parent="P-1", as_admin=True)
+        self.assertEqual(result.family_parent, "P-1")
+        entries = [doc for (kind, _), doc in self.state["docs"].items() if kind == "QAS PAYG Entry"]
+        self.assertEqual([(row.available_delta, row.reserved_delta, row.actor) for row in entries],
+                         [(-1, 1, "admin@example.com")])
+        self.assertFalse(booking.require_parent.called)
+
+    def test_parent_still_cannot_book_inside_72_hours(self):
+        with patch.object(booking, "_now", return_value=datetime(2026, 9, 26, 10)):
+            self.assertIn("inside_72_hours", booking.preview_booking("S-1", "CS-1")["reasons"])
+            with self.assertRaisesRegex(ValueError, "inside_72_hours"):
+                booking.confirm_booking("S-1", "CS-1", "A", "parent-late", confirmed_rules=True)
+        self.db.rollback.assert_called_once()
+
+    def test_admin_cannot_book_a_started_session(self):
+        with patch.object(booking, "_now", return_value=datetime(2026, 9, 27, 10)):
+            self.assertIn("session_started", booking.preview_booking("S-1", "CS-1", parent="P-1", as_admin=True)["reasons"])
+            with self.assertRaisesRegex(ValueError, "session_started"):
+                booking.confirm_booking("S-1", "CS-1", "A", "past", confirmed_rules=True, parent="P-1", as_admin=True)
+        self.db.rollback.assert_called_once()
+
+    def test_admin_mode_requires_role_family_and_no_support_view(self):
+        for role in ("Parent", "Teacher", "Campus Admin", "Guest"):
+            self.fake.get_roles.return_value = [role]
+            with self.assertRaisesRegex(ValueError, "School Admin"):
+                booking.preview_booking("S-1", "CS-1", parent="P-1", as_admin=True)
+        self.fake.get_roles.return_value = ["School Admin"]
+        with patch.object(booking, "get_support_view_token", return_value="token"), self.assertRaises(ValueError):
+            booking.preview_booking("S-1", "CS-1", parent="P-1", as_admin=True)
+        with self.assertRaisesRegex(ValueError, "Parent was not found"):
+            booking.preview_booking("S-1", "CS-1", as_admin=True)
+        with self.assertRaisesRegex(ValueError, "does not belong"):
+            booking.preview_booking("S-1", "CS-1", parent="P-2", as_admin=True)
+
+    def test_admin_retry_reserves_only_once(self):
+        first = booking.confirm_booking("S-1", "CS-1", "A", "admin-retry", confirmed_rules=True, parent="P-1", as_admin=True)
+        second = booking.confirm_booking("S-1", "CS-1", "A", "admin-retry", confirmed_rules=True, parent="P-1", as_admin=True)
+        self.assertIs(first, second)
+        booking.session_resources.reserve_regular_place.assert_called_once()
+        self.assertEqual((self.card.available_count, self.card.reserved_count), (9, 1))
+
+    def test_admin_keeps_card_and_capacity_guards(self):
+        booking.session_resources.active_rows.return_value = [frappe._dict(student=f"S-{n}") for n in range(2, 12)]
+        self.assertIn("full", booking.preview_booking("S-1", "CS-1", parent="P-1", as_admin=True)["reasons"])
+        self.card.status = "Cancelled"
+        self.assertIn("no_eligible_card", booking.preview_booking("S-1", "CS-1", parent="P-1", as_admin=True)["reasons"])
+
+    def test_discovery_starts_at_brisbane_today(self):
+        booking.available_sessions("S-1", "C-1", parent="P-1", as_admin=True)
+        query = next(call for call in self.db.sql.call_args_list if "ORDER BY s.session_date" in call.args[0])
+        self.assertEqual(query.args[1][1:4], ("2026-09-24", "2026-09-24", ""))

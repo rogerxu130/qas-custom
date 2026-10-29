@@ -1,8 +1,10 @@
 """Thin School Admin entry points for PAYG commands and audit records."""
+import json
+
 import frappe
 
 from qas_custom.modules.billing import payg_drafts
-from qas_custom.modules.payg import card_admin, cancellation, issue
+from qas_custom.modules.payg import booking, card_admin, cancellation, issue
 from qas_custom.modules.payg import pricing
 from qas_custom.services import payg_read_models
 from qas_custom.services.support_view import get_support_view_parent, get_support_view_token
@@ -143,3 +145,33 @@ def payg_cancel_purchase_operation(operation_id=None, family_parent=None, reason
     result = payg_drafts.cancel_purchase(operation_id, family_parent, reason, cancel_invoice=bool(cint(cancel_invoice)))
     return {**_operation_payload(result["operation"]), "invoice_action": result["invoice_action"],
             "cancelled_invoice": result["invoice"], "store_credit_amount": result.get("store_credit_amount", 0)}
+
+
+@frappe.whitelist()
+def payg_admin_available_sessions(family_parent=None, student=None, course=None, cursor=None, limit=30):
+    _admin()
+    if isinstance(cursor, str):
+        try:
+            cursor = json.loads(cursor)
+        except ValueError:
+            frappe.throw("PAYG cursor must be a JSON [date, session] pair")
+    result = booking.available_sessions(student, course, cursor=cursor, limit=limit,
+                                        parent=family_parent, as_admin=True)
+    return payg_read_models.enrich_available_sessions(result)
+
+
+@frappe.whitelist()
+def payg_admin_preview_booking(family_parent=None, student=None, session=None):
+    _admin()
+    return booking.preview_booking(student, session, parent=family_parent, as_admin=True)
+
+
+@frappe.whitelist(methods=["POST"])
+def payg_admin_confirm_booking(family_parent=None, student=None, session=None, preview_card=None,
+                               request_key=None, confirmed_rules=False):
+    _admin()
+    confirmed = confirmed_rules is True or str(confirmed_rules).lower() in ("1", "true")
+    result = booking.confirm_booking(student, session, preview_card, _required_key(request_key),
+                                     confirmed_rules=confirmed, parent=family_parent, as_admin=True)
+    return {"booking": result.name, "card": result.card, "status": result.status,
+            "attendance_entry": result.attendance_entry}

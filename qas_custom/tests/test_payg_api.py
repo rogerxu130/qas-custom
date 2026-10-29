@@ -144,3 +144,28 @@ class TestPaygPortalAPI(TestCase):
             with self.assertRaises(ValueError):
                 booking.available_sessions("S-1", "C-1", cursor=[])
             error.assert_called()
+
+    def test_admin_booking_endpoints_enforce_role_and_support_view(self):
+        calls = [lambda: school_admin_payg.payg_admin_available_sessions("P", "S", "C"),
+                 lambda: school_admin_payg.payg_admin_preview_booking("P", "S", "CS"),
+                 lambda: school_admin_payg.payg_admin_confirm_booking("P", "S", "CS", "CARD", "key", True)]
+        for action in calls:
+            for role, token in (("Parent", ""), ("Campus Admin", ""), ("School Admin", "support")):
+                with patch.object(school_admin_payg.frappe, "get_roles", return_value=[role]), \
+                     patch.object(school_admin_payg, "get_support_view_token", return_value=token), \
+                     self.assertRaises(frappe.PermissionError):
+                    action()
+
+    def test_admin_booking_adapters_pass_explicit_family_and_guarded_mode(self):
+        with patch.object(school_admin_payg, "_admin"), \
+             patch.object(booking, "available_sessions", return_value={"items": []}) as available, \
+             patch.object(school_admin_payg.payg_read_models, "enrich_available_sessions", side_effect=lambda x: x), \
+             patch.object(booking, "preview_booking", return_value={"bookable": True}) as preview, \
+             patch.object(booking, "confirm_booking", return_value=frappe._dict(name="B", card="CARD", status="Reserved", attendance_entry="ATT")) as confirm:
+            school_admin_payg.payg_admin_available_sessions("P", "S", "C", '["2026-11-01","CS"]', 10)
+            available.assert_called_once_with("S", "C", cursor=["2026-11-01", "CS"], limit=10, parent="P", as_admin=True)
+            school_admin_payg.payg_admin_preview_booking("P", "S", "CS")
+            preview.assert_called_once_with("S", "CS", parent="P", as_admin=True)
+            result = school_admin_payg.payg_admin_confirm_booking("P", "S", "CS", "CARD", "key", "true")
+            confirm.assert_called_once_with("S", "CS", "CARD", "key", confirmed_rules=True, parent="P", as_admin=True)
+            self.assertEqual(result["attendance_entry"], "ATT")

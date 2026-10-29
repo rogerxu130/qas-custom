@@ -73,6 +73,19 @@ class TestRegularReservation(TestCase):
             with self.assertRaisesRegex(ValueError, "full"):
                 self.reserve("STU-2", "PB-2")
 
+    def test_reservation_uses_actual_session_schedule_after_class_change(self):
+        self.slot.day_of_week = "Sunday"
+        self.slot.start_time = "14:00"
+        self.slot.end_time = "15:00"
+        self.session.start_time = "10:00"
+        self.session.end_time = "11:00"
+        inspected = []
+        result = subject.reserve_regular_place("STU-1", "CS-1", "QAS PAYG Booking", "PB-1", "Pay-as-you-go",
+            validate_business=lambda session, slot, term, rows: inspected.append(dict(slot)))
+        self.assertEqual(result, "ATT-NEW")
+        self.assertEqual((inspected[0]["day_of_week"], inspected[0]["start_time"]), ("Saturday", "10:00"))
+        self.assertEqual((self.slot.day_of_week, self.slot.start_time), ("Sunday", "14:00"))
+
     def test_cancelled_row_does_not_block_new_source(self):
         self.assertEqual(self.reserve(source="PB-NEW"), "ATT-NEW")
         self.assertEqual(subject.create_attendance_entry.call_args.kwargs["prevent_student_duplicate"], False)
@@ -99,6 +112,7 @@ class TestRegularReservation(TestCase):
 
     def test_business_guard_rejects_before_attendance_insert(self):
         with patch.object(adhoc_booking, "now_datetime", return_value=datetime(2026, 10, 2)), \
+             patch.object(adhoc_booking, "_", side_effect=lambda text: text), \
              patch.object(adhoc_booking.frappe, "throw", side_effect=ValueError):
             with self.assertRaises(ValueError):
                 subject.reserve_regular_place("STU-1", "CS-1", "Adhoc Booking", "AB-1", "Pay-as-you-go",

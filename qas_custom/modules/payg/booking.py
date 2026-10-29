@@ -26,9 +26,15 @@ def _now():
     return get_datetime_in_timezone("Australia/Brisbane")
 
 
-def _family(parent=None, *, write=False):
+def _family(parent=None, *, write=False, as_admin=False):
     if write and get_support_view_token():
         frappe.throw("Support View cannot write PAYG bookings", frappe.PermissionError)
+    if as_admin:
+        if get_support_view_token() or "School Admin" not in frappe.get_roles(frappe.session.user):
+            frappe.throw("School Admin access is required", frappe.PermissionError)
+        if not parent or not frappe.db.exists("Parent", parent):
+            frappe.throw("PAYG family Parent was not found")
+        return frappe._dict(name=parent)
     own = require_parent()
     if parent and own.name != parent:
         frappe.throw("Another family's PAYG data is unavailable", frappe.PermissionError)
@@ -103,7 +109,7 @@ def _age_reason(student, course, session_date):
     return None
 
 
-def _basic_reasons(student, session, slot, term, course, now):
+def _basic_reasons(student, session, slot, term, course, now, *, as_admin=False):
     reasons = []
     if course.status != "Active": reasons.append("course_inactive")
     if session.status != "Scheduled": reasons.append("session_not_scheduled")
@@ -115,6 +121,9 @@ def _basic_reasons(student, session, slot, term, course, now):
         reasons.append("teacher_missing")
     if not slot.start_time or not slot.end_time:
         reasons.append("time_missing")
+    elif as_admin:
+        if _start(session, slot) <= as_brisbane_datetime(now):
+            reasons.append("session_started")
     elif not can_book(now=now, session_start=_start(session, slot)):
         reasons.append("inside_72_hours")
     if getdate(session.session_date).strftime("%A") != slot.day_of_week:
@@ -165,9 +174,9 @@ def family_booking_history(student=None, limit=100):
                           order_by="creation desc", limit_page_length=count)
 
 
-def available_sessions(student, course, cursor=None, limit=30, parent=None):
+def available_sessions(student, course, cursor=None, limit=30, parent=None, *, as_admin=False):
     """Page all open terms using the stable (session_date, name) cursor."""
-    family = _family(parent)
+    family = _family(parent, as_admin=True) if as_admin else _family(parent)
     pupil = _student(student, family.name)
     if not course:
         frappe.throw("Course is required")
@@ -182,7 +191,7 @@ def available_sessions(student, course, cursor=None, limit=30, parent=None):
         except (TypeError, ValueError):
             frappe.throw("PAYG cursor date is invalid")
     else:
-        cursor = ("1000-01-01", "")
+        cursor = (as_brisbane_datetime(_now()).date().isoformat(), "") if as_admin else ("1000-01-01", "")
     # Scan raw cursor batches until we have a full page of age-matched sessions.
     # Unknown birth dates remain visible with an explicit unbookable reason.
     candidates = []
@@ -217,7 +226,7 @@ def available_sessions(student, course, cursor=None, limit=30, parent=None):
         session = frappe.get_doc("Course Sessions", row.name)
         slot = session_timeslot(session, frappe.get_doc("Weekly Timeslot", session.weekly_timeslot))
         term = frappe.get_doc("Term", slot.term)
-        reasons = _basic_reasons(pupil, session, slot, term, course_doc, now)
+        reasons = _basic_reasons(pupil, session, slot, term, course_doc, now, as_admin=as_admin)
         selected = choose_card(cards, now=now, session_start=_start(session, slot)) if slot.start_time else None
         if not selected: reasons.append("no_eligible_card")
         if slot.start_time and slot.end_time:
@@ -229,15 +238,15 @@ def available_sessions(student, course, cursor=None, limit=30, parent=None):
             "next_cursor": (str(items[-1]["session_date"]), items[-1]["name"]) if len(candidates) > limit and items else None}
 
 
-def preview_booking(student, session, parent=None):
-    family = _family(parent)
+def preview_booking(student, session, parent=None, *, as_admin=False):
+    family = _family(parent, as_admin=True) if as_admin else _family(parent)
     pupil = _student(student, family.name)
     occurrence = frappe.get_doc("Course Sessions", session)
     slot = session_timeslot(occurrence, frappe.get_doc("Weekly Timeslot", occurrence.weekly_timeslot))
     term = frappe.get_doc("Term", slot.term)
     course = frappe.get_doc("Course", slot.course)
     now = _now()
-    reasons = _basic_reasons(pupil, occurrence, slot, term, course, now)
+    reasons = _basic_reasons(pupil, occurrence, slot, term, course, now, as_admin=as_admin)
     card = choose_card(_cards(family.name, slot.course), now=now,
                        session_start=_start(occurrence, slot)) if slot.start_time else None
     if not card: reasons.append("no_eligible_card")
@@ -271,10 +280,10 @@ def _activate_booking_student(pupil, booking):
     return booking
 
 
-def confirm_booking(student, session, preview_card, request_key, *, confirmed_rules=False, parent=None):
+def confirm_booking(student, session, preview_card, request_key, *, confirmed_rules=False, parent=None, as_admin=False):
     if confirmed_rules is not True:
         frappe.throw("Please confirm the PAYG booking rules before reserving")
-    family = _family(parent, write=True)
+    family = _family(parent, write=True, as_admin=True) if as_admin else _family(parent, write=True)
     if not all((student, session, preview_card, request_key)):
         frappe.throw("Student, session, preview card and request key are required")
     savepoint = "payg_confirm_" + uuid4().hex
@@ -298,7 +307,7 @@ def confirm_booking(student, session, preview_card, request_key, *, confirmed_ru
             if slot.course != course_id or _start(occurrence, slot) != start:
                 frappe.throw("Session changed; refresh preview")
             course = frappe.get_doc("Course", course_id)
-            reasons = _basic_reasons(pupil, occurrence, slot, term, course, now)
+            reasons = _basic_reasons(pupil, occurrence, slot, term, course, now, as_admin=as_admin)
             if reasons:
                 frappe.throw("Session is unavailable: " + ", ".join(reasons))
             selected = confirm_preview_card(cards, now=now,

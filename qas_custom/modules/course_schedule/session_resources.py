@@ -87,6 +87,7 @@ def reserve_regular_place(student, session_id, source_doctype, source_document, 
     session = frappe.get_doc("Course Sessions", session_id, for_update=True)
     slot = frappe.get_doc("Weekly Timeslot", session.weekly_timeslot, for_update=True)
     term = frappe.get_doc("Term", slot.term, for_update=True)
+    slot = session_timeslot(session, slot)
     capacity = effective_capacity(slot, lock=True)
     if slot.get("status") != "Active" or term.get("status") not in {"Upcoming", "Active"}:
         frappe.throw("This class or term is not open for booking.")
