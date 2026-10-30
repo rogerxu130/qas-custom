@@ -516,3 +516,124 @@ class TestAdminBooking(TestCase):
         booking.available_sessions("S-1", "C-1", parent="P-1", as_admin=True)
         query = next(call for call in self.db.sql.call_args_list if "ORDER BY s.session_date" in call.args[0])
         self.assertEqual(query.args[1][1:4], ("2026-09-24", "2026-09-24", ""))
+
+
+class TestEqualPriceAdminBooking(TestAdminBooking):
+    def setUp(self):
+        super().setUp()
+        self.add("Course", "C-2", min_age=5, max_age=12, status="Active")
+        self.add("Weekly Timeslot", "W-2", term="T-1", course="C-2", classroom="ROOM-1",
+                 teacher="TEACHER-1", status="Active", day_of_week="Sunday", start_time="10:00", end_time="11:00")
+        self.add("Course Sessions", "CS-2", weekly_timeslot="W-2", session_date="2026-09-27", status="Scheduled")
+        self.add("QAS PAYG Product", "PROD-1", course="C-1", enabled=1, standard_card_price=652.80)
+        self.target_product = self.add("QAS PAYG Product", "PROD-2", course="C-2", enabled=1, standard_card_price=652.80)
+        self.card.product = "PROD-1"
+        self.fake.session.user = "admin@example.com"
+
+    def value(self, dt, key, field, **kwargs):
+        if dt == "QAS PAYG Product" and isinstance(key, dict):
+            return next((doc.name for (kind, _), doc in self.state["docs"].items()
+                         if kind == dt and doc.course == key["course"]), None)
+        return TestBooking.value(self, dt, key, field, **kwargs)
+
+    def reserve(self, student, session, _dt, source, _kind, *, validate_business):
+        occurrence = self.state["docs"][("Course Sessions", session)]
+        slot = self.state["docs"][("Weekly Timeslot", occurrence.weekly_timeslot)]
+        validate_business(occurrence, slot, self.state["docs"][("Term", slot.term)], [])
+        return "ATT-NEW"
+
+    def sql(self, query, params, **kwargs):
+        if "FROM `tabCourse Sessions` s" in query and params[0] == "C-2":
+            return [frappe._dict(name="CS-2", session_date="2026-09-27")]
+        return TestBooking.sql(self, query, params, **kwargs)
+
+    def preview_cross(self, **kwargs):
+        return booking.preview_booking("S-1", "CS-2", parent="P-1", as_admin=True, source_card="A", **kwargs)
+
+    def confirm_cross(self, key="cross-1", **kwargs):
+        return booking.confirm_booking("S-1", "CS-2", "A", key, confirmed_rules=True,
+                                       parent="P-1", as_admin=True, source_card="A", **kwargs)
+
+    def test_same_price_uses_original_card_without_transferring_it(self):
+        self.assertTrue(self.preview_cross()["bookable"])
+        result = self.confirm_cross()
+        self.assertEqual((result.card, result.course_snapshot), ("A", "C-2"))
+        self.assertEqual((self.card.course, self.card.available_count, self.card.reserved_count), ("C-1", 9, 1))
+        self.assertEqual(self.card.expires_on, date(2027, 3, 1))
+        self.assertIs(self.confirm_cross(), result)
+        self.assertEqual(self.card.available_count, 9)
+        self.assertFalse(any(dt in ("Sales Invoice", "QAS PAYG Operation") for dt, _ in self.state["docs"]))
+
+    def test_more_expensive_and_cheaper_targets_are_rejected_before_writes(self):
+        for price in (528, 816):
+            self.target_product.standard_card_price = price
+            with self.assertRaisesRegex(ValueError, "equally priced"):
+                self.preview_cross()
+            with self.assertRaisesRegex(ValueError, "equally priced"):
+                self.confirm_cross()
+        self.assertEqual(self.card.available_count, 10)
+        self.assertFalse(any(dt == "QAS PAYG Booking" for dt, _ in self.state["docs"]))
+
+    def test_price_changed_since_preview_is_rejected_on_confirmation(self):
+        self.assertTrue(self.preview_cross()["bookable"])
+        self.target_product.standard_card_price = 816
+        with self.assertRaisesRegex(ValueError, "equally priced"):
+            self.confirm_cross()
+        self.db.rollback.assert_called_once()
+        self.assertEqual(self.card.available_count, 10)
+
+    def test_missing_zero_and_disabled_prices_are_rejected(self):
+        self.target_product.standard_card_price = 0
+        with self.assertRaisesRegex(ValueError, "positive"):
+            self.preview_cross()
+        self.target_product.standard_card_price = 652.8
+        self.target_product.enabled = 0
+        with self.assertRaisesRegex(ValueError, "not available"):
+            self.preview_cross()
+        del self.state["docs"][("QAS PAYG Product", "PROD-2")]
+        with self.assertRaisesRegex(ValueError, "missing"):
+            self.preview_cross()
+
+    def test_parent_cannot_use_cross_course_admin_override(self):
+        result = booking.preview_booking("S-1", "CS-2")
+        self.assertFalse(result["bookable"])
+        self.assertIn("no_eligible_card", result["reasons"])
+        with self.assertRaisesRegex(ValueError, "Only School Admin"):
+            booking.preview_booking("S-1", "CS-2", source_card="A")
+
+    def test_chosen_card_stays_selected_even_with_an_earlier_expiring_card(self):
+        self.add("QAS PAYG Card", "B", family_parent="P-1", course="C-1", status="Active",
+                 issued_on=date(2026, 9, 1), expires_on=date(2026, 12, 1), available_count=10)
+        self.assertEqual(self.preview_cross()["card"], "A")
+        self.assertEqual(self.confirm_cross().card, "A")
+
+    def test_source_card_must_belong_to_family_and_match_request_key(self):
+        with self.assertRaisesRegex(ValueError, "does not belong"):
+            booking.preview_booking("S-1", "CS-2", parent="P-1", as_admin=True, source_card="OTHER")
+        self.confirm_cross()
+        with self.assertRaisesRegex(ValueError, "another source pass"):
+            booking.confirm_booking("S-1", "CS-2", "B", "cross-1", confirmed_rules=True,
+                                     parent="P-1", as_admin=True, source_card="B")
+
+    def test_cancellation_returns_cross_course_reservation_to_original_card(self):
+        result = self.confirm_cross()
+        booking._now.return_value = datetime(2026, 9, 24, 9)
+        booking.session_resources.active_rows.return_value = [frappe._dict(name="ATT-NEW")]
+        self.db.exists.return_value = False
+        cancelled = booking.cancel_booking(result.name)
+        self.assertEqual((cancelled.card, cancelled.status), ("A", "Cancelled"))
+        self.assertEqual((self.card.available_count, self.card.reserved_count, self.card.course), (10, 0, "C-1"))
+
+    def test_live_global_prices_ignore_historical_family_discount(self):
+        self.card.unit_price_snapshot = 50
+        with patch.object(booking.pricing, "settings", return_value={"enabled": True, "discount_percent": 4}), \
+             patch.object(booking.pricing, "get_trial_class_fee", side_effect=lambda course: 68):
+            self.assertTrue(self.preview_cross()["bookable"])
+            self.assertEqual(self.confirm_cross().card, "A")
+
+    def test_discovery_rejects_mismatched_target_and_uses_selected_card(self):
+        self.target_product.standard_card_price = 816
+        with self.assertRaisesRegex(ValueError, "equally priced"):
+            booking.available_sessions("S-1", "C-2", parent="P-1", as_admin=True, source_card="A")
+        self.target_product.standard_card_price = 652.8
+        self.assertEqual(booking.available_sessions("S-1", "C-2", parent="P-1", as_admin=True, source_card="A")["items"][0]["card"], "A")

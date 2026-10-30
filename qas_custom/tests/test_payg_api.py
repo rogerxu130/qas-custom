@@ -163,9 +163,21 @@ class TestPaygPortalAPI(TestCase):
              patch.object(booking, "preview_booking", return_value={"bookable": True}) as preview, \
              patch.object(booking, "confirm_booking", return_value=frappe._dict(name="B", card="CARD", status="Reserved", attendance_entry="ATT")) as confirm:
             school_admin_payg.payg_admin_available_sessions("P", "S", "C", '["2026-11-01","CS"]', 10)
-            available.assert_called_once_with("S", "C", cursor=["2026-11-01", "CS"], limit=10, parent="P", as_admin=True)
+            available.assert_called_once_with("S", "C", cursor=["2026-11-01", "CS"], limit=10, parent="P", as_admin=True, source_card=None)
             school_admin_payg.payg_admin_preview_booking("P", "S", "CS")
-            preview.assert_called_once_with("S", "CS", parent="P", as_admin=True)
+            preview.assert_called_once_with("S", "CS", parent="P", as_admin=True, source_card=None)
             result = school_admin_payg.payg_admin_confirm_booking("P", "S", "CS", "CARD", "key", "true")
-            confirm.assert_called_once_with("S", "CS", "CARD", "key", confirmed_rules=True, parent="P", as_admin=True)
+            confirm.assert_called_once_with("S", "CS", "CARD", "key", confirmed_rules=True, parent="P", as_admin=True, source_card=None)
             self.assertEqual(result["attendance_entry"], "ATT")
+
+    def test_admin_selected_source_card_is_forwarded_by_all_adapters(self):
+        with patch.object(school_admin_payg, "_admin"), \
+             patch.object(booking, "available_sessions", return_value={"items": []}) as available, \
+             patch.object(school_admin_payg.payg_read_models, "enrich_available_sessions", side_effect=lambda value: value), \
+             patch.object(booking, "preview_booking", return_value={"bookable": True}) as preview, \
+             patch.object(booking, "confirm_booking", return_value=frappe._dict(name="B", card="A", status="Reserved")) as confirm:
+            school_admin_payg.payg_admin_available_sessions("P", "S", "Anime", source_card="A")
+            school_admin_payg.payg_admin_preview_booking("P", "S", "CS", source_card="A")
+            school_admin_payg.payg_admin_confirm_booking("P", "S", "CS", "A", "key", True, source_card="A")
+        for service in (available, preview, confirm):
+            self.assertEqual(service.call_args.kwargs["source_card"], "A")

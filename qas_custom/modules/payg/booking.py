@@ -3,6 +3,7 @@
 All commands join the caller's transaction. A savepoint protects each multi-row write.
 """
 from datetime import date, datetime, timedelta
+from decimal import Decimal, ROUND_HALF_UP
 from uuid import uuid4
 
 import frappe
@@ -10,6 +11,7 @@ from qas_custom.services.session_schedule import session_timeslot
 from frappe.utils import getdate, get_time, get_datetime_in_timezone
 
 from qas_custom.modules.course_schedule import session_resources
+from qas_custom.modules.payg import pricing
 from qas_custom.modules.payg.rules import (as_brisbane_datetime, can_book, can_parent_cancel,
                                             choose_card, confirm_preview_card)
 from qas_custom.services.adhoc_booking import require_parent
@@ -75,6 +77,47 @@ def _cards(family, course=None, lock=False):
     else:
         names = sorted(frappe.get_all(CARD, filters=filters, pluck="name"))
     return [frappe.get_doc(CARD, name, for_update=lock) for name in names]
+
+
+def _course_card_price(course, *, lock=False):
+    product_id = frappe.db.get_value("QAS PAYG Product", {"course": course}, "name", for_update=lock)
+    if not product_id:
+        frappe.throw("Cannot book another course: course pricing is missing")
+    product = frappe.get_doc("QAS PAYG Product", product_id, for_update=lock)
+    price = pricing.card_price(course, product)
+    if not price.is_finite() or price <= 0:
+        frappe.throw("Cannot book another course: course pricing must be positive")
+    return product, price.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def _validate_card_course(card, course, *, as_admin=False, lock=False):
+    if card.course == course:
+        return
+    if not as_admin:
+        frappe.throw("This pass can only book its own course", frappe.PermissionError)
+    # Compare today's standard course prices, not a family's historical discount.
+    prices = {name: _course_card_price(name, lock=lock) for name in sorted({card.course, course})}
+    _, source_price = prices[card.course]
+    target, target_price = prices[course]
+    if not target.enabled:
+        frappe.throw("The target course is not available for pass bookings")
+    if source_price != target_price:
+        frappe.throw("Only equally priced courses can use this pass. "
+                     f"Card course: ${source_price}; selected course: ${target_price}")
+
+
+def _booking_cards(family, course, *, source_card=None, as_admin=False, lock=False):
+    if not source_card:
+        return _cards(family, course, lock=lock)
+    if not as_admin:
+        frappe.throw("Only School Admin can choose a source pass", frappe.PermissionError)
+    # Keep the existing stable Card lock order, including across courses.
+    cards = _cards(family, lock=lock)
+    card = next((item for item in cards if item.name == source_card), None)
+    if not card:
+        frappe.throw("The selected pass does not belong to this family", frappe.PermissionError)
+    _validate_card_course(card, course, as_admin=as_admin, lock=lock)
+    return [card]
 
 
 def _query_limit(value, maximum):
@@ -174,7 +217,7 @@ def family_booking_history(student=None, limit=100):
                           order_by="creation desc", limit_page_length=count)
 
 
-def available_sessions(student, course, cursor=None, limit=30, parent=None, *, as_admin=False):
+def available_sessions(student, course, cursor=None, limit=30, parent=None, *, as_admin=False, source_card=None):
     """Page all open terms using the stable (session_date, name) cursor."""
     family = _family(parent, as_admin=True) if as_admin else _family(parent)
     pupil = _student(student, family.name)
@@ -219,7 +262,7 @@ def available_sessions(student, course, cursor=None, limit=30, parent=None, *, a
         scan_cursor = last
         if len(rows) < limit + 1:
             break
-    cards = _cards(family.name, course)
+    cards = _booking_cards(family.name, course, source_card=source_card, as_admin=as_admin)
     now = _now()
     items = []
     for row in candidates[:limit]:
@@ -238,7 +281,7 @@ def available_sessions(student, course, cursor=None, limit=30, parent=None, *, a
             "next_cursor": (str(items[-1]["session_date"]), items[-1]["name"]) if len(candidates) > limit and items else None}
 
 
-def preview_booking(student, session, parent=None, *, as_admin=False):
+def preview_booking(student, session, parent=None, *, as_admin=False, source_card=None):
     family = _family(parent, as_admin=True) if as_admin else _family(parent)
     pupil = _student(student, family.name)
     occurrence = frappe.get_doc("Course Sessions", session)
@@ -247,7 +290,7 @@ def preview_booking(student, session, parent=None, *, as_admin=False):
     course = frappe.get_doc("Course", slot.course)
     now = _now()
     reasons = _basic_reasons(pupil, occurrence, slot, term, course, now, as_admin=as_admin)
-    card = choose_card(_cards(family.name, slot.course), now=now,
+    card = choose_card(_booking_cards(family.name, slot.course, source_card=source_card, as_admin=as_admin), now=now,
                        session_start=_start(occurrence, slot)) if slot.start_time else None
     if not card: reasons.append("no_eligible_card")
     if slot.start_time and slot.end_time:
@@ -268,9 +311,11 @@ def _booking_by_request_key(request_key, *, after_duplicate=False):
     return frappe.get_doc(BOOKING, name, for_update=True) if name else None
 
 
-def _same_booking(booking, family, student, session):
+def _same_booking(booking, family, student, session, source_card=None):
     if (booking.family_parent, booking.student, booking.course_session) != (family, student, session):
         frappe.throw("Booking request key belongs to another reservation")
+    if source_card and booking.card != source_card:
+        frappe.throw("Booking request key belongs to another source pass")
     return booking
 
 
@@ -280,7 +325,7 @@ def _activate_booking_student(pupil, booking):
     return booking
 
 
-def confirm_booking(student, session, preview_card, request_key, *, confirmed_rules=False, parent=None, as_admin=False):
+def confirm_booking(student, session, preview_card, request_key, *, confirmed_rules=False, parent=None, as_admin=False, source_card=None):
     if confirmed_rules is not True:
         frappe.throw("Please confirm the PAYG booking rules before reserving")
     family = _family(parent, write=True, as_admin=True) if as_admin else _family(parent, write=True)
@@ -293,7 +338,7 @@ def confirm_booking(student, session, preview_card, request_key, *, confirmed_ru
         pupil = _student(student, family.name, lock=True)
         existing = _booking_by_request_key(request_key)
         if existing:
-            return _activate_booking_student(pupil, _same_booking(existing, family.name, student, session))
+            return _activate_booking_student(pupil, _same_booking(existing, family.name, student, session, source_card))
         # Serialize candidate-card discovery with issue actions for this family.
         frappe.db.sql("SELECT name FROM `tabParent` WHERE name=%s FOR UPDATE", (family.name,))
         # Resolve identifiers without locking Session, then lock all family cards by stable name.
@@ -301,7 +346,7 @@ def confirm_booking(student, session, preview_card, request_key, *, confirmed_ru
         course_id = frappe.db.get_value("Weekly Timeslot", session_id, "course") if session_id else None
         if not course_id:
             frappe.throw("Course session was not found")
-        cards = _cards(family.name, course_id, lock=True)
+        cards = _booking_cards(family.name, course_id, source_card=source_card, as_admin=as_admin, lock=True)
         now = _now()
         def validate(occurrence, slot, term, _rows):
             if slot.course != course_id or _start(occurrence, slot) != start:
@@ -313,6 +358,7 @@ def confirm_booking(student, session, preview_card, request_key, *, confirmed_ru
             selected = confirm_preview_card(cards, now=now,
                                             session_start=_start(occurrence, slot),
                                             preview_card=preview_card)
+            _validate_card_course(selected, course_id, as_admin=as_admin, lock=True)
             if selected.name != booking.card:
                 frappe.throw("Card changed; refresh preview")
         # Booking must exist before its Reserve Entry; shared reservation runs after the card lock.
@@ -335,6 +381,8 @@ def confirm_booking(student, session, preview_card, request_key, *, confirmed_ru
             "family_parent": pupil.guardian, "student": pupil.name,
             "card": selected.name, "card_family": selected.family_parent,
             "card_course": selected.course, "course_session": session,
+            "cross_course_token": (QASPAYGBooking._SERVICE_CROSS_COURSE_TOKEN
+                                   if as_admin and source_card and selected.course != course_id else None),
             "course_snapshot": course_id,
             "card_expires_on_snapshot": selected.expires_on,
             "request_key": request_key, "cancellable_until": start - timedelta(hours=72),
@@ -370,7 +418,7 @@ def confirm_booking(student, session, preview_card, request_key, *, confirmed_ru
             pupil = _student(student, family.name, lock=True)
             existing = _booking_by_request_key(request_key, after_duplicate=True)
             if existing:
-                return _activate_booking_student(pupil, _same_booking(existing, family.name, student, session))
+                return _activate_booking_student(pupil, _same_booking(existing, family.name, student, session, source_card))
         raise
     except Exception:
         frappe.db.rollback(save_point=savepoint)

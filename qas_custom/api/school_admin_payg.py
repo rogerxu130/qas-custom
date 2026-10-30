@@ -148,7 +148,7 @@ def payg_cancel_purchase_operation(operation_id=None, family_parent=None, reason
 
 
 @frappe.whitelist()
-def payg_admin_available_sessions(family_parent=None, student=None, course=None, cursor=None, limit=30):
+def payg_admin_available_sessions(family_parent=None, student=None, course=None, cursor=None, limit=30, source_card=None):
     _admin()
     if isinstance(cursor, str):
         try:
@@ -156,22 +156,22 @@ def payg_admin_available_sessions(family_parent=None, student=None, course=None,
         except ValueError:
             frappe.throw("PAYG cursor must be a JSON [date, session] pair")
     result = booking.available_sessions(student, course, cursor=cursor, limit=limit,
-                                        parent=family_parent, as_admin=True)
+                                        parent=family_parent, as_admin=True, source_card=source_card)
     return payg_read_models.enrich_available_sessions(result)
 
 
 @frappe.whitelist()
-def payg_admin_preview_booking(family_parent=None, student=None, session=None):
+def payg_admin_preview_booking(family_parent=None, student=None, session=None, source_card=None):
     _admin()
-    return booking.preview_booking(student, session, parent=family_parent, as_admin=True)
+    return booking.preview_booking(student, session, parent=family_parent, as_admin=True, source_card=source_card)
 
 
 @frappe.whitelist(methods=["POST"])
 def payg_admin_confirm_booking(family_parent=None, student=None, session=None, preview_card=None,
-                               request_key=None, confirmed_rules=False):
+                               request_key=None, confirmed_rules=False, source_card=None):
     _admin()
     confirmed = confirmed_rules is True or str(confirmed_rules).lower() in ("1", "true")
     result = booking.confirm_booking(student, session, preview_card, _required_key(request_key),
-                                     confirmed_rules=confirmed, parent=family_parent, as_admin=True)
+                                     confirmed_rules=confirmed, parent=family_parent, as_admin=True, source_card=source_card)
     return {"booking": result.name, "card": result.card, "status": result.status,
             "attendance_entry": result.attendance_entry}

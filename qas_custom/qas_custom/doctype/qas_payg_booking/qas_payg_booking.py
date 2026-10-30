@@ -9,6 +9,7 @@ class QASPAYGBooking(Document):
     # An object identity cannot be supplied through DocType JSON or a form post.
     _SERVICE_CREATE_TOKEN = object()
     _SERVICE_MUTATION_TOKEN = object()
+    _SERVICE_CROSS_COURSE_TOKEN = object()
 
     def validate(self):
         creating = self.is_new()
@@ -95,7 +96,8 @@ class QASPAYGBooking(Document):
                       "cancellable_until"):
             if not context.get(field) or str(self.get(field)) != str(context[field]):
                 frappe.throw(f"PAYG booking {field} does not match locked reservation context")
-        if context.get("card_family") != self.family_parent or context.get("card_course") != self.course_snapshot:
+        cross_course = context.get("cross_course_token") is QASPAYGBooking._SERVICE_CROSS_COURSE_TOKEN
+        if context.get("card_family") != self.family_parent or (context.get("card_course") != self.course_snapshot and not cross_course):
             frappe.throw("PAYG booking card does not match its family and course")
         if self.attendance_entry:
             frappe.throw("New PAYG booking cannot pre-link attendance")

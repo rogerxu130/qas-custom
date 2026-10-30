@@ -292,6 +292,26 @@ class TestPaygControllers(TestCase):
         with self.assertRaises(ValueError):
             controller.validate(booking)
 
+    def test_cross_course_creation_requires_service_only_token(self):
+        controller = self.controller("booking")
+        booking = self.doc(card="CARD-1", family_parent="P-1", student="S-1",
+                           course_session="SESSION-1", course_snapshot="C-2",
+                           card_expires_on_snapshot="2027-03-23", attendance_entry=None,
+                           request_key="cross-1", cancellable_until="2026-10-01", status="Reserved")
+        context = {"token": controller._SERVICE_CREATE_TOKEN,
+                   "family_parent": "P-1", "student": "S-1", "card": "CARD-1",
+                   "card_family": "P-1", "card_course": "C-1", "course_session": "SESSION-1",
+                   "course_snapshot": "C-2", "card_expires_on_snapshot": "2027-03-23",
+                   "request_key": "cross-1", "cancellable_until": "2026-10-01"}
+        booking.flags = {"payg_create_context": context}
+        for token in (None, True, "allow-cross-course"):
+            context["cross_course_token"] = token
+            with self.assertRaises(ValueError):
+                controller.validate(booking)
+        context["cross_course_token"] = controller._SERVICE_CROSS_COURSE_TOKEN
+        controller.validate(booking)
+        self.frappe.db.get_value.assert_not_called()
+
     def test_existing_booking_requires_service_mutation_token_without_relation_locks(self):
         controller = self.controller("booking")
         booking = self.doc(card="CARD-1", family_parent="P-1", student="S-1",
