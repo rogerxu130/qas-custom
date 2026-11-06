@@ -56,3 +56,22 @@ class TestClassRecordNaming(TestCase):
         self.assertEqual(result, {'name': 'legacy-session-name', 'created': False})
         self.assertEqual(db.exists.call_args.args[1]['weekly_timeslot'], 'WTS-2026-00001')
         new_doc.assert_not_called()
+
+    def test_generating_new_session_uses_weekly_timeslot_times(self):
+        from qas_custom.services.school_admin import _ensure_course_session
+        service = 'qas_custom.services.school_admin'
+        session = Mock(name='session', start_time='01:38:18.947863', end_time='01:38:18.947885')
+        session.name = 'new-session'
+        with (
+            patch(f'{service}.frappe.db', new=Mock()) as db,
+            patch(f'{service}.frappe.new_doc', return_value=session),
+            patch(f'{service}._create_session_attendance_for_active_enrollments') as create_attendance,
+        ):
+            db.exists.return_value = None
+            db.get_value.return_value = frappe._dict(start_time='09:00:00', end_time='10:30:00')
+            result = _ensure_course_session('WTS-2026-00001', '2026-11-07')
+
+        self.assertEqual(result, {'name': 'new-session', 'created': True})
+        self.assertEqual((session.start_time, session.end_time), ('09:00:00', '10:30:00'))
+        session.insert.assert_called_once_with(ignore_permissions=True)
+        create_attendance.assert_called_once_with(session)

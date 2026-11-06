@@ -8977,6 +8977,9 @@ def _ensure_course_session(weekly_timeslot, session_date):
 	session = frappe.new_doc("Course Sessions")
 	session.weekly_timeslot = weekly_timeslot
 	session.session_date = getdate(session_date)
+	timeslot = frappe.db.get_value("Weekly Timeslot", weekly_timeslot, ["start_time", "end_time"], as_dict=True)
+	session.start_time = timeslot.start_time
+	session.end_time = timeslot.end_time
 	session.status = "Scheduled"
 	session.insert(ignore_permissions=True)
 	_create_session_attendance_for_active_enrollments(session)
