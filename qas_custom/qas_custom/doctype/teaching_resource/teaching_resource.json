@@ -9,7 +9,9 @@
   "title",
   "summary",
   "admin_note",
-  "status"
+  "status",
+  "import_id",
+  "import_data"
  ],
  "fields": [
   {
@@ -37,6 +39,24 @@
    "options": "Draft\nPublished\nArchived\nDeleting\nDeleted",
    "default": "Draft",
    "reqd": 1
+  },
+  {
+   "fieldname": "import_id",
+   "label": "XML Course ID",
+   "fieldtype": "Data",
+   "length": 140,
+   "unique": 1,
+   "read_only": 1,
+   "no_copy": 1,
+   "description": "Unique source identity. Admin import API only."
+  },
+  {
+   "fieldname": "import_data",
+   "label": "XML Import Source",
+   "fieldtype": "Long Text",
+   "read_only": 1,
+   "no_copy": 1,
+   "description": "Internal source metadata and completion state. Never returned to teacher APIs."
   }
  ],
  "permissions": [

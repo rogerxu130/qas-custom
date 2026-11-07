@@ -26,6 +26,8 @@ def manage(action, data=None):
     if action == 'prepare_preview':
         from qas_custom.services.teaching_resource_previews import request
         return request(data.get('file'))
+    if action == 'import_draft':
+        return service.import_draft(data)
     if action == 'save':
         return service.save(data)
     if action in ('publish', 'archive', 'restore', 'delete'):

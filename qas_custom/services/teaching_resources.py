@@ -239,6 +239,8 @@ def detail(name, admin=False):
     result['tags'] = []
     if admin:
         result['admin_note'] = doc.get('admin_note') or ''
+        imported = import_data(doc)
+        result['import_source'] = ({**imported['course'], 'complete': imported.get('complete', False)} if imported else None)
         result['tags'] = [r.tag for r in frappe.db.sql('SELECT t.tag FROM `tabTeaching Resource Tag Link` l JOIN `tabTeaching Resource Tag` t ON t.name=l.tag WHERE l.resource=%s ORDER BY t.tag', (name,), as_dict=True)]
         result['teachers'] = frappe.get_all(GRANT, filters={'resource': name}, pluck='teacher', limit_page_length=0)
     return result
@@ -308,6 +310,8 @@ def save(data):
             tag_id = frappe.get_doc(dict(doctype=TAG, tag=tag)).insert(ignore_permissions=True).name
         frappe.get_doc(dict(doctype=TAG_LINK, resource=doc.name, tag=tag_id)).insert(ignore_permissions=True)
     audit(doc, f'Resource details and teacher grants saved; assignment term: {assignment_term or "unchanged"}.')
+    if 'files' in data:
+        return edit_files({'resource': doc.name, 'modified': str(doc.modified), 'files': data['files']})
     return detail(doc.name, True)
 
 
@@ -327,6 +331,9 @@ def lifecycle(action, name, modified, confirmation=''):
         return {'deleted': frappe.db.get_value(RESOURCE, name, 'status') == 'Deleted'}
     require_editable(doc)
     if action == 'publish':
+        imported = import_data(doc)
+        if imported and not imported.get('complete'):
+            frappe.throw('Finish every XML attachment before publishing. / 请先完成 XML 中全部附件的上传。')
         if not frappe.db.exists(FILE, {'resource': name, 'status': 'Ready'}) or frappe.db.exists(FILE, {'resource': name, 'status': 'Uploading'}):
             frappe.throw('Finish or cancel uploads, and keep at least one ready file before publishing.')
         doc.status = 'Published'
@@ -357,6 +364,7 @@ def options():
         elif doctype == 'Course':
             option_filters['is_makeup_course'] = 0
         result[key] = frappe.get_all(doctype, filters=option_filters, fields=fields, limit_page_length=0)
+    result['xml_import_version'] = 1
     result['ppt_previews_version'] = 1
     result['assignment_terms_version'] = 1
     result['today'] = datetime.now(ZONE).date().isoformat()
@@ -397,10 +405,22 @@ def init_upload(data):
         frappe.throw('Select a ready file of the same type to replace.')
     if replaces and frappe.db.exists(FILE, {'replaces': replaces, 'status': 'Uploading'}):
         frappe.throw('Resume or cancel the pending replacement before replacing this file again.')
+    imported = import_data(doc)
+    source_file = None
+    if data.get('import_source_id') and (not imported or imported['course']['source_id'] != data['import_source_id']):
+        frappe.throw('XML source does not match this resource. / XML 来源与课程不一致。')
+    if imported and (not imported.get('complete') or data.get('import_source_id')):
+        source_file = next((item for item in imported['course']['files'] if item['filename'] == data['filename']), None)
+        if replaces or not source_file or source_file['size'] != size:
+            frappe.throw('Finish the original XML attachments first. / 请先完成原始 XML 附件上传。')
+        existing_source = frappe.db.get_value(FILE, {'resource': doc.name, 'filename': data['filename'], 'size_bytes': size, 'status': ['in', ['Uploading', 'Ready']]}, 'name')
+        if existing_source:
+            source_upload = frappe.get_doc(FILE, existing_source)
+            return {'file': source_upload.name, 'status': source_upload.status, 'part_size': PART_SIZE}
     active_files = frappe.db.count(FILE, {'resource': doc.name, 'status': ['in', ['Ready', 'Uploading']]})
     if active_files - bool(replaces) >= MAX_FILES:
         frappe.throw('A resource can contain at most 100 files.')
-    file = frappe.get_doc(dict(doctype=FILE, resource=doc.name, filename=data['filename'], label=data['filename'], size_bytes=size, kind=kind, mime=mime, object_key=f'teaching/{doc.name}/{uuid.uuid4().hex}', request_id=data['request_id'], last_modified=str(data.get('last_modified') or ''), replaces=replaces, status='Uploading', sort_order=frappe.db.count(FILE, {'resource': doc.name})))
+    file = frappe.get_doc(dict(doctype=FILE, resource=doc.name, filename=data['filename'], label=source_file['label'] if source_file else data['filename'], size_bytes=size, kind=kind, mime=mime, object_key=f'teaching/{doc.name}/{uuid.uuid4().hex}', request_id=data['request_id'], last_modified=str(data.get('last_modified') or ''), replaces=replaces, status='Uploading', sort_order=source_file['order'] if source_file else frappe.db.count(FILE, {'resource': doc.name})))
     file.insert(ignore_permissions=True)
     # Persist identity before contacting storage, so failed transactions never lose object ownership.
     frappe.db.commit()
@@ -475,6 +495,7 @@ def complete_upload(name):
     file.replaces = ''
     file.upload_id = ''
     file.save(ignore_permissions=True)
+    mark_import_complete(doc)
     doc.save(ignore_permissions=True)
     audit(doc, 'File ready: ' + file.filename)
     if getattr(file, 'kind', None) == 'ppt':
@@ -642,3 +663,48 @@ def teacher_options():
     rows = frappe.db.sql(f"""SELECT DISTINCT a.term,a.campus,a.course FROM `tabTeaching Resource Assignment` a
         JOIN `tabTeaching Resource` r ON r.name=a.resource WHERE r.status='Published' AND {scope}""", params, as_dict=True)
     return {key: sorted({row[key] for row in rows}) for key in ('term', 'campus', 'course')}
+
+
+def import_data(doc):
+    value = getattr(doc, 'import_data', None)
+    return json.loads(value) if value else None
+
+
+def import_draft(data):
+    require_user(True)
+    data = payload(data)
+    from qas_custom.services.teaching_resource_import import parse_course_xml
+    try:
+        course = parse_course_xml(data.get('xml'), data.get('files'))
+    except ValueError as exc:
+        frappe.throw(str(exc))
+    existing = frappe.db.get_value(RESOURCE, {'import_id': course['source_id']}, 'name')
+    if existing:
+        doc = lock_resource(existing)
+        if doc.status != 'Draft':
+            frappe.throw('This XML course already exists and is not a Draft. / 此课程已存在且不是草稿，请在资源库查看。')
+        stored = import_data(doc)
+        if not stored or stored['course'] != course:
+            frappe.throw('This course ID has different XML metadata. Review the existing draft. / 相同课程 ID 的 XML 已改变，请审阅已有草稿。')
+        result = detail(doc.name, True)
+        result['import_resumed'] = True
+        return result
+    result = save({key: course[key] for key in ('title', 'summary', 'admin_note', 'tags')})
+    doc = lock_resource(result['name'])
+    doc.import_id = course['source_id']
+    doc.import_data = json.dumps({'course': course, 'complete': False}, ensure_ascii=False)
+    doc.save(ignore_permissions=True)
+    audit(doc, 'XML draft imported: ' + course['source_id'])
+    return detail(doc.name, True)
+
+
+def mark_import_complete(doc):
+    imported = import_data(doc)
+    if not imported or imported.get('complete'):
+        return
+    ready = frappe.get_all(FILE, filters={'resource': doc.name, 'status': 'Ready'},
+                           fields=['filename', 'size_bytes'], limit_page_length=0)
+    available = {(row.filename, int(row.size_bytes)) for row in ready}
+    if all((item['filename'], item['size']) in available for item in imported['course']['files']):
+        imported['complete'] = True
+        doc.import_data = json.dumps(imported, ensure_ascii=False)

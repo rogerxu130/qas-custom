@@ -286,6 +286,13 @@ class TermAssignmentHistory(TestCase):
     def data(self, **overrides):
         return dict(name='R1', modified='version', title='Apple', summary='Updated', tags=[], teachers=[], **overrides)
 
+    def test_metadata_and_file_edits_share_one_save_request(self):
+        self.doc.modified = 'saved-version'
+        files = [dict(name='FILE1', label='Reviewed label')]
+        with patch.object(service, 'edit_files', return_value={'name': 'R1'}) as edit:
+            self.assertEqual(service.save(self.data(files=files)), {'name': 'R1'})
+        edit.assert_called_once_with({'resource': 'R1', 'modified': 'saved-version', 'files': files})
+
     def test_saving_one_term_keeps_other_terms_and_notes(self):
         service.save(self.data(assignment_term='NOW', assignments=[dict(term='NOW', campus='A', course='C', note='New note')]))
         self.assertEqual(self.assignments[0], dict(name='OLD', resource='R1', term='PAST', campus='A', course='C', note='Original history'))
