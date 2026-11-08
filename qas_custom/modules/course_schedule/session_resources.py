@@ -3,7 +3,7 @@ from datetime import datetime
 
 import frappe
 from qas_custom.services.session_schedule import session_timeslot
-from frappe.utils import cint, getdate, get_time, now_datetime
+from frappe.utils import cint, getdate, get_time, now_datetime, get_datetime_in_timezone
 from qas_custom.services.class_attendance import create_attendance_entry
 
 
@@ -77,7 +77,7 @@ def session_is_future(session, slot):
 
 
 def reserve_regular_place(student, session_id, source_doctype, source_document, enrollment_type, *,
-                          validate_business=None, comments=None):
+                          validate_business=None, comments=None, allow_same_day=False):
     """Reserve a regular class in the caller's transaction, serializing on Student and Session.
 
     A caller holding Booking/Card locks must already hold Student. No commit occurs here.
@@ -93,7 +93,10 @@ def reserve_regular_place(student, session_id, source_doctype, source_document, 
         frappe.throw("This class or term is not open for booking.")
     if not term.get("start_date") or not term.get("end_date") or not (getdate(term.start_date) <= getdate(session.session_date) <= getdate(term.end_date)):
         frappe.throw("This session is outside the term dates.")
-    if not slot.get("start_time") or not slot.get("end_time") or not session_is_future(session, slot):
+    # Only guarded administrator PAYG commands opt into same-day backfilling.
+    same_day = (allow_same_day and session.status in {"Scheduled", "Completed"}
+                and getdate(session.session_date) == get_datetime_in_timezone("Australia/Brisbane").date())
+    if not slot.get("start_time") or not slot.get("end_time") or not (same_day or session_is_future(session, slot)):
         frappe.throw("This session is no longer available for booking.")
     if getdate(session.session_date).strftime("%A") != slot.get("day_of_week"):
         frappe.throw("This session does not match the class weekday.")

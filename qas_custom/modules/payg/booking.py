@@ -155,7 +155,9 @@ def _age_reason(student, course, session_date):
 def _basic_reasons(student, session, slot, term, course, now, *, as_admin=False):
     reasons = []
     if course.status != "Active": reasons.append("course_inactive")
-    if session.status != "Scheduled": reasons.append("session_not_scheduled")
+    completed_today = (as_admin and session.status == "Completed"
+                       and getdate(session.session_date) == as_brisbane_datetime(now).date())
+    if session.status != "Scheduled" and not completed_today: reasons.append("session_not_scheduled")
     if slot.status != "Active" or term.status not in ("Upcoming", "Active"):
         reasons.append("class_or_term_closed")
     if not term.start_date or not term.end_date or not (getdate(term.start_date) <= getdate(session.session_date) <= getdate(term.end_date)):
@@ -165,8 +167,8 @@ def _basic_reasons(student, session, slot, term, course, now, *, as_admin=False)
     if not slot.start_time or not slot.end_time:
         reasons.append("time_missing")
     elif as_admin:
-        if _start(session, slot) <= as_brisbane_datetime(now):
-            reasons.append("session_started")
+        if _start(session, slot).date() < as_brisbane_datetime(now).date():
+            reasons.append("session_before_today")
     elif not can_book(now=now, session_start=_start(session, slot)):
         reasons.append("inside_72_hours")
     if getdate(session.session_date).strftime("%A") != slot.day_of_week:
@@ -243,11 +245,13 @@ def available_sessions(student, course, cursor=None, limit=30, parent=None, *, a
         rows = frappe.db.sql("""SELECT s.name, s.session_date FROM `tabCourse Sessions` s
             JOIN `tabWeekly Timeslot` w ON w.name=s.weekly_timeslot
             JOIN `tabTerm` t ON t.name=w.term
-            WHERE w.course=%s AND s.status='Scheduled' AND w.status='Active'
+            WHERE w.course=%s AND w.status='Active'
               AND t.status IN ('Upcoming','Active')
               AND (s.session_date>%s OR (s.session_date=%s AND s.name>%s))
+              AND s.status IN %s
             ORDER BY s.session_date, s.name LIMIT %s""",
-            (course, scan_cursor[0], scan_cursor[0], scan_cursor[1], limit + 1), as_dict=True)
+            (course, scan_cursor[0], scan_cursor[0], scan_cursor[1],
+             ("Scheduled", "Completed") if as_admin else ("Scheduled",), limit + 1), as_dict=True)
         if not rows:
             break
         last = (str(rows[-1].session_date), rows[-1].name)
@@ -397,7 +401,8 @@ def confirm_booking(student, session, preview_card, request_key, *, confirmed_ru
         finally:
             booking.flags.payg_create_context = None
         attendance = session_resources.reserve_regular_place(
-            student, session, BOOKING, booking.name, "Pay-as-you-go", validate_business=validate)
+            student, session, BOOKING, booking.name, "Pay-as-you-go",
+            validate_business=validate, allow_same_day=as_admin)
         frappe.get_doc({"doctype": ENTRY, "card": selected.name, "booking": booking.name,
                         "kind": "Reserve", "available_delta": -1, "reserved_delta": 1,
                         "consumed_delta": 0, "operation_key": f"reserve:{booking.name}",

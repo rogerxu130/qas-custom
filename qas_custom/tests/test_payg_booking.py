@@ -93,7 +93,7 @@ class TestBooking(TestCase):
         if dt == "QAS PAYG Booking": return self.state["docs"][(dt, key)].get(field)
         return None
 
-    def reserve(self, student, session, _dt, source, _kind, *, validate_business):
+    def reserve(self, student, session, _dt, source, _kind, *, validate_business, allow_same_day=False):
         self.events.append("Session:" + session)
         validate_business(self.state["docs"][("Course Sessions", session)],
                           self.state["docs"][("Weekly Timeslot", "W-1")],
@@ -479,12 +479,45 @@ class TestAdminBooking(TestCase):
                 booking.confirm_booking("S-1", "CS-1", "A", "parent-late", confirmed_rules=True)
         self.db.rollback.assert_called_once()
 
-    def test_admin_cannot_book_a_started_session(self):
-        with patch.object(booking, "_now", return_value=datetime(2026, 9, 27, 10)):
-            self.assertIn("session_started", booking.preview_booking("S-1", "CS-1", parent="P-1", as_admin=True)["reasons"])
-            with self.assertRaisesRegex(ValueError, "session_started"):
+    def test_admin_can_backfill_today_at_start_during_and_after_class(self):
+        for hour, minute in ((10, 0), (10, 30), (23, 59)):
+            now = datetime(2026, 9, 27, hour, minute)
+            with self.subTest(now=now), patch.object(booking, "_now", return_value=now):
+                items = booking.available_sessions("S-1", "C-1", parent="P-1", as_admin=True)["items"]
+                self.assertTrue(items[0]["bookable"])
+                self.assertTrue(booking.preview_booking("S-1", "CS-1", parent="P-1", as_admin=True)["bookable"])
+        with patch.object(booking, "_now", return_value=datetime(2026, 9, 27, 23, 59)):
+            first = booking.confirm_booking("S-1", "CS-1", "A", "backfill", confirmed_rules=True, parent="P-1", as_admin=True)
+            second = booking.confirm_booking("S-1", "CS-1", "A", "backfill", confirmed_rules=True, parent="P-1", as_admin=True)
+        self.assertIs(first, second)
+        booking.session_resources.reserve_regular_place.assert_called_once()
+        self.assertTrue(booking.session_resources.reserve_regular_place.call_args.kwargs["allow_same_day"])
+        self.assertEqual((self.card.available_count, self.card.reserved_count), (9, 1))
+        entries = [doc for (kind, _), doc in self.state["docs"].items() if kind == "QAS PAYG Entry"]
+        self.assertEqual(len(entries), 1)
+
+    def test_admin_can_backfill_completed_session_today(self):
+        self.state["docs"][("Course Sessions", "CS-1")].status = "Completed"
+        with patch.object(booking, "_now", return_value=datetime(2026, 9, 27, 23)):
+            self.assertTrue(booking.available_sessions("S-1", "C-1", parent="P-1", as_admin=True)["items"][0]["bookable"])
+            self.assertTrue(booking.preview_booking("S-1", "CS-1", parent="P-1", as_admin=True)["bookable"])
+            result = booking.confirm_booking("S-1", "CS-1", "A", "completed-today", confirmed_rules=True, parent="P-1", as_admin=True)
+        self.assertEqual(result.attendance_entry, "ATT-NEW")
+
+    def test_admin_cannot_book_yesterday_at_brisbane_midnight(self):
+        # 14:00 UTC is already the next day in Brisbane.
+        from datetime import timezone
+        with patch.object(booking, "_now", return_value=datetime(2026, 9, 27, 14, tzinfo=timezone.utc)):
+            self.assertIn("session_before_today", booking.preview_booking("S-1", "CS-1", parent="P-1", as_admin=True)["reasons"])
+            with self.assertRaisesRegex(ValueError, "session_before_today"):
                 booking.confirm_booking("S-1", "CS-1", "A", "past", confirmed_rules=True, parent="P-1", as_admin=True)
         self.db.rollback.assert_called_once()
+
+    def test_parent_cannot_backfill_today(self):
+        with patch.object(booking, "_now", return_value=datetime(2026, 9, 27, 23)):
+            self.assertIn("inside_72_hours", booking.preview_booking("S-1", "CS-1")["reasons"])
+            with self.assertRaisesRegex(ValueError, "inside_72_hours"):
+                booking.confirm_booking("S-1", "CS-1", "A", "parent-backfill", confirmed_rules=True)
 
     def test_admin_mode_requires_role_family_and_no_support_view(self):
         for role in ("Parent", "Teacher", "Campus Admin", "Guest"):
@@ -536,7 +569,7 @@ class TestEqualPriceAdminBooking(TestAdminBooking):
                          if kind == dt and doc.course == key["course"]), None)
         return TestBooking.value(self, dt, key, field, **kwargs)
 
-    def reserve(self, student, session, _dt, source, _kind, *, validate_business):
+    def reserve(self, student, session, _dt, source, _kind, *, validate_business, allow_same_day=False):
         occurrence = self.state["docs"][("Course Sessions", session)]
         slot = self.state["docs"][("Weekly Timeslot", occurrence.weekly_timeslot)]
         validate_business(occurrence, slot, self.state["docs"][("Term", slot.term)], [])

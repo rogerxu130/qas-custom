@@ -86,6 +86,32 @@ class TestRegularReservation(TestCase):
         self.assertEqual((inspected[0]["day_of_week"], inspected[0]["start_time"]), ("Saturday", "10:00"))
         self.assertEqual((self.slot.day_of_week, self.slot.start_time), ("Sunday", "14:00"))
 
+    def test_same_day_backfill_requires_opt_in_and_preserves_guards(self):
+        with patch.object(subject, "now_datetime", return_value=datetime(2026, 10, 3, 23)), \
+             patch.object(subject, "get_datetime_in_timezone", return_value=datetime(2026, 10, 3, 23)):
+            with self.assertRaisesRegex(ValueError, "no longer available"):
+                self.reserve()
+            result = subject.reserve_regular_place("STU-1", "CS-1", "QAS PAYG Booking", "PB-1", "Pay-as-you-go", allow_same_day=True)
+            self.assertEqual(result, "ATT-NEW")
+            with patch.object(subject, "active_rows", return_value=[frappe._dict(name="ATT-1", student="STU-1")]):
+                with self.assertRaisesRegex(ValueError, "already listed"):
+                    subject.reserve_regular_place("STU-1", "CS-1", "QAS PAYG Booking", "PB-2", "Pay-as-you-go", allow_same_day=True)
+            with patch.object(subject, "active_rows", return_value=[frappe._dict(name="ATT-2", student="OTHER")]):
+                with self.assertRaisesRegex(ValueError, "full"):
+                    subject.reserve_regular_place("STU-1", "CS-1", "QAS PAYG Booking", "PB-2", "Pay-as-you-go", allow_same_day=True)
+            self.session.status = "Completed"
+            self.assertEqual(subject.reserve_regular_place("STU-1", "CS-1", "QAS PAYG Booking", "PB-3", "Pay-as-you-go", allow_same_day=True), "ATT-NEW")
+            self.session.status = "Cancelled"
+            with self.assertRaisesRegex(ValueError, "no longer available"):
+                subject.reserve_regular_place("STU-1", "CS-1", "QAS PAYG Booking", "PB-3", "Pay-as-you-go", allow_same_day=True)
+
+    def test_same_day_opt_in_cannot_backfill_yesterday(self):
+        with patch.object(subject, "now_datetime", return_value=datetime(2026, 10, 4)), \
+             patch.object(subject, "get_datetime_in_timezone", return_value=datetime(2026, 10, 4)):
+            with self.assertRaisesRegex(ValueError, "no longer available"):
+                subject.reserve_regular_place("STU-1", "CS-1", "QAS PAYG Booking", "PB-1", "Pay-as-you-go", allow_same_day=True)
+        subject.create_attendance_entry.assert_not_called()
+
     def test_cancelled_row_does_not_block_new_source(self):
         self.assertEqual(self.reserve(source="PB-NEW"), "ATT-NEW")
         self.assertEqual(subject.create_attendance_entry.call_args.kwargs["prevent_student_duplicate"], False)
