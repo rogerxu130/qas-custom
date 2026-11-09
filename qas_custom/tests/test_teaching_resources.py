@@ -359,6 +359,37 @@ class Publishing(TestCase):
             self.assertEqual(file.status,'Ready'); finish.assert_called_once()
 
 
+class DraftDeletion(TestCase):
+    def test_delete_draft_cleans_partial_uploads_and_previews(self):
+        doc = SimpleNamespace(status='Draft', title='Course', import_id='course-1', import_data='{}', save=Mock())
+        files = {
+            'F1': SimpleNamespace(kind='ppt', object_key='slides', upload_id=None),
+            'F2': SimpleNamespace(kind='video', object_key='video', upload_id='multipart-1'),
+        }
+        db = Mock()
+        db.get_value.side_effect = lambda table, *args: doc.status if table == service.RESOURCE else 'R1'
+        db.set_value.side_effect = lambda table, name, field, value: setattr(files[name], field, value)
+        fake = SimpleNamespace(db=db, get_doc=lambda table, name: files[name],
+                               get_all=lambda table, **kwargs: list(files) if table == service.FILE else [],
+                               delete_doc=Mock())
+        with patch.object(service, 'require_user'), patch.object(service, 'lock_resource', return_value=doc), patch.object(service, 'audit'), patch.object(service, 'frappe', fake), patch.object(service.storage, 'abort') as abort, patch.object(service.storage, 'delete') as delete:
+            self.assertTrue(service.lifecycle('delete_draft', 'R1', 'version', 'Course')['deleted'])
+            abort.assert_called_once_with('video', 'multipart-1')
+            self.assertEqual([call.args[0] for call in delete.call_args_list], ['slides.preview.pdf', 'slides', 'video'])
+            self.assertEqual(fake.delete_doc.call_count, 2)
+            self.assertEqual(doc.status, 'Deleted')
+            self.assertIsNone(doc.import_id)
+            self.assertIsNone(doc.import_data)
+
+    def test_batch_delete_does_not_touch_non_drafts(self):
+        fake = SimpleNamespace(throw=lambda *args: (_ for _ in ()).throw(Denied()))
+        for status in ('Published', 'Archived', 'Deleting', 'Deleted'):
+            doc = SimpleNamespace(status=status, title='Course', save=Mock())
+            with self.subTest(status=status), patch.object(service, 'require_user'), patch.object(service, 'lock_resource', return_value=doc), patch.object(service, 'frappe', fake), self.assertRaises(Denied):
+                service.lifecycle('delete_draft', 'R1', 'version', 'Course')
+            doc.save.assert_not_called()
+
+
 class TrustBoundaries(TestCase):
     def test_disabled_guest_and_campus_admin_cannot_manage(self):
         for feature, user, roles in [(0,'admin',['School Admin']),(1,'Guest',[]),(1,'campus',['Campus Admin'])]:

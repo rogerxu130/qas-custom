@@ -320,8 +320,11 @@ def lifecycle(action, name, modified, confirmation=''):
     if not modified:
         frappe.throw('Reload this resource before changing its status.')
     doc = lock_resource(name, modified)
-    if action == 'delete':
-        if doc.status not in ('Archived', 'Deleting') or confirmation != doc.title:
+    if action in ('delete', 'delete_draft'):
+        if action == 'delete_draft':
+            if doc.status != 'Draft' or confirmation != doc.title:
+                frappe.throw('Only selected drafts can be deleted. / 只能删除所选草稿。')
+        elif doc.status not in ('Archived', 'Deleting') or confirmation != doc.title:
             frappe.throw('Archive first, then type the resource title to permanently delete its files.')
         doc.status = 'Deleting'
         doc.save(ignore_permissions=True)
@@ -364,6 +367,7 @@ def options():
         elif doctype == 'Course':
             option_filters['is_makeup_course'] = 0
         result[key] = frappe.get_all(doctype, filters=option_filters, fields=fields, limit_page_length=0)
+    result['draft_deletion_version'] = 1
     result['xml_import_version'] = 1
     result['ppt_previews_version'] = 1
     result['assignment_terms_version'] = 1
@@ -636,6 +640,9 @@ def cleanup_resource(name):
         for child in frappe.get_all(doctype, filters={'resource': name}, pluck='name', limit_page_length=0):
             frappe.delete_doc(doctype, child, ignore_permissions=True)
     doc.status = 'Deleted'
+    # Release the unique source ID so a corrected course folder can be imported again.
+    doc.import_id = None
+    doc.import_data = None
     doc.save(ignore_permissions=True)
     audit(doc, 'All files permanently deleted; minimal resource record retained for audit.')
 

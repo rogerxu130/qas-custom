@@ -30,7 +30,7 @@ def manage(action, data=None):
         return service.import_draft(data)
     if action == 'save':
         return service.save(data)
-    if action in ('publish', 'archive', 'restore', 'delete'):
+    if action in ('publish', 'archive', 'restore', 'delete', 'delete_draft'):
         return service.lifecycle(action, data.get('name'), data.get('modified'), data.get('confirmation', ''))
     if action == 'init_upload':
         return service.init_upload(data)
