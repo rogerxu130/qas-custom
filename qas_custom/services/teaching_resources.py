@@ -179,6 +179,15 @@ def catalog(filters=None, offset=0, admin=False):
     return {'items': items, 'has_more': len(rows) > 30}
 
 
+def admin_tags():
+    require_user(True)
+    return frappe.db.sql("""SELECT t.tag, COUNT(DISTINCT r.name) AS resource_count
+        FROM `tabTeaching Resource Tag` t
+        LEFT JOIN `tabTeaching Resource Tag Link` l ON l.tag=t.name
+        LEFT JOIN `tabTeaching Resource` r ON r.name=l.resource AND r.status <> 'Deleted'
+        GROUP BY t.name, t.tag ORDER BY t.tag""", as_dict=True)
+
+
 def add_admin_tags(items):
     if not items:
         return

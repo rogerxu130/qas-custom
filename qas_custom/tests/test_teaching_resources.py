@@ -124,6 +124,19 @@ class ResourceAuthorization(TestCase):
             self.assertNotIn('admin_note', teacher_items[0])
             self.assertEqual(service.catalog({'query': '内部备课苹果', 'campus': 'B'}, admin=True)['items'], [])
 
+    def test_tag_directory_counts_all_non_deleted_resources_once(self):
+        self.db.db.execute("UPDATE `tabTeaching Resource` SET status='Deleted' WHERE name='R2'")
+        self.db.db.executemany('INSERT INTO `tabTeaching Resource Tag` VALUES (?,?)', [('A', 'drawing'), ('B', 'painting')])
+        self.db.db.executemany('INSERT INTO `tabTeaching Resource Tag Link` VALUES (?,?,?)', [
+            ('L1', 'R1', 'A'), ('L2', 'R1', 'A'), ('L3', 'R2', 'A'), ('L4', 'DRAFT', 'A'),
+        ])
+        with patch.object(service, 'require_user') as require_user:
+            self.assertEqual(service.admin_tags(), [
+                {'tag': 'drawing', 'resource_count': 2},
+                {'tag': 'painting', 'resource_count': 0},
+            ])
+            require_user.assert_called_once_with(True)
+
     def test_admin_catalog_returns_all_resource_tags_in_one_query(self):
         tags = [f'标签{i:02d}' for i in range(40)]
         for index, tag in enumerate(tags):

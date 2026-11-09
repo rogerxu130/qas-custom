@@ -14,6 +14,11 @@ def admin_list(filters=None, offset=0):
     return service.catalog(filters, offset, True)
 
 
+@frappe.whitelist(methods=['GET'])
+def admin_tags():
+    return service.admin_tags()
+
+
 @frappe.whitelist()
 def admin_detail(resource):
     return service.detail(resource, True)
